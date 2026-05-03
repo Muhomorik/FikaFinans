@@ -536,3 +536,8 @@ nul
 # FikaFinans local-only data examples (real holdings, not for public repo)
 FikaFinans/DataExamples/*
 !FikaFinans/DataExamples/.gitkeep
+
+# Fund pipeline generated artifacts (per-run outputs from agent chain runs)
+FikaFinans.InfrastructureV2.Tests/stepOutputs/*
+!FikaFinans.InfrastructureV2.Tests/stepOutputs/.gitkeep
+
