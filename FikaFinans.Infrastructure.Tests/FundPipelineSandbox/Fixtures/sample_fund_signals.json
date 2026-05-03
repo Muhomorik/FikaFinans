@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-04-27T12:00:00Z",
+  "data_period_end": "2026-04-25",
+  "macro_regime": "Stagflation / risk-off",
+  "signals": [
+    {
+      "isin": "SE0000111111",
+      "name": "Energy Direct Fund",
+      "category": "Energy",
+      "label": "BuySignal",
+      "thesis_validity": "Valid",
+      "exposure_type": "Direct",
+      "rotation_target_alignment": "Strong",
+      "currently_held": false,
+      "current_value_kr": null,
+      "below_threshold": false,
+      "metrics": {
+        "windows_positive": "3 of 3",
+        "current_drawdown_pct": 0.0,
+        "latest_sharpe": 1.7,
+        "ann_volatility_pct": 14.2,
+        "net_return_after_fee_pct": 4.1,
+        "total_fee_pct": 0.8
+      },
+      "catalyst": null,
+      "rationale": "Three consecutive positive windows, drawdown zero, Strong rotation alignment.",
+      "missing_for_upgrade": null
+    },
+    {
+      "isin": "SE0000111112",
+      "name": "Energy Cheaper Peer",
+      "category": "Energy",
+      "label": "Watch",
+      "thesis_validity": "Valid",
+      "exposure_type": "Direct",
+      "rotation_target_alignment": "Strong",
+      "currently_held": false,
+      "current_value_kr": null,
+      "below_threshold": false,
+      "metrics": {
+        "windows_positive": "2 of 3",
+        "current_drawdown_pct": -0.5,
+        "latest_sharpe": 1.6,
+        "ann_volatility_pct": 13.8,
+        "net_return_after_fee_pct": 3.7,
+        "total_fee_pct": 0.4
+      },
+      "catalyst": null,
+      "rationale": "One window short of streak, near-zero drawdown, materially lower fee than the lead Energy candidate.",
+      "missing_for_upgrade": "third consecutive positive window"
+    },
+    {
+      "isin": "SE0000222222",
+      "name": "Catalyst Energy Fund",
+      "category": "Energy",
+      "label": "CatalystEntry",
+      "thesis_validity": "Valid",
+      "exposure_type": "Direct",
+      "rotation_target_alignment": "Strong",
+      "currently_held": false,
+      "current_value_kr": null,
+      "below_threshold": false,
+      "metrics": {
+        "windows_positive": "2 of 3",
+        "current_drawdown_pct": 0.0,
+        "latest_sharpe": 1.4,
+        "ann_volatility_pct": 18.3,
+        "net_return_after_fee_pct": 6.2,
+        "total_fee_pct": 1.1
+      },
+      "catalyst": {
+        "name": "US-Israel war on Iran / Hormuz disruption",
+        "causal_chain": "Hormuz disruption → Brent above $100 → upstream producers benefit",
+        "nav_at_catalyst": 121.5,
+        "current_nav": 134.2,
+        "invalidation_condition": "Ceasefire or Hormuz reopening, Brent back below $80"
+      },
+      "rationale": "Direct catalyst beneficiary, NAV 10.5% above catalyst onset, drawdown back to zero.",
+      "missing_for_upgrade": null
+    },
+    {
+      "isin": "SE0000333333",
+      "name": "Stagnant Tech Fund",
+      "category": "Technology",
+      "label": "SellSignal",
+      "thesis_validity": "Invalid",
+      "exposure_type": "Indirect",
+      "rotation_target_alignment": "None",
+      "currently_held": true,
+      "current_value_kr": 12000,
+      "below_threshold": true,
+      "metrics": {
+        "windows_positive": "0 of 3",
+        "current_drawdown_pct": -8.0,
+        "latest_sharpe": -0.6,
+        "ann_volatility_pct": 22.5,
+        "net_return_after_fee_pct": -5.4,
+        "total_fee_pct": 1.0
+      },
+      "catalyst": null,
+      "rationale": "Two consecutive negative windows, peers also falling, sub-threshold and held — full exit.",
+      "missing_for_upgrade": null
+    },
+    {
+      "isin": "SE0000444444",
+      "name": "Held Sub-Threshold Energy Fund",
+      "category": "Energy",
+      "label": "BuySignal",
+      "thesis_validity": "Valid",
+      "exposure_type": "Direct",
+      "rotation_target_alignment": "Strong",
+      "currently_held": true,
+      "current_value_kr": 9000,
+      "below_threshold": true,
+      "metrics": {
+        "windows_positive": "3 of 3",
+        "current_drawdown_pct": 0.0,
+        "latest_sharpe": 1.5,
+        "ann_volatility_pct": 14.0,
+        "net_return_after_fee_pct": 5.0,
+        "total_fee_pct": 0.6
+      },
+      "catalyst": null,
+      "rationale": "Held below threshold but signal intact — emit as Hold (top-up decision).",
+      "missing_for_upgrade": null
+    },
+    {
+      "isin": "SE0000555555",
+      "name": "Pinned Core Global Index",
+      "category": "Global Equity",
+      "label": "SellSignal",
+      "thesis_validity": "Valid",
+      "exposure_type": "Indirect",
+      "rotation_target_alignment": "None",
+      "currently_held": true,
+      "current_value_kr": 50000,
+      "below_threshold": false,
+      "metrics": {
+        "windows_positive": "1 of 3",
+        "current_drawdown_pct": -3.0,
+        "latest_sharpe": 0.4,
+        "ann_volatility_pct": 11.5,
+        "net_return_after_fee_pct": -1.2,
+        "total_fee_pct": 0.2
+      },
+      "catalyst": null,
+      "rationale": "Sharpe below 1 in two consecutive windows — but pinned as core, must be ignored.",
+      "missing_for_upgrade": null
+    },
+    {
+      "isin": "SE0000666666",
+      "name": "Quiet Bond Fund",
+      "category": "Bonds",
+      "label": "Pass",
+      "thesis_validity": "NotApplicable",
+      "exposure_type": "Indirect",
+      "rotation_target_alignment": "None",
+      "currently_held": false,
+      "current_value_kr": null,
+      "below_threshold": false,
+      "metrics": {
+        "windows_positive": "1 of 3",
+        "current_drawdown_pct": -1.5,
+        "latest_sharpe": 0.3,
+        "ann_volatility_pct": 4.5,
+        "net_return_after_fee_pct": 0.4,
+        "total_fee_pct": 0.3
+      },
+      "catalyst": null,
+      "rationale": "Flat across 3 windows, no rotation alignment.",
+      "missing_for_upgrade": null
+    }
+  ]
+}

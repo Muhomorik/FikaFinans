@@ -1,0 +1,67 @@
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Starting evaluation for run ID: continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | SessionPoller initialized with environment identifier: 659dc76b-cd59-4da1-9331-d4f776984e9f
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | HTTP client: httpx (shared)
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successfully retrieved access token for session polling
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Starting session polling for identifier: /evaluation/keepalive/continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc?identifier=eval13a2595cb41d4783a56ba69a2cf68ca8-1
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Session polling started successfully
+2026-04-27 12:00:56 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | inspect_ai check: is_inspect_ai=False, evaluator_keys=['kanelbrief-news-brief-quality', 'groundedness']
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Session polling request completed with status code: 200
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Getting eval metadata for eval_13a2595cb41d4783a56ba69a2cf68ca8 at https://kanelbullekapital-ai-2026-v1.services.ai.azure.com/api/projects/fikaforecast-2026-v1/openai/evals/eval_13a2595cb41d4783a56ba69a2cf68ca8?api-version=2025-11-15-preview.
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successful response received with status: 200
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | AGENTIC_HISTORY_MAPPING and COMMON_MAPPING applied for evaluator: kanelbrief-news-brief-quality
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Initializing Custom Foundry evaluator kanelbrief-news-brief-quality from account kanelbullekapital-ai-2026-v1, project fikaforecast-2026-v1
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Fetching custom evaluator details for kanelbrief-news-brief-quality...
+2026-04-27 12:00:57 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Get custom foundry evaluator with name: kanelbrief-news-brief-quality, version: 2
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Custom evaluator type: prompt
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Processing custom prompt-based evaluator: kanelbrief-news-brief-quality
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Initializing PromptEvaluator or PromptyEvaluator based on prompt text format
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Metric missing max_value, using fallback threshold: 3
+2026-04-27 12:00:58 | WARNING  | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Failed to load as Prompty template: (UserError) Illegal formatting of prompty. The prompt file is in markdown format and can be divided into two parts, the first part is in YAML format and contains connection and model information. The second part is the prompt template.
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Using api_key for authentication.
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | AGENTIC_HISTORY_MAPPING and COMMON_MAPPING applied for evaluator: builtin.groundedness
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Initializing AzureML evaluator builtin.groundedness from registry azureml
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Get custom foundry evaluator with name: builtin.groundedness, version: 8
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Evaluator subtype: code
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Using blob-based code for evaluator: builtin.groundedness
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Downloading evaluator asset files for builtin.groundedness version 8 in BuiltinCodeEvaluator...
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successful response received with status: 200
+2026-04-27 12:00:58 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Listing and downloading blobs in container 'azureml-be37934e-333a-592a-94ab-633a33169bc9':
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | - Downloading blob: __init__.py
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Blob '__init__.py' downloaded successfully as 'continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/builtin.groundedness.py'.
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | - Downloading blob: _groundedness.py
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Blob '_groundedness.py' downloaded successfully as 'continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/builtin.groundedness.py'.
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | - Downloading blob: groundedness_with_query.prompty
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Blob 'groundedness_with_query.prompty' downloaded successfully as 'continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/groundedness_with_query.prompty'.
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | - Downloading blob: groundedness_without_query.prompty
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Blob 'groundedness_without_query.prompty' downloaded successfully as 'continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/groundedness_without_query.prompty'.
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successfully downloaded files to: continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/groundedness_without_query.prompty
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Found expected Python file: builtin.groundedness.py
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Loading Python module from: builtin.groundedness.py
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successfully executed module: builtin.groundedness_module
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Selected evaluator class: GroundednessEvaluator
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Adding credentials...
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Instantiating GroundednessEvaluator with 3 initialization parameters
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Init parameter keys: ['is_reasoning_model', 'model_config', 'credential']
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successfully loaded and instantiated evaluator class GroundednessEvaluator from downloaded builtin.groundedness.py
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Execution path: foundry | Foundry evaluators: 2 | OpenAI graders: 0
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | User agent is not set. Using default user agent.
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | dataMapping provided for kanelbrief-news-brief-quality: {'query': '${data.query_history_list}', 'response': '${data.sample.output_items}', 'context': '${data.context}', 'tool_definitions': '${data.tool_definitions}', 'output_text': '${data.sample.output_text}'}
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorDefinition provided: {'type': 'prompt', 'metrics': {'kanelbrief-news-brief-quality': {'type': 'boolean', 'desirable_direction': 'decrease', 'min_value': None, 'max_value': None}}}
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorName provided: kanelbrief-news-brief-quality
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorVersion provided: 2
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorId provided: azureai://accounts/kanelbullekapital-ai-2026-v1/projects/fikaforecast-2026-v1/evaluators/kanelbrief-news-brief-quality/versions/2
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | dataMapping provided for groundedness: {'query': '${data.query_history_list}', 'response': '${data.sample.output_items}', 'context': '${data.context}', 'tool_definitions': '${data.tool_definitions}', 'output_text': '${data.sample.output_text}'}
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorDefinition provided: {'type': 'code', 'metrics': {'groundedness': {'type': 'ordinal', 'desirable_direction': 'increase', 'min_value': 1.0, 'max_value': 5.0}}}
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorName provided: builtin.groundedness
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorVersion provided: 8
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | evaluatorId provided: azureml://registries/azureml/evaluators/builtin.groundedness/versions/8
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Execute evaluators with evaluators: ['kanelbrief-news-brief-quality', 'groundedness']
+2026-04-27 12:00:59 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Calling evaluator method on GroundednessEvaluator...
+2026-04-27 12:00:59 | ERROR    | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Error during evaluation: (UserError) bing_grounding tool call is currently not supported for GroundednessEvaluator evaluator.
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Completed evaluation SDK execution for continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc in 6.61 seconds.
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Start pending upload for evaluationResult
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | start_upload_url: https://kanelbullekapital-ai-2026-v1.services.ai.azure.com/api/projects/fikaforecast-2026-v1/evaluationresults/eval-result-continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc-ZHWQ/versions/1/startPendingUpload?api-version=2025-05-01
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Successful response received with status: 200
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Uploading to Azure Storage as blob: /app/continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/eval_results/results.jsonl
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | File 'results.jsonl' uploaded successfully. Response: {'etag': '"0x8DEA454A896C10F"', 'last_modified': datetime.datetime(2026, 4, 27, 12, 1, 4, tzinfo=datetime.timezone.utc), 'content_md5': bytearray(b'\xaa\x9f5R\x7f\x9e\x0c7l\x86\x89\xd6#\xab\xf6\x08'), 'client_request_id': 'c45d51ea-4230-11f1-854a-22821df45961', 'request_id': '9d8152ea-401e-0028-3a3d-d669c8000000', 'version': '2025-01-05', 'version_id': None, 'date': datetime.datetime(2026, 4, 27, 12, 1, 4, tzinfo=datetime.timezone.utc), 'request_server_encrypted': True, 'encryption_key_sha256': None, 'encryption_scope': None, 'structured_body': None}
+2026-04-27 12:01:04 | INFO     | continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc | Uploading to Azure Storage as blob: /app/continuousevalrun_379e6e5a-079f-4c19-b277-9d5b326843dc/eval_results/user_logs.txt
