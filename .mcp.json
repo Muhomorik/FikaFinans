@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "microsoft-learn": {
+      "url": "https://learn.microsoft.com/api/mcp",
+      "type": "http"
+    },
+    "dxdocs": {
+      "url": "https://api.devexpress.com/mcp/docs",
+      "type": "http"
+    },
+    "next-devtools": {
+      "command": "npx",
+      "args": ["-y", "next-devtools-mcp@latest"]
+    },
+    "shadcn": {
+      "command": "npx",
+      "args": ["shadcn@latest", "mcp"]
+    }
+  }
+}

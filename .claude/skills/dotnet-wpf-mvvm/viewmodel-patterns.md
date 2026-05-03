@@ -1,0 +1,874 @@
+# ViewModel Patterns Reference
+
+Complete reference for ViewModel implementation patterns in WPF applications using DevExpress MVVM, Autofac DI, and Rx.NET.
+
+## Table of Contents
+
+- ViewModel Lifecycle
+- Constructor Patterns (Runtime vs Design-Time)
+- Property Change Notification
+- Sensitive Data Properties
+- Command Patterns
+- Subscription Management with Rx.NET
+- IDisposable Implementation
+- Testing ViewModels
+
+## ViewModel Lifecycle
+
+### Creation
+
+ViewModels are created in one of two contexts:
+
+1. **Runtime** (via DI container): Uses constructor with dependencies
+2. **Design-time** (by XAML designer): Uses parameterless constructor
+
+### Initialization
+
+Initialization happens in the `LoadedCommand` handler, not the constructor:
+
+```csharp
+public ICommand LoadedCommand { get; }
+
+public MyViewModel(ILogger logger, IScheduler uiScheduler, IDataService dataService)
+{
+    _logger = logger;
+    _uiScheduler = uiScheduler;
+    _dataService = dataService;
+
+    // Initialize commands
+    LoadedCommand = new DelegateCommand(OnLoaded);
+
+    // DO NOT start subscriptions here - View not loaded yet
+}
+
+private void OnLoaded()
+{
+    // NOW start subscriptions, load data
+    _logger.Info("ViewModel loaded, starting initialization");
+
+    // Start observables
+    _dataService.DataStream
+        .ObserveOn(_uiScheduler)
+        .Subscribe(data => ProcessData(data))
+        .DisposeWith(_disposables);
+}
+```
+
+**Why wait for Loaded?**
+- View is fully constructed and rendered
+- Data binding is established
+- Window handle is available for UI thread operations
+- Avoids potential race conditions
+
+### Disposal
+
+ViewModels must implement `IDisposable` to clean up:
+
+```csharp
+public sealed class MyViewModel : ViewModelBase, IDisposable
+{
+    private readonly CompositeDisposable _disposables = new();
+
+    public void Dispose()
+    {
+        _disposables.Dispose();  // Disposes all subscriptions
+        _logger.Info("ViewModel disposed");
+    }
+}
+```
+
+Dispose is triggered by `CurrentWindowService.ClosingCommand` — the ViewModel self-disposes when its window closes (see "Window Closing Lifecycle" in [SKILL.md](SKILL.md)).
+
+## Constructor Patterns
+
+### The DevExpress design-time / runtime split
+
+`DevExpress.Mvvm.ViewModelBase` provides two virtual hooks that the base constructor automatically dispatches to based on its built-in `IsInDesignMode` static property:
+
+- `OnInitializeInDesignMode()` — runs when the XAML designer instantiates the VM (via `d:DataContext IsDesignTimeCreatable=True`)
+- `OnInitializeInRuntime()` — runs in production
+
+This is the [canonical DevExpress pattern](https://docs.devexpress.com/WPF/17351). Use it instead of duplicating property assignments across two constructors — single source of truth per mode, no drift.
+
+### Canonical pattern
+
+```csharp
+public sealed class MyViewModel : ViewModelBase, IDisposable
+{
+    private readonly ILogger? _logger;
+    private readonly IScheduler? _uiScheduler;
+    private readonly IDataService? _dataService;
+    private readonly CompositeDisposable _disposables = new();
+
+    private string _title = string.Empty;
+    private string _status = string.Empty;
+
+    public string Title
+    {
+        get => _title;
+        set => SetProperty(ref _title, value, nameof(Title));
+    }
+
+    public string Status
+    {
+        get => _status;
+        set => SetProperty(ref _status, value, nameof(Status));
+    }
+
+    public ObservableCollection<ItemViewModel> Items { get; } = new();
+
+    public ICommand LoadedCommand { get; }
+    public ICommand SaveCommand { get; }
+
+    /// <summary>Runtime constructor (DI). Chains to the parameterless ctor so the base ctor + OnInitializeInRuntime fire first.</summary>
+    public MyViewModel(ILogger logger, IScheduler uiScheduler, IDataService dataService) : this()
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _uiScheduler = uiScheduler ?? throw new ArgumentNullException(nameof(uiScheduler));
+        _dataService = dataService ?? throw new ArgumentNullException(nameof(dataService));
+    }
+
+    /// <summary>Designer ctor — required by d:DataContext IsDesignTimeCreatable=True.</summary>
+    public MyViewModel()
+    {
+        LoadedCommand = new DelegateCommand(OnLoaded);
+        SaveCommand = new AsyncCommand(SaveAsync, CanSave);
+    }
+
+    protected override void OnInitializeInDesignMode()
+    {
+        base.OnInitializeInDesignMode();
+        Title = "Design-Time Preview";
+        Status = "Ready (designer)";
+        Items.Add(new ItemViewModel { Name = "Sample Item 1" });
+        Items.Add(new ItemViewModel { Name = "Sample Item 2" });
+    }
+
+    protected override void OnInitializeInRuntime()
+    {
+        base.OnInitializeInRuntime();
+        Title = "My Application";
+        Status = "Ready";
+    }
+
+    private void OnLoaded()
+    {
+        if (_logger == null) return; // running in designer — services aren't injected
+        _logger.Info("ViewModel loaded");
+        // Start subscriptions, load real data
+    }
+}
+```
+
+### Why constructor chaining matters
+
+`OnInitialize*` is invoked by the **base** `ViewModelBase` constructor — *before* the derived constructor body runs. That means inside `OnInitializeInRuntime` you cannot read `_logger`, `_uiScheduler`, or any other DI field set in the parameterized ctor body. Two consequences:
+
+1. **Keep `OnInitialize*` overrides to property assignments only.** Anything that needs services (logging, subscriptions, network calls) belongs in `OnLoaded` (wired via `LoadedCommand`).
+2. **Chain the runtime ctor with `: this()`** so the parameterless ctor (and therefore the base ctor and `OnInitialize*`) runs first; the parameterized ctor body just stores DI services.
+
+### Field initializers are the implicit third tier
+
+If a default is the same in both modes, set it via field initializer and skip the override — no need to write the same line twice:
+
+```csharp
+private string _title = "My Application";   // identical in design + runtime
+```
+
+Only override `OnInitialize*` for properties whose values **differ** between modes (or whose runtime defaults need computation).
+
+### Detecting design-time mode in code
+
+Use the framework-provided `ViewModelBase.IsInDesignMode` static property — don't roll your own with `System.ComponentModel.DesignerProperties.GetIsInDesignMode`:
+
+```csharp
+if (ViewModelBase.IsInDesignMode)
+{
+    // designer-only branch
+}
+```
+
+Prefer `OnInitializeIn*` overrides over inline `IsInDesignMode` checks when you're branching on initialization. Keep `IsInDesignMode` for the rare case where mid-method behavior must diverge.
+
+### `OnInitialize*` best practices
+
+- Set property values only — do not call services, network, or file system
+- Never throw — exceptions break the XAML designer's preview pane
+- Sample data for `ObservableCollection<T>` belongs in `OnInitializeInDesignMode`
+- Always call `base.OnInitializeInDesignMode()` / `base.OnInitializeInRuntime()` first
+
+### When to skip the parameterless ctor entirely
+
+For ViewModels that will never be created by the XAML designer (e.g., dialog VMs always resolved through DI), drop the parameterless ctor and use `IsDesignTimeCreatable=False` in XAML. You still get binding-IntelliSense from the type metadata, just no live preview.
+
+## Property Change Notification
+
+### Basic Pattern with SetProperty
+
+```csharp
+private string _status;
+
+public string Status
+{
+    get => _status;
+    set => SetProperty(ref _status, value, nameof(Status));
+}
+```
+
+`SetProperty` from `ViewModelBase`:
+- Compares new value with current value
+- Only sets if different
+- Raises `PropertyChanged` event
+- Returns `true` if value changed, `false` otherwise
+
+### Property with Side Effects
+
+Execute logic when property changes:
+
+```csharp
+private string _searchText;
+
+public string SearchText
+{
+    get => _searchText;
+    set
+    {
+        if (SetProperty(ref _searchText, value, nameof(SearchText)))
+        {
+            // Property changed, perform search
+            PerformSearch(_searchText);
+        }
+    }
+}
+```
+
+### Computed Properties
+
+Notify dependent properties when source changes:
+
+```csharp
+private string _firstName;
+private string _lastName;
+
+public string FirstName
+{
+    get => _firstName;
+    set
+    {
+        if (SetProperty(ref _firstName, value, nameof(FirstName)))
+        {
+            RaisePropertyChanged(nameof(FullName));  // Notify dependent
+        }
+    }
+}
+
+public string LastName
+{
+    get => _lastName;
+    set
+    {
+        if (SetProperty(ref _lastName, value, nameof(LastName)))
+        {
+            RaisePropertyChanged(nameof(FullName));  // Notify dependent
+        }
+    }
+}
+
+public string FullName => $"{FirstName} {LastName}";
+```
+
+### Observable Collections
+
+Use `ObservableCollection<T>` for bindable collections.
+
+**IMPORTANT:** Objects in `ObservableCollection<T>` MUST inherit `BindableBase` (or implement INPC).
+
+```csharp
+// ❌ BAD: Plain class - property changes won't update UI
+public class FundItem
+{
+    public string Name { get; set; }
+}
+
+// ✅ GOOD: BindableBase for INPC support
+public class FundItemViewModel : BindableBase
+{
+    private string _name;
+    public string Name
+    {
+        get => _name;
+        set => SetProperty(ref _name, value);
+    }
+}
+
+public ObservableCollection<FundItemViewModel> Items { get; }
+```
+
+`ObservableCollection<T>` only notifies when items are added/removed, NOT when item properties change.
+
+## Sensitive Data Properties
+
+Properties backing a `PasswordBox` (API keys, tokens, passwords, sensitive URLs) are regular `string` properties — UI masking is handled in XAML via `mahShared:PasswordBoxBindingBehavior.Password` (see [ui-patterns.md — Sensitive Data Input](ui-patterns.md#sensitive-data-input-passwordbox)).
+
+```csharp
+private string _apiKey = string.Empty;
+
+public string ApiKey
+{
+    get => _apiKey;
+    set
+    {
+        if (SetProperty(ref _apiKey, value, nameof(ApiKey)))
+        {
+            _logger.Debug("ApiKey changed");  // ← log the fact, NEVER the value
+            RaisePropertyChanged(nameof(HasChanges));
+        }
+    }
+}
+```
+
+Rules:
+
+- **TwoWay binding** so the ViewModel can preload persisted values
+- **Never log the value** — not in logs, exceptions, `ToString()`, or diagnostic dumps
+- **Exclude from serialization** (`[JsonIgnore]`) on any DTO that gets persisted or transmitted in logs
+- **Persist to a secure store** (DPAPI, Windows Credential Manager, Azure Key Vault) — not plaintext `appsettings.json` or user settings JSON
+- **Clear on logout/reset** by setting back to `string.Empty`
+
+## Command Patterns
+
+### DelegateCommand
+
+For synchronous operations:
+
+```csharp
+public ICommand ClearCommand { get; }
+
+public MyViewModel(ILogger logger, IScheduler uiScheduler)
+{
+    _logger = logger;
+    _uiScheduler = uiScheduler;
+
+    // Command with execute and canExecute
+    ClearCommand = new DelegateCommand(OnClear, CanClear);
+}
+
+private void OnClear()
+{
+    Items.Clear();
+    _logger.Info("Items cleared");
+}
+
+private bool CanClear()
+{
+    return Items.Count > 0;
+}
+```
+
+Update `CanExecute` state:
+
+```csharp
+private void OnItemsChanged()
+{
+    (ClearCommand as DelegateCommand)?.RaiseCanExecuteChanged();
+}
+```
+
+### AsyncCommand
+
+For asynchronous operations:
+
+```csharp
+public ICommand SaveCommand { get; }
+
+public MyViewModel(ILogger logger, IScheduler uiScheduler, IDataService dataService)
+{
+    _logger = logger;
+    _uiScheduler = uiScheduler;
+    _dataService = dataService;
+
+    SaveCommand = new AsyncCommand(SaveAsync, CanSave);
+}
+
+private async Task SaveAsync()
+{
+    IsBusy = true;
+    try
+    {
+        _logger.Info("Saving data...");
+        await _dataService.SaveAsync(CurrentItem);
+
+        Status = "Saved successfully";
+        _logger.Info("Data saved successfully");
+    }
+    catch (Exception ex)
+    {
+        _logger.Error(ex, "Failed to save data");
+        Status = $"Save failed: {ex.Message}";
+    }
+    finally
+    {
+        IsBusy = false;
+    }
+}
+
+private bool CanSave()
+{
+    return CurrentItem != null && CurrentItem.IsValid && !IsBusy;
+}
+```
+
+`AsyncCommand` automatically:
+- Disables command during execution
+- Handles exceptions
+- Supports cancellation (if you provide `CancellationToken`)
+
+### Command with Parameters
+
+```csharp
+public ICommand DeleteItemCommand { get; }
+
+public MyViewModel(ILogger logger, IScheduler uiScheduler)
+{
+    _logger = logger;
+    _uiScheduler = uiScheduler;
+
+    DeleteItemCommand = new DelegateCommand<ItemViewModel>(OnDeleteItem, CanDeleteItem);
+}
+
+private void OnDeleteItem(ItemViewModel item)
+{
+    if (item != null)
+    {
+        Items.Remove(item);
+        _logger.Info($"Deleted item: {item.Name}");
+    }
+}
+
+private bool CanDeleteItem(ItemViewModel item)
+{
+    return item != null;
+}
+```
+
+XAML binding:
+
+```xml
+<Button Content="Delete"
+        Command="{Binding DeleteItemCommand}"
+        CommandParameter="{Binding}" />
+```
+
+## Subscription Management with Rx.NET
+
+### Creating Subscriptions
+
+```csharp
+private void OnLoaded()
+{
+    // Timer-based subscription
+    Observable
+        .Interval(TimeSpan.FromSeconds(5))
+        .ObserveOn(_uiScheduler)
+        .Subscribe(_ => RefreshStatus())
+        .DisposeWith(_disposables);
+
+    // Event-based subscription
+    _eventAggregator.GetEvent<DataChangedEvent>()
+        .ToObservable()
+        .ObserveOn(_uiScheduler)
+        .Subscribe(data => HandleDataChanged(data))
+        .DisposeWith(_disposables);
+
+    // Service stream subscription
+    _dataService.DataStream
+        .ObserveOn(_uiScheduler)
+        .Subscribe(
+            data => ProcessData(data),
+            ex => _logger.Error(ex, "Error in data stream"),
+            () => _logger.Info("Data stream completed"))
+        .DisposeWith(_disposables);
+}
+```
+
+### DisposeWith Extension
+
+The `DisposeWith` extension method adds the subscription to `CompositeDisposable`:
+
+```csharp
+observable
+    .Subscribe(x => HandleData(x))
+    .DisposeWith(_disposables);
+```
+
+Equivalent to:
+
+```csharp
+var subscription = observable.Subscribe(x => HandleData(x));
+_disposables.Add(subscription);
+```
+
+### ObserveOn for UI Thread Marshalling
+
+Always use `ObserveOn(_uiScheduler)` before updating UI-bound properties:
+
+```csharp
+// ✓ CORRECT
+Observable
+    .Return(LoadDataAsync())
+    .SelectMany(x => x)
+    .ObserveOn(_uiScheduler)  // Switch to UI thread
+    .Subscribe(data =>
+    {
+        DataItems = data;  // Safe: on UI thread
+    })
+    .DisposeWith(_disposables);
+
+// ✗ WRONG
+Observable
+    .Return(LoadDataAsync())
+    .SelectMany(x => x)
+    .Subscribe(data =>
+    {
+        DataItems = data;  // ERROR: Cross-thread exception
+    })
+    .DisposeWith(_disposables);
+```
+
+### Combining Multiple Observables
+
+```csharp
+private void OnLoaded()
+{
+    // Combine latest values from two observables
+    Observable
+        .CombineLatest(
+            _service1.DataStream,
+            _service2.DataStream,
+            (data1, data2) => new { Data1 = data1, Data2 = data2 })
+        .ObserveOn(_uiScheduler)
+        .Subscribe(combined =>
+        {
+            ProcessCombinedData(combined.Data1, combined.Data2);
+        })
+        .DisposeWith(_disposables);
+
+    // Merge multiple observables into one
+    Observable
+        .Merge(
+            _source1.Changes,
+            _source2.Changes,
+            _source3.Changes)
+        .ObserveOn(_uiScheduler)
+        .Subscribe(change => HandleChange(change))
+        .DisposeWith(_disposables);
+}
+```
+
+## IDisposable Implementation
+
+### Basic Pattern
+
+```csharp
+public sealed class MyViewModel : ViewModelBase, IDisposable
+{
+    private readonly CompositeDisposable _disposables = new();
+
+    public void Dispose()
+    {
+        _disposables.Dispose();
+    }
+}
+```
+
+### Disposing Custom Resources
+
+If you have resources beyond Rx subscriptions:
+
+```csharp
+public sealed class MyViewModel : ViewModelBase, IDisposable
+{
+    private readonly CompositeDisposable _disposables = new();
+    private readonly IDataService _dataService;
+    private Timer _timer;
+
+    public void Dispose()
+    {
+        // Dispose Rx subscriptions
+        _disposables.Dispose();
+
+        // Dispose other resources
+        _timer?.Dispose();
+
+        // Clean up service resources if needed
+        if (_dataService is IDisposable disposableService)
+        {
+            disposableService.Dispose();
+        }
+    }
+}
+```
+
+### Preventing Multiple Disposal
+
+```csharp
+public sealed class MyViewModel : ViewModelBase, IDisposable
+{
+    private readonly CompositeDisposable _disposables = new();
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposables.Dispose();
+        _disposed = true;
+
+        _logger.Debug("ViewModel disposed");
+    }
+}
+```
+
+## Testing ViewModels
+
+### Unit Test Structure
+
+```csharp
+using AutoFixture;
+using AutoFixture.AutoMoq;
+using Moq;
+using NUnit.Framework;
+using Microsoft.Reactive.Testing;
+
+[TestFixture]
+public class MainViewModelTests
+{
+    private IFixture _fixture;
+    private Mock<ILogger> _loggerMock;
+    private Mock<IDataService> _dataServiceMock;
+    private TestScheduler _testScheduler;
+    private MainViewModel _sut;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+
+        _loggerMock = _fixture.Freeze<Mock<ILogger>>();
+        _dataServiceMock = _fixture.Freeze<Mock<IDataService>>();
+
+        // Use TestScheduler for testing Rx observables
+        _testScheduler = new TestScheduler();
+
+        _sut = new MainViewModel(
+            _loggerMock.Object,
+            _testScheduler,  // Use test scheduler instead of DispatcherScheduler
+            _dataServiceMock.Object);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _sut?.Dispose();
+    }
+}
+```
+
+### Testing Commands
+
+```csharp
+[Test]
+public void ClearCommand_WhenItemsExist_ClearsItems()
+{
+    // Arrange
+    _sut.Items.Add(new ItemViewModel { Name = "Item 1" });
+    _sut.Items.Add(new ItemViewModel { Name = "Item 2" });
+
+    // Act
+    _sut.ClearCommand.Execute(null);
+
+    // Assert
+    Assert.That(_sut.Items, Is.Empty);
+}
+
+[Test]
+public void ClearCommand_WhenNoItems_CannotExecute()
+{
+    // Arrange
+    _sut.Items.Clear();
+
+    // Act
+    var canExecute = _sut.ClearCommand.CanExecute(null);
+
+    // Assert
+    Assert.That(canExecute, Is.False);
+}
+```
+
+### Testing Async Commands
+
+```csharp
+[Test]
+public async Task SaveCommand_WhenValid_SavesDataSuccessfully()
+{
+    // Arrange
+    var testItem = _fixture.Create<ItemModel>();
+    _sut.CurrentItem = testItem;
+
+    _dataServiceMock
+        .Setup(x => x.SaveAsync(testItem))
+        .ReturnsAsync(true);
+
+    // Act
+    await ((AsyncCommand)_sut.SaveCommand).ExecuteAsync(null);
+
+    // Assert
+    _dataServiceMock.Verify(x => x.SaveAsync(testItem), Times.Once);
+    Assert.That(_sut.Status, Does.Contain("success"));
+}
+
+[Test]
+public async Task SaveCommand_WhenServiceFails_LogsError()
+{
+    // Arrange
+    var testItem = _fixture.Create<ItemModel>();
+    _sut.CurrentItem = testItem;
+
+    var exception = new Exception("Save failed");
+    _dataServiceMock
+        .Setup(x => x.SaveAsync(testItem))
+        .ThrowsAsync(exception);
+
+    // Act
+    await ((AsyncCommand)_sut.SaveCommand).ExecuteAsync(null);
+
+    // Assert
+    _loggerMock.Verify(
+        x => x.Error(exception, It.IsAny<string>()),
+        Times.Once);
+    Assert.That(_sut.Status, Does.Contain("failed"));
+}
+```
+
+### Testing Observables with TestScheduler
+
+```csharp
+[Test]
+public void OnLoaded_StartsPolling_UpdatesStatusPeriodically()
+{
+    // Arrange
+    var expectedStatuses = new List<string>();
+    _sut.PropertyChanged += (s, e) =>
+    {
+        if (e.PropertyName == nameof(_sut.Status))
+            expectedStatuses.Add(_sut.Status);
+    };
+
+    // Act
+    _sut.LoadedCommand.Execute(null);
+
+    // Advance test scheduler by 5 seconds
+    _testScheduler.AdvanceBy(TimeSpan.FromSeconds(5).Ticks);
+
+    // Assert
+    Assert.That(expectedStatuses, Is.Not.Empty);
+    Assert.That(_sut.Status, Does.Contain("Updated"));
+}
+```
+
+### Testing Property Change Notification
+
+```csharp
+[Test]
+public void Status_WhenChanged_RaisesPropertyChangedEvent()
+{
+    // Arrange
+    var propertyChangedRaised = false;
+    _sut.PropertyChanged += (s, e) =>
+    {
+        if (e.PropertyName == nameof(_sut.Status))
+            propertyChangedRaised = true;
+    };
+
+    // Act
+    _sut.Status = "New Status";
+
+    // Assert
+    Assert.That(propertyChangedRaised, Is.True);
+}
+```
+
+## Common Patterns and Anti-Patterns
+
+### ✓ DO: Initialize Commands in Constructor
+
+```csharp
+public MyViewModel(ILogger logger, IScheduler uiScheduler)
+{
+    _logger = logger;
+    _uiScheduler = uiScheduler;
+
+    LoadedCommand = new DelegateCommand(OnLoaded);
+    SaveCommand = new AsyncCommand(SaveAsync);
+}
+```
+
+### ✗ DON'T: Create Commands in Property Getters
+
+```csharp
+// This creates a new command instance every time the property is accessed
+public ICommand SaveCommand => new AsyncCommand(SaveAsync);
+```
+
+### ✓ DO: Use ObserveOn Before Updating UI Properties
+
+```csharp
+_observable
+    .ObserveOn(_uiScheduler)
+    .Subscribe(data => Status = data);
+```
+
+### ✗ DON'T: Update UI Properties from Background Threads
+
+```csharp
+Task.Run(() =>
+{
+    Status = "Updated";  // Cross-thread exception
+});
+```
+
+### ✓ DO: Dispose All Subscriptions
+
+```csharp
+_observable
+    .Subscribe(x => HandleData(x))
+    .DisposeWith(_disposables);
+```
+
+### ✗ DON'T: Forget to Dispose Subscriptions
+
+```csharp
+// Memory leak - subscription never disposed
+_observable.Subscribe(x => HandleData(x));
+```
+
+### ✓ DO: Validate Dependencies in Constructor
+
+```csharp
+public MyViewModel(ILogger logger, IDataService dataService)
+{
+    _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    _dataService = dataService ?? throw new ArgumentNullException(nameof(dataService));
+}
+```
+
+### ✗ DON'T: Allow Null Dependencies
+
+```csharp
+public MyViewModel(ILogger logger, IDataService dataService)
+{
+    _logger = logger;  // No validation
+    _dataService = dataService;
+}
+```
