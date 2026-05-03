@@ -1,0 +1,37 @@
+{
+  "reportType": "weekly-summary",
+  "periodStart": "2026-04-20T00:00:00+00:00",
+  "periodEnd": "2026-04-27T00:00:00+00:00",
+  "periodIsoWeek": "2026-W17",
+  "netMood": "Mixed",
+  "moodSummary": "The week finished with a mixed but slightly risk-on tilt, as AI/semiconductor leadership and solid earnings helped major U.S. indexes reach records even while oil-driven inflation pressure, Middle East tensions, and softer cyclicals kept broader sentiment uneven. Investors rotated between growth, energy, and defensives rather than embracing a clean risk-on or risk-off posture.",
+  "themes": [
+    {
+      "category": "AI and semiconductor leadership",
+      "summary": "AI-linked tech, especially semiconductors, was the clearest source of upside and index leadership, with strong earnings and capex optimism offsetting broader macro concerns.",
+      "confidence": "High",
+      "sentiment": "RiskOn"
+    },
+    {
+      "category": "Geopolitical oil shock and inflation pressure",
+      "summary": "Middle East tensions repeatedly lifted crude and kept energy elevated, reinforcing inflation worries and pressuring rate-sensitive, consumer, and growth-exposed sectors.",
+      "confidence": "High",
+      "sentiment": "RiskOff"
+    },
+    {
+      "category": "Selective sector rotation",
+      "summary": "Market action was uneven, with energy and tech outperforming while financials, healthcare, industrials, and consumer discretionary traded choppily and often lagged on a relative basis.",
+      "confidence": "High",
+      "sentiment": "Mixed"
+    }
+  ],
+  "runDate": "2026-04-30",
+  "runId": "c41c5aa3-3670-49f0-9f07-6d1052054cbb",
+  "createdAt": "2026-04-30T17:00:01.1887181+00:00",
+  "modelId": "gpt-5.4-mini",
+  "status": "Success",
+  "durationSeconds": 5.8111849,
+  "inputTokens": 21651,
+  "outputTokens": 301,
+  "totalTokens": 21952
+}

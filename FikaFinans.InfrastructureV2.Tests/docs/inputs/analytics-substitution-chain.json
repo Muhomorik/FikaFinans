@@ -1,0 +1,33 @@
+{
+  "reportType": "substitution-chain",
+  "weeklySummaryRunId": "c41c5aa3-3670-49f0-9f07-6d1052054cbb",
+  "periodStart": "2026-04-20T00:00:00+00:00",
+  "periodEnd": "2026-04-27T00:00:00+00:00",
+  "periodIsoWeek": "2026-W17",
+  "chains": [
+    {
+      "capitalFleeing": "Rate-sensitive growth and consumer sectors",
+      "flowsToward": "AI and semiconductors",
+      "mechanism": "Strong earnings and capex optimism concentrated capital in AI-linked tech, while inflation and higher-rate fears made investors favor the clearest growth leaders over broader duration-sensitive areas."
+    },
+    {
+      "capitalFleeing": "Cyclicals and consumer discretionary",
+      "flowsToward": "Energy",
+      "mechanism": "Geopolitical tensions pushed crude higher, so capital rotated into energy as an inflation hedge and away from sectors more exposed to weaker demand and cost pressure."
+    },
+    {
+      "capitalFleeing": "Broader defensives and lagging sectors",
+      "flowsToward": "Large-cap tech leadership",
+      "mechanism": "A mixed but slightly risk-on tape rewarded index-heavy AI/semiconductor names, pulling money out of sectors that were choppy or underperforming on a relative basis."
+    }
+  ],
+  "runDate": "2026-04-30",
+  "runId": "67752ad4-0dfc-4332-b6a2-270576c5d9d3",
+  "createdAt": "2026-04-30T17:00:07.0225059+00:00",
+  "modelId": "gpt-5.4-mini",
+  "status": "Success",
+  "durationSeconds": 1.9594907,
+  "inputTokens": 352,
+  "outputTokens": 181,
+  "totalTokens": 533
+}

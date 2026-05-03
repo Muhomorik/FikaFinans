@@ -1,0 +1,17 @@
+isin,name,company_name,currency_code,category,fund_type,is_index_fund,managed_type,total_fee,management_fee,risk,rating,sharpe_ratio,standard_deviation,recommended_holding_period,capital,number_of_owners
+LU0106252389,Schroder ISF Em Mkts A Acc USD,Schroder,USD,Tillväxtmarknader,EQUITY_FUND,false,ACTIVE,2.17,1.5,4,3,0.68,14.279999999999998,FIVE_YEAR,70121004753.02,410
+LU0106817157,Schroder ISF Emerging Europe A Acc EUR,Schroder,EUR,Östeuropa ex Ryssland,EQUITY_FUND,false,ACTIVE,2.42,1.5,6,,1.53,14.249999999999998,FIVE_YEAR,17123096340.44,3092
+LU0140636845,Schroder ISF Greater China A Acc USD,Schroder,USD,Kina & närliggande,EQUITY_FUND,false,ACTIVE,2.84,1.5,5,4,0.07,18.28,THREE_YEAR,26541835046.94,148
+LU0161305163,Schroder ISF European Value A Acc EUR,Schroder,EUR,"Europa, Flexibel storlek bolag",EQUITY_FUND,false,ACTIVE,2.05,1.5,4,4,0.68,11.23,THREE_YEAR,8290454433.86,212
+LU0228659784,Schroder ISF BIC A Acc USD,Schroder,USD,Övriga aktiefonder,EQUITY_FUND,false,ACTIVE,2.26,1.5,4,,-0.08,12.7,FIVE_YEAR,3650440460.26,135
+LU0240877869,Schroder ISF Global Smlr Coms A Acc USD,Schroder,USD,"Global, Små/medelstora bolag",EQUITY_FUND,false,ACTIVE,2.26,1.5,4,2,0.05,15.85,THREE_YEAR,2269814979.02,139
+LU0256331488,Schroder ISF Global Energy A Acc USD,Schroder,USD,"Branschfond, Energi",EQUITY_FUND,false,ACTIVE,2.38,1.5,5,3,0.79,21.42,THREE_YEAR,10307093905.01,3283
+LU0269904917,Schroder ISF Glb Em Mkt Opps A Acc USD,Schroder,USD,Tillväxtmarknader,EQUITY_FUND,false,ACTIVE,2.24,1.5,4,4,0.64,14.09,FIVE_YEAR,31203692958.82,17441
+LU0270814014,Schroder ISF Taiwanese Equity A Acc USD,Schroder,USD,Taiwan,EQUITY_FUND,false,ACTIVE,2.44,1.5,5,2,0.84,21.21,THREE_YEAR,3465322432.03,595
+LU0302445910,Schroder ISF Glb Clmt Chg Eq A Acc USD,Schroder,USD,"Branschfond, Miljö",EQUITY_FUND,false,ACTIVE,1.95,1.5,4,4,0.24,14.06,THREE_YEAR,21989051356.82,148
+LU0323591593,Schroder ISF QEP Glbl Qual A Acc USD,Schroder,USD,"Global, Mix bolag",EQUITY_FUND,false,ACTIVE,1.68,1.25,4,3,0.55,13.019999999999998,THREE_YEAR,3162510073.87,137
+LU0557290698,Schroder ISF Glbl Sust Gr A Acc USD,Schroder,USD,"Global, Tillväxtbolag",EQUITY_FUND,false,ACTIVE,1.78,1.3,4,4,0.28,13.58,THREE_YEAR,38008694144.52,413
+LU0562313402,Schroder ISF Frntr Mkts Eq A USD Acc,Schroder,USD,"Tillväxtmarknader, Nya",EQUITY_FUND,false,ACTIVE,2.66,1.5,3,5,1.23,12.6,FIVE_YEAR,8358736185.14,1063
+LU0959626531,Schroder ISF Indian Opports A Acc USD,Schroder,USD,Indien,EQUITY_FUND,false,ACTIVE,2.54,1.5,4,3,0.06,15.049999999999999,THREE_YEAR,2094365442.1,110
+LU1713307426,Schroder ISF China A A Acc USD,Schroder,USD,"Kina, A-aktier",EQUITY_FUND,false,ACTIVE,2.86,1.5,5,3,-0.01,23.76,THREE_YEAR,31327900371.58,149
+LU1983299162,Schroder ISF Glbl Alt Engy A Acc USD,Schroder,USD,"Branschfond, Ny energi",EQUITY_FUND,false,ACTIVE,2.29,1.5,5,2,-0.44,20.63,THREE_YEAR,8457318378.41,435

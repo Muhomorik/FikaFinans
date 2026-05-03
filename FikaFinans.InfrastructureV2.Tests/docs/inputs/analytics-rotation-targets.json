@@ -1,0 +1,42 @@
+{
+  "reportType": "rotation-targets",
+  "substitutionChainRunId": "67752ad4-0dfc-4332-b6a2-270576c5d9d3",
+  "periodStart": "2026-04-20T00:00:00+00:00",
+  "periodEnd": "2026-04-27T00:00:00+00:00",
+  "periodIsoWeek": "2026-W17",
+  "targets": [
+    {
+      "category": "AI and semiconductors",
+      "signalStrength": "Strong",
+      "rationale": "Capital is concentrating in AI-linked semiconductors on the back of earnings momentum, capex optimism, and clear secular growth visibility. This makes the group a primary recipient of rotation from rate-sensitive and lagging sectors.",
+      "riskCaveat": "Valuations may already reflect high expectations; any slowdown in AI spending, export restrictions, or margin compression could trigger sharp multiple contraction."
+    },
+    {
+      "category": "Energy",
+      "signalStrength": "Moderate",
+      "rationale": "Geopolitical tensions and higher crude prices are drawing capital into energy as both an inflation hedge and a relative haven versus cyclicals and consumer discretionary names exposed to weaker demand and cost pressure.",
+      "riskCaveat": "The trade depends heavily on crude staying elevated; a de-escalation in geopolitical risks or weaker global demand could quickly reverse flows."
+    },
+    {
+      "category": "Large-cap tech leadership",
+      "signalStrength": "Moderate",
+      "rationale": "Index-heavy mega-cap tech continues to attract capital as investors prefer liquid, earnings-resilient leaders in a mixed risk-on environment. Relative strength suggests ongoing rotation from broader defensives and underperformers.",
+      "riskCaveat": "Crowding risk is high, and any market-wide rotation into value or defensive leadership could pressure performance despite strong fundamentals."
+    },
+    {
+      "category": "Rate-sensitive growth and consumer sectors",
+      "signalStrength": "Weak",
+      "rationale": "These areas are currently being sold, but they may offer selective contrarian opportunities if rates stabilize, inflation cools, or the market broadens beyond concentrated tech leadership.",
+      "riskCaveat": "They remain vulnerable to sustained higher rates and weaker consumer demand, so timing is critical and downside could persist before a reversal."
+    }
+  ],
+  "runDate": "2026-04-30",
+  "runId": "4ac05b6d-e791-4eb7-b264-17558775429e",
+  "createdAt": "2026-04-30T17:00:08.9944744+00:00",
+  "modelId": "gpt-5.4-mini",
+  "status": "Success",
+  "durationSeconds": 4.9788787,
+  "inputTokens": 291,
+  "outputTokens": 348,
+  "totalTokens": 639
+}
