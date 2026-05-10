@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.37203.1
@@ -14,8 +14,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FikaFinans.Domain.Tests", "FikaFinans.Domain.Tests\FikaFinans.Domain.Tests.csproj", "{19DD150C-5724-467D-A284-8E1233E1E2D3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FikaFinans.Application.Tests", "FikaFinans.Application.Tests\FikaFinans.Application.Tests.csproj", "{9CB4EB1F-6879-44B1-B5F6-ED6DEA1FA6FA}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FikaFinans.Infrastructure.Tests", "FikaFinans.Infrastructure.Tests\FikaFinans.Infrastructure.Tests.csproj", "{86F61587-B9D8-48E4-9F43-5DD04139ADCE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FikaFinans.InfrastructureV2.Tests", "FikaFinans.InfrastructureV2.Tests\FikaFinans.InfrastructureV2.Tests.csproj", "{62B5D255-CA73-4E7B-B195-562312C7C1B4}"
 EndProject
@@ -101,18 +99,6 @@ Global
 		{9CB4EB1F-6879-44B1-B5F6-ED6DEA1FA6FA}.Release|x64.Build.0 = Release|Any CPU
 		{9CB4EB1F-6879-44B1-B5F6-ED6DEA1FA6FA}.Release|x86.ActiveCfg = Release|Any CPU
 		{9CB4EB1F-6879-44B1-B5F6-ED6DEA1FA6FA}.Release|x86.Build.0 = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|x64.Build.0 = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Debug|x86.Build.0 = Debug|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|Any CPU.Build.0 = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|x64.ActiveCfg = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|x64.Build.0 = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|x86.ActiveCfg = Release|Any CPU
-		{86F61587-B9D8-48E4-9F43-5DD04139ADCE}.Release|x86.Build.0 = Release|Any CPU
 		{62B5D255-CA73-4E7B-B195-562312C7C1B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{62B5D255-CA73-4E7B-B195-562312C7C1B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{62B5D255-CA73-4E7B-B195-562312C7C1B4}.Debug|x64.ActiveCfg = Debug|Any CPU

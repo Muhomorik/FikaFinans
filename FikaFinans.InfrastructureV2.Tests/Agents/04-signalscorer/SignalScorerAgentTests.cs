@@ -1,9 +1,12 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
-using FikaFinans.InfrastructureV2.Tests.Models.SignalScorer;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Application.Pipeline.Configs;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.SignalScorer;
 
@@ -18,6 +21,7 @@ public class SignalScorerAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
         _config = SignalScorerConfig.Default;
     }
 
@@ -278,7 +282,7 @@ public class SignalScorerAgentTests
         var fund = result.Funds.Single();
         Assert.Multiple(() =>
         {
-            Assert.That(fund.Isin, Is.EqualTo("LU0010"));
+            Assert.That(fund.Isin.Value, Is.EqualTo("LU0010"));
             Assert.That(fund.Metadata, Is.SameAs(input.Funds[0].Metadata));
             Assert.That(fund.Metrics, Is.SameAs(metrics));
             Assert.That(result.IsoWeek, Is.EqualTo(input.IsoWeek));
@@ -357,10 +361,10 @@ public class SignalScorerAgentTests
         var step1Path = Paths.DataLoaderOutput("2026-W18", runId);
         if (!File.Exists(step1Path))
         {
-            new FikaFinans.InfrastructureV2.Tests.Agents.DataLoader.DataLoaderAgent().Run(
+            new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService()).Run(
                 "schroder", "2026-W18", runId);
         }
-        new FikaFinans.InfrastructureV2.Tests.Agents.MetricsCalculator.MetricsCalculatorAgent().Run("2026-W18", runId);
+        new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService()).Run("2026-W18", runId);
     }
 
     private static FundRecord MakeFund(string isin, Metrics metrics) => new()

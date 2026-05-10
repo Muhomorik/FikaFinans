@@ -1,6 +1,9 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -13,7 +16,11 @@ public class SnapshotCsvParserTests
     private IFixture _fixture = null!;
 
     [SetUp]
-    public void SetUp() => _fixture = new Fixture().Customize(new AutoMoqCustomization());
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
+    }
 
     [Test]
     public void Parse_TwoRows_ReturnsDictKeyedByIsin()
@@ -27,7 +34,7 @@ public class SnapshotCsvParserTests
 
         var result = sut.Parse(new StringReader(csv));
 
-        Assert.That(result.Keys, Is.EquivalentTo(new[] { "LU0000000001", "LU0000000002" }));
+        Assert.That(result.Keys.Select(k => k.Value), Is.EquivalentTo(new[] { "LU0000000001", "LU0000000002" }));
         Assert.That(result["LU0000000001"].Sharpe12w, Is.EqualTo(1.8167m));
         Assert.That(result["LU0000000001"].AsOfDate, Is.EqualTo(new DateOnly(2026, 4, 30)));
     }

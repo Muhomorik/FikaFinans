@@ -11,7 +11,7 @@ namespace FikaFinans.Infrastructure.Tests.Foundry;
 /// End-to-end exercises for <see cref="FoundryFileStore"/> against a real
 /// Foundry project: real OpenAI Files API uploads, real per-test sidecar.
 /// Each test uses an isolated temp folder + isolated sidecar so production
-/// state under <c>%APPDATA%\FikaFinans</c> is never touched.
+/// state under <c>%LOCALAPPDATA%\FikaFinans</c> is never touched.
 /// </summary>
 [TestFixture]
 [Explicit("Burns Foundry tokens / hits live OpenAI Files API.")]

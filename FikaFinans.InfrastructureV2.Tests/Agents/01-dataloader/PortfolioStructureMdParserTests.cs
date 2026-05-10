@@ -1,6 +1,9 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -10,7 +13,11 @@ public class PortfolioStructureMdParserTests
     private IFixture _fixture = null!;
 
     [SetUp]
-    public void SetUp() => _fixture = new Fixture().Customize(new AutoMoqCustomization());
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
+    }
 
     [Test]
     public void Parse_NameOnlyCoreAndWriteoffPinnings_PreservesNameAndNullsIsin()
@@ -55,10 +62,10 @@ public class PortfolioStructureMdParserTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Pinnings[0].Isin, Is.EqualTo("LU0000000001"));
+            Assert.That(result.Pinnings[0].Isin?.Value, Is.EqualTo("LU0000000001"));
             Assert.That(result.Pinnings[0].Name, Is.EqualTo("Foo Fund"));
             Assert.That(result.Pinnings[0].Layer, Is.EqualTo(PinnedLayer.Core));
-            Assert.That(result.Pinnings[1].Isin, Is.EqualTo("LU0000000002"));
+            Assert.That(result.Pinnings[1].Isin?.Value, Is.EqualTo("LU0000000002"));
             Assert.That(result.Pinnings[1].Layer, Is.EqualTo(PinnedLayer.Writeoff));
         });
     }

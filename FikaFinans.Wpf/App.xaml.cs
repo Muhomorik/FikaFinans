@@ -1,5 +1,11 @@
+using System.IO;
 using System.Windows;
+using System.Windows.Media;
 using Autofac;
+using ControlzEx.Theming;
+using FikaFinans.Application.Settings;
+using FikaFinans.Infrastructure;
+using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.DependencyInjection;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.Modules;
@@ -24,6 +30,10 @@ public partial class App : System.Windows.Application
         LogManager.Setup().LoadConfigurationFromFile("NLog.config");
         Logger.Info("Application starting...");
 
+        ApplyFikaFinansTheme();
+
+        EnsureDefaultDirectories();
+
         WireUpExceptionHandlers();
 
         var configuration = BuildConfiguration();
@@ -41,6 +51,14 @@ public partial class App : System.Windows.Application
         _appScope = _container.BeginLifetimeScope();
 
         Logger.Info("DI container configured");
+
+        WarnIfModelsNotConfigured(_appScope.Resolve<IAppSettingsStore>());
+
+        // Create directories and default config files before any tab or agent needs them.
+        _appScope.Resolve<AppStartupInitializer>().Initialize();
+
+        // Seed the bank's chart of accounts before any tab can post an order.
+        _appScope.Resolve<DataSeeder>().SeedAsync().GetAwaiter().GetResult();
 
         var mainWindow = _appScope.Resolve<MainWindow>();
         mainWindow.Show();
@@ -95,6 +113,49 @@ public partial class App : System.Windows.Application
             .Build();
     }
 
+    /// <summary>
+    /// Applies the MahApps theme derived from the Windows system accent color.
+    /// Light.Blue.xaml in App.xaml serves as a XAML designer fallback only.
+    /// </summary>
+    private static void ApplyFikaFinansTheme()
+    {
+        try
+        {
+            var accentColor = SystemParameters.WindowGlassColor;
+
+            // Fall back to Windows 11 default blue if transparent or black
+            if (accentColor.A == 0 || (accentColor.R == 0 && accentColor.G == 0 && accentColor.B == 0))
+                accentColor = (Color)ColorConverter.ConvertFromString("#0078D4")!;
+
+            var theme = RuntimeThemeGenerator.Current
+                .GenerateRuntimeTheme("Light", accentColor);
+
+            if (theme is null)
+            {
+                Logger.Warn("RuntimeThemeGenerator returned null, falling back to Light.Blue");
+                return;
+            }
+
+            ThemeManager.Current.ChangeTheme(System.Windows.Application.Current, theme);
+            Logger.Info("Applied FikaFinans theme with accent #{R:X2}{G:X2}{B:X2}",
+                accentColor.R, accentColor.G, accentColor.B);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "Failed to apply FikaFinans theme, falling back to Light.Blue");
+        }
+    }
+
+    private static void EnsureDefaultDirectories()
+    {
+        var appName  = typeof(App).Namespace!.Split('.')[0];
+        var docsBase = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), appName);
+
+        Directory.CreateDirectory(Path.Combine(docsBase, "inputs"));
+        Directory.CreateDirectory(Path.Combine(docsBase, "stepOutputs"));
+    }
+
     private static void WarnIfConfigurationIncomplete(IConfiguration configuration)
     {
         var missing = InfrastructureModule.FindMissingConfiguration(configuration);
@@ -105,12 +166,26 @@ public partial class App : System.Windows.Application
         var lines = missing.Select(m => $"• {m.Key}\n   {m.Hint}");
         var body =
             string.Join("\n\n", lines) +
-            "\n\nThe app will start, but model comparison will fail until these are set.";
+            "\n\nThe app will start, but LLM pipeline steps (03, 06, 07, 09) will fail until these are set.";
 
         TaskDialog.ShowWarning(
             owner: null,
             title: "FikaFinans",
             mainInstruction: "Configuration is missing",
             content: body);
+    }
+
+    private static void WarnIfModelsNotConfigured(IAppSettingsStore store)
+    {
+        var missing = InfrastructureModule.FindMissingModelConfiguration(store.Load());
+        if (missing is null) return;
+
+        Logger.Warn("Model configuration incomplete: {Key} — {Hint}", missing.Key, missing.Hint);
+
+        TaskDialog.ShowWarning(
+            owner: null,
+            title: "FikaFinans",
+            mainInstruction: "No model is configured",
+            content: $"{missing.Hint}\n\nThe app will start, but pipeline runs will fail until a model and its Foundry deployment name are saved.");
     }
 }

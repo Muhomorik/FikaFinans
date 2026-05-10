@@ -1,4 +1,6 @@
+using System.Reactive.Concurrency;
 using System.Reflection;
+using System.Windows.Threading;
 using Autofac;
 using Microsoft.Extensions.Configuration;
 
@@ -19,8 +21,18 @@ public class PresentationModule : Autofac.Module
 
     protected override void Load(ContainerBuilder builder)
     {
+        RegisterScheduler(builder);
         RegisterViewModels(builder);
         RegisterViews(builder);
+    }
+
+    private static void RegisterScheduler(ContainerBuilder builder)
+    {
+        // DispatcherScheduler wraps the WPF UI dispatcher so Rx pipelines can
+        // ObserveOn(_uiScheduler) to marshal updates back to the UI thread.
+        builder.Register(_ => new DispatcherScheduler(Dispatcher.CurrentDispatcher))
+            .As<IScheduler>()
+            .SingleInstance();
     }
 
     private static void RegisterViewModels(ContainerBuilder builder)

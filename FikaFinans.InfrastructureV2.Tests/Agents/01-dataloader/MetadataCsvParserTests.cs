@@ -1,7 +1,10 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using CsvHelper;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -11,7 +14,11 @@ public class MetadataCsvParserTests
     private IFixture _fixture = null!;
 
     [SetUp]
-    public void SetUp() => _fixture = new Fixture().Customize(new AutoMoqCustomization());
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
+    }
 
     [Test]
     public void Parse_TwoRows_ReturnsTwoRecordsWithAllFieldsPopulated()
@@ -28,7 +35,7 @@ public class MetadataCsvParserTests
         Assert.That(result, Has.Count.EqualTo(2));
         Assert.Multiple(() =>
         {
-            Assert.That(result[0].Isin, Is.EqualTo("LU0106252389"));
+            Assert.That(result[0].Isin.Value, Is.EqualTo("LU0106252389"));
             Assert.That(result[0].Name, Is.EqualTo("Schroder ISF Em Mkts A Acc USD"));
             Assert.That(result[0].IsIndexFund, Is.False);
             Assert.That(result[0].ManagedType, Is.EqualTo("ACTIVE"));

@@ -1,12 +1,14 @@
+using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.Identity;
-using FikaFinans.InfrastructureV2.Tests.Models.CatalystTagger;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
-using FikaFinans.InfrastructureV2.Tests.Models.SignalScorer;
+using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Application.Pipeline.Configs;
 using Microsoft.Extensions.Configuration;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.CatalystTagger;
@@ -108,7 +110,7 @@ public sealed class CatalystTaggerAgentIntegrationTests
         };
 
         var llm = new FoundryFundCatalystLlmClient(_projectClient, _modelId);
-        var sut = new CatalystTaggerAgent(llm);
+        var sut = new CatalystTaggerAgent(new TestPathsService(), llm);
 
         // Act
         var result = await sut.RunInMemoryAsync(input, macro);

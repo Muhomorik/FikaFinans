@@ -1,8 +1,12 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Application.Pipeline.Configs;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MetricsCalculator;
 
@@ -16,6 +20,7 @@ public class MetricsCalculatorAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
         _config = new MetricsCalculatorConfig();
     }
 
@@ -268,7 +273,7 @@ public class MetricsCalculatorAgentTests
         var step1Path = Paths.DataLoaderOutput("2026-W18", runId);
         if (!File.Exists(step1Path))
         {
-            new FikaFinans.InfrastructureV2.Tests.Agents.DataLoader.DataLoaderAgent().Run(
+            new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService()).Run(
                 "schroder", "2026-W18", runId);
         }
 

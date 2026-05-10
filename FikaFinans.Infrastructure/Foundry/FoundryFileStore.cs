@@ -11,7 +11,7 @@ namespace FikaFinans.Infrastructure.Foundry;
 /// <summary>
 /// Foundry-side file cache for the canonical fund-data files. Tracks
 /// <c>logicalName → (fileId, sourceMtime, sourceSize, uploadedAt)</c> in a JSON sidecar
-/// at <c>%APPDATA%\FikaFinans\foundry-files.json</c>. The sidecar is the source of
+/// at <c>%LOCALAPPDATA%\FikaFinans\foundry-files.json</c>. The sidecar is the source of
 /// truth for "what's currently uploaded."
 /// </summary>
 /// <remarks>
@@ -49,7 +49,7 @@ public sealed class FoundryFileStore : IFoundryFileStore
         _fileClient = projectClient.ProjectOpenAIClient.GetOpenAIFileClient();
         if (sidecarPath is null)
         {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             _sidecarPath = Path.Combine(appData, AppFolderName, SidecarFileName);
         }
         else

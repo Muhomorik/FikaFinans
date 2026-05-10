@@ -29,26 +29,6 @@ public sealed class StatusToBrushConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
-/// <summary>Maps <see cref="ModelRunStatus"/> to a foreground brush for the per-model header dot.</summary>
-public sealed class RunStatusToBrushConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        if (value is not ViewModels.ModelRunStatus status) return DependencyProperty.UnsetValue;
-        return status switch
-        {
-            ViewModels.ModelRunStatus.Idle => new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E)),
-            ViewModels.ModelRunStatus.Running => new SolidColorBrush(Color.FromRgb(0x2D, 0x9C, 0xDB)),
-            ViewModels.ModelRunStatus.Done => new SolidColorBrush(Color.FromRgb(0x27, 0xAE, 0x60)),
-            ViewModels.ModelRunStatus.Error => new SolidColorBrush(Color.FromRgb(0xC1, 0x39, 0x2B)),
-            _ => Brushes.Gray,
-        };
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => throw new NotSupportedException();
-}
-
 /// <summary>
 /// True → Visible, false → Collapsed. Pass <c>"Invert"</c> as <c>ConverterParameter</c>
 /// to flip the mapping (true → Collapsed).

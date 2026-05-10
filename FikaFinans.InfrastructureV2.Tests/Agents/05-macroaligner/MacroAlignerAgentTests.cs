@@ -1,10 +1,14 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
-using FikaFinans.InfrastructureV2.Tests.Models.SignalScorer;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Macro;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Application.Pipeline.Configs;
 using Moq;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MacroAligner;
@@ -21,6 +25,7 @@ public sealed class MacroAlignerAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
         _llmMock = _fixture.Freeze<Mock<IThemeAdjacencyLlmClient>>();
         _llmMock
             .Setup(x => x.ClassifyAsync(
@@ -436,7 +441,7 @@ public sealed class MacroAlignerAgentTests
         const string runId = "test-happypath";
         await EnsureMacroFixtureExistsAsync(runId);
 
-        var sut = new MacroAlignerAgent(_llmMock.Object);
+        var sut = new MacroAlignerAgent(new TestPathsService(), _llmMock.Object);
 
         // Act
         var result = await sut.RunAsync("2026-W18", runId);
@@ -476,13 +481,13 @@ public sealed class MacroAlignerAgentTests
                 var step1Path = Paths.DataLoaderOutput("2026-W18", runId);
                 if (!File.Exists(step1Path))
                 {
-                    new FikaFinans.InfrastructureV2.Tests.Agents.DataLoader.DataLoaderAgent()
+                    new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService())
                         .Run("schroder", "2026-W18", runId);
                 }
-                new FikaFinans.InfrastructureV2.Tests.Agents.MetricsCalculator.MetricsCalculatorAgent()
+                new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
                     .Run("2026-W18", runId);
             }
-            new FikaFinans.InfrastructureV2.Tests.Agents.SignalScorer.SignalScorerAgent()
+            new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
                 .Run("2026-W18", runId);
         }
 

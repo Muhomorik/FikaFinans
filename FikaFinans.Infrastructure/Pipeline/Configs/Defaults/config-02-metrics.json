@@ -1,0 +1,35 @@
+{
+  "_meta": {
+    "config_version": "1.0.0",
+    "consumed_by_step": "02-metricscalculator",
+    "matches_plan": "02-metricscalculator.md",
+    "notes": "Controls how MetricsCalculator selects and aggregates per-fund metrics. Most fields are about data-quality handling, since the heavy lifting is done at the producer."
+  },
+
+  "primary_sharpe_horizon_weeks": 12,
+  "_primary_sharpe_horizon_weeks_doc": "12w is the medium-term horizon used as the canonical Sharpe for buy/sell rules. 2w is too noisy; 1y is too slow.",
+
+  "min_bucket_days": 7,
+  "_min_bucket_days_doc": "Buckets shorter than this should already be dropped at the producer, but consumer also enforces.",
+
+  "drop_partial_buckets": true,
+
+  "stale_snapshot_warn_days": 14,
+  "_stale_snapshot_warn_days_doc": "Warn if snapshot's as_of_date is older than summary's latest period_end by more than this many days.",
+
+  "treat_nan_sharpe_as_zero_for_rules": true,
+  "_treat_nan_sharpe_as_zero_for_rules_doc": "When a Sharpe is NaN (e.g. producer's vol-guard fired), treat as 0 for buy/sell rule evaluation but record data_quality flag for conviction to penalize.",
+
+  "warn_on_buckets_total_lt": 3,
+
+  "fee_deduction_horizon_weeks": 12,
+  "_fee_deduction_horizon_weeks_doc": "Used for net_return_after_fee_12w_pct = return_12w_compound_pct - total_fee_pct * (12 / 52). Linear approximation; good enough for development.",
+
+  "data_quality_flags_enabled": [
+    "snapshot_missing",
+    "snapshot_stale_vs_summary",
+    "sharpe_2w_is_nan",
+    "sharpe_12w_is_nan",
+    "sharpe_1y_is_nan"
+  ]
+}

@@ -7,7 +7,7 @@ namespace FikaFinans.Application.Agents;
 /// </summary>
 /// <remarks>
 /// Today this is a hardcoded baseline. The roadmap is a header-menu editor that persists a
-/// custom prompt to <c>%APPDATA%\FikaFinans\</c> with a "reset to default" path back to
+/// custom prompt to <c>%LOCALAPPDATA%\FikaFinans\</c> with a "reset to default" path back to
 /// whatever this provider returns.
 /// </remarks>
 public interface IDefaultUserPromptProvider

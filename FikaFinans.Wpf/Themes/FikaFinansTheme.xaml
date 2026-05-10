@@ -1,0 +1,190 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!--
+        ═══════════════════════════════════════════════════════════════
+        FikaFinans Design Tokens (ff.*)
+        Fluent v2 token system for MahApps.Metro 2.4.11 / .NET 9.0
+
+        Based on FikaForecastTheme.xaml; topped up with:
+          • ff.OverlayBrush + ff.SplitterStyle from YieldRaccoonTheme.xaml
+          • Signals palette (ff.BuySignalBrush … ff.PreAnalysisBrush)
+        ff.ButtonDeleteIconStyle intentionally not included.
+        ═══════════════════════════════════════════════════════════════
+    -->
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Semantic Status Brushes
+        ───────────────────────────────────────────────────────────────
+    -->
+    <SolidColorBrush x:Key="ff.SuccessBrush"  Color="#2ECC71"/>
+    <SolidColorBrush x:Key="ff.WarningBrush"  Color="#F39C12"/>
+    <SolidColorBrush x:Key="ff.ErrorBrush"    Color="#E74C3C"/>
+    <SolidColorBrush x:Key="ff.InfoBrush"     Color="#3498DB"/>
+    <SolidColorBrush x:Key="ff.MutedBrush"    Color="#95A5A6"/>
+    <SolidColorBrush x:Key="ff.OverlayBrush"  Color="#44000000"/>
+
+    <!-- Warning banner (amber) -->
+    <SolidColorBrush x:Key="ff.WarningBackgroundBrush" Color="#FFF3CD"/>
+    <SolidColorBrush x:Key="ff.WarningBorderBrush"     Color="#FFECB5"/>
+    <SolidColorBrush x:Key="ff.WarningForegroundBrush" Color="#856404"/>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Signals Palette — step 9 / chart colors
+        Source: docs/signals-chart-spec.md
+        ───────────────────────────────────────────────────────────────
+    -->
+    <SolidColorBrush x:Key="ff.BuySignalBrush"    Color="#1F8A3D"/>
+    <SolidColorBrush x:Key="ff.SellSignalBrush"   Color="#C2362A"/>
+    <SolidColorBrush x:Key="ff.WatchBrush"        Color="#E08E1A"/>
+    <SolidColorBrush x:Key="ff.PassBrush"         Color="#7A7A7A"/>
+    <SolidColorBrush x:Key="ff.PreAnalysisBrush"  Color="#C9CCD0"/>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Spacing — Double tokens (4px grid)
+        ───────────────────────────────────────────────────────────────
+    -->
+    <sys:Double x:Key="ff.SpacingXS">4</sys:Double>
+    <sys:Double x:Key="ff.SpacingS">8</sys:Double>
+    <sys:Double x:Key="ff.SpacingM">12</sys:Double>
+    <sys:Double x:Key="ff.SpacingL">16</sys:Double>
+    <sys:Double x:Key="ff.SpacingXL">24</sys:Double>
+    <sys:Double x:Key="ff.PanelPadding">16</sys:Double>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Spacing — Thickness tokens (for XAML Margin / Padding bindings)
+        ───────────────────────────────────────────────────────────────
+    -->
+    <Thickness x:Key="ff.PanelPaddingThickness">16</Thickness>
+    <Thickness x:Key="ff.SectionSpacing">0,24,0,0</Thickness>
+    <Thickness x:Key="ff.SubsectionSpacing">0,16,0,0</Thickness>
+    <Thickness x:Key="ff.ItemSpacing">0,8,0,0</Thickness>
+    <Thickness x:Key="ff.LabelSpacing">0,0,0,8</Thickness>
+    <Thickness x:Key="ff.CompactSpacing">0,4,0,0</Thickness>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Typography — Fluent v2 type ramp
+        Font: Segoe UI Variable (via MahApps default)
+        ───────────────────────────────────────────────────────────────
+    -->
+    <Style x:Key="ff.TitleStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="ff.SubheaderStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="ff.BodyLargeStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="18"/>
+    </Style>
+
+    <Style x:Key="ff.BodyStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="14"/>
+    </Style>
+
+    <Style x:Key="ff.BodyStrongStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="ff.CaptionStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource MahApps.Brushes.Gray2}"/>
+    </Style>
+
+    <Style x:Key="ff.SmallStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource MahApps.Brushes.Gray3}"/>
+    </Style>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Elevation — Two-tier panel hierarchy
+        ───────────────────────────────────────────────────────────────
+    -->
+
+    <!-- Card level: top-level containers, panels, standalone cards -->
+    <Style x:Key="ff.PanelStyle" TargetType="Border">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background" Value="{StaticResource MahApps.Brushes.Gray10}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource MahApps.Brushes.Gray7}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect BlurRadius="8" Direction="270" ShadowDepth="2" Opacity="0.08" Color="Black"/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Control level: toolbars, nested containers, response previews -->
+    <Style x:Key="ff.PanelControlStyle" TargetType="Border">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Background" Value="{StaticResource MahApps.Brushes.Gray9}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource MahApps.Brushes.Gray7}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect BlurRadius="4" Direction="270" ShadowDepth="1" Opacity="0.04" Color="Black"/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Button Styles — Fluent v2 with 4px corner radius
+        ───────────────────────────────────────────────────────────────
+    -->
+    <Style x:Key="ff.ButtonAccentStyle" TargetType="Button"
+           BasedOn="{StaticResource MahApps.Styles.Button.Square.Accent}">
+        <Setter Property="mah:ControlsHelper.CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="24,8"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Style.Resources>
+            <SolidColorBrush x:Key="MahApps.Brushes.Button.ForegroundPointerOver" Color="White"/>
+            <SolidColorBrush x:Key="MahApps.Brushes.Button.ForegroundPressed" Color="White"/>
+        </Style.Resources>
+    </Style>
+
+    <Style x:Key="ff.ButtonStyle" TargetType="Button"
+           BasedOn="{StaticResource MahApps.Styles.Button.Square}">
+        <Setter Property="mah:ControlsHelper.CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="24,8"/>
+    </Style>
+
+    <Style x:Key="ff.ButtonFlatStyle" TargetType="Button"
+           BasedOn="{StaticResource MahApps.Styles.Button.Flat}">
+        <Setter Property="mah:ControlsHelper.CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="24,8"/>
+    </Style>
+
+    <!--
+        ───────────────────────────────────────────────────────────────
+        Splitter — 3px visual width; Gray8 at rest, Accent on hover
+        Hit target: 6px via GridSplitter layout
+        ───────────────────────────────────────────────────────────────
+    -->
+    <Style x:Key="ff.SplitterStyle" TargetType="GridSplitter">
+        <Setter Property="Background" Value="{StaticResource MahApps.Brushes.Gray8}"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Stretch"/>
+        <Setter Property="Width" Value="3"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource MahApps.Brushes.Accent}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+</ResourceDictionary>

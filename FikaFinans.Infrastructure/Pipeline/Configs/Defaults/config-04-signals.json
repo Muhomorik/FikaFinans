@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "config_version": "1.0.0",
+    "consumed_by_step": "04-signalscorer",
+    "matches_plan": "04-signalscorer.md",
+    "notes": "Rules that map per-fund metrics to a Signal label (Strength / Weakness / Forming / Neutral). Tightened sell rule (any-of three triggers) is the post-mortem fix for the Taiwan / China A / Glb Clmt Chg false-positive pattern."
+  },
+
+  "buy_strength": {
+    "min_positive_windows": 3,
+    "of_total_windows": 3,
+    "max_drawdown_pct": -1.0,
+    "min_sharpe_12w": 0.5,
+    "_doc": "All four conditions must hold. Drawdown is non-positive; -1.0 means 'no worse than -1%'."
+  },
+
+  "sell_weakness_any_of": [
+    {
+      "metric": "sharpe_2w",
+      "comparator": "lt",
+      "value": 0,
+      "_doc": "Recent 2-week Sharpe turned negative — fast change-detector"
+    },
+    {
+      "metric": "current_drawdown_pct",
+      "comparator": "lt",
+      "value": -1.5,
+      "_doc": "Fresh drawdown deeper than -1.5%"
+    },
+    {
+      "metric": "windows_positive_count",
+      "comparator": "le",
+      "value": 1,
+      "_doc": "Only one (or zero) of the last three buckets was positive"
+    }
+  ],
+
+  "watch_forming": {
+    "missing_one_buy_criterion": true,
+    "min_macro_alignment": "Strong",
+    "_doc": "Promotes a near-buy candidate to Watch (rather than Neutral) only when there is a Strong macro tailwind. Otherwise it stays Neutral."
+  },
+
+  "neutral": {
+    "_doc": "Default state when no rule fires. Includes funds with insufficient history (windows_total < 3) and conflicting signals."
+  },
+
+  "rule_fired_taxonomy": {
+    "buy_3of3_zero_dd": "All buy_strength criteria satisfied",
+    "sell_sharpe_negative": "sharpe_2w < 0 fired",
+    "sell_drawdown_breach": "current_drawdown_pct < -1.5 fired",
+    "sell_pos_le_1": "windows_positive_count <= 1 fired",
+    "sell_combined": "Two or more sell triggers fired (most decisive Weakness)",
+    "watch_partial_with_macro": "watch_forming criteria satisfied",
+    "neutral_default": "No rule fired",
+    "neutral_insufficient_history": "windows_total < 3",
+    "neutral_conflicting": "buy criteria met AND a sell trigger fired"
+  },
+
+  "data_quality_handling": {
+    "treat_nan_sharpe_as_zero": true,
+    "_doc": "If sharpe_2w is NaN (e.g. producer's vol-guard fired on near-zero vol), treat as 0 for rule evaluation. Conviction scoring downstream penalizes via the data_quality flag."
+  }
+}

@@ -1,21 +1,19 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Agents.CatalystTagger;
-using FikaFinans.InfrastructureV2.Tests.Agents.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Agents.Recommender;
-using FikaFinans.InfrastructureV2.Tests.Agents.ThesisValidator;
-using FikaFinans.InfrastructureV2.Tests.Agents.UniverseEnricher;
-using FikaFinans.InfrastructureV2.Tests.Models.CatalystTagger;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
-using FikaFinans.InfrastructureV2.Tests.Models.PortfolioConstructor;
-using FikaFinans.InfrastructureV2.Tests.Models.Recommender;
-using FikaFinans.InfrastructureV2.Tests.Models.SignalScorer;
-using FikaFinans.InfrastructureV2.Tests.Models.ThesisValidator;
-using FikaFinans.InfrastructureV2.Tests.Models.UniverseEnricher;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Application.Pipeline.Configs;
+using FikaFinans.Domain.Portfolio;
 using Moq;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.PortfolioConstructor;
@@ -31,7 +29,8 @@ public sealed class PortfolioConstructorAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
-        _sut     = new PortfolioConstructorAgent();
+        _fixture.Inject<IPathsService>(new TestPathsService());
+        _sut     = new PortfolioConstructorAgent(new TestPathsService());
     }
 
     #region Conversion + conviction gating
@@ -95,7 +94,7 @@ public sealed class PortfolioConstructorAgentTests
         {
             Assert.That(result.Trades.Count(t => t.TradeType is TradeType.Sell), Is.Zero);
             Assert.That(result.RejectedRecommendations, Has.Count.EqualTo(1));
-            Assert.That(result.RejectedRecommendations[0].Isin, Is.EqualTo("LU01"));
+            Assert.That(result.RejectedRecommendations[0].Isin.Value, Is.EqualTo("LU01"));
             Assert.That(result.RejectedRecommendations[0].RejectedBecause, Does.Contain("conviction_below_floor"));
         });
     }
@@ -160,7 +159,7 @@ public sealed class PortfolioConstructorAgentTests
                 SkipBuyBelowConviction = 0.30m,
             },
         };
-        var sut = new PortfolioConstructorAgent(config);
+        var sut = new PortfolioConstructorAgent(new TestPathsService(), config);
         var sell = MakeFund("LU04",
             recommendation: Recommendation.ThesisExit, signal: SignalLabel.Weakness,
             thesis: ThesisValidity.Partial, macro: MacroAlignment.Strong,
@@ -296,7 +295,7 @@ public sealed class PortfolioConstructorAgentTests
                 MinTradeKr                = 5_000m,
             },
         };
-        var sut = new PortfolioConstructorAgent(config);
+        var sut = new PortfolioConstructorAgent(new TestPathsService(), config);
 
         var sell = MakeFund("LU0RSELL",
             recommendation: Recommendation.ThesisExit, signal: SignalLabel.Weakness,
@@ -485,7 +484,7 @@ public sealed class PortfolioConstructorAgentTests
                 },
             },
         };
-        var sut = new PortfolioConstructorAgent(config);
+        var sut = new PortfolioConstructorAgent(new TestPathsService(), config);
 
         var buy = MakeFund("LU0CBUY",
             recommendation: Recommendation.MomentumEntry, signal: SignalLabel.Strength,
@@ -522,7 +521,7 @@ public sealed class PortfolioConstructorAgentTests
         };
 
         // Act + Assert
-        Assert.That(() => new PortfolioConstructorAgent(bad),
+        Assert.That(() => new PortfolioConstructorAgent(new TestPathsService(), bad),
             Throws.TypeOf<InvalidDataException>());
     }
 
@@ -593,17 +592,17 @@ public sealed class PortfolioConstructorAgentTests
 
         if (!File.Exists(step1Path))
         {
-            new FikaFinans.InfrastructureV2.Tests.Agents.DataLoader.DataLoaderAgent()
+            new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService())
                 .Run("schroder", "2026-W18", runId);
         }
         if (!File.Exists(step2Path))
         {
-            new FikaFinans.InfrastructureV2.Tests.Agents.MetricsCalculator.MetricsCalculatorAgent()
+            new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
                 .Run("2026-W18", runId);
         }
         if (!File.Exists(step4Path))
         {
-            new FikaFinans.InfrastructureV2.Tests.Agents.SignalScorer.SignalScorerAgent()
+            new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
                 .Run("2026-W18", runId);
         }
         if (!File.Exists(step3Path))
@@ -621,7 +620,7 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<IReadOnlyList<RotationTheme>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ThemeAdjacencyVerdict.NoneVerdict);
-            new MacroAlignerAgent(alignLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
         }
         if (!File.Exists(step6Path))
         {
@@ -632,7 +631,7 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<IReadOnlyList<Catalyst>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Array.Empty<CatalystExposureClassification>());
-            new CatalystTaggerAgent(taggerLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
         }
         if (!File.Exists(step7Path))
         {
@@ -644,11 +643,11 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync((FundRecord _, ThesisValidity baseline, CancellationToken _) =>
                     ThesisRefinementVerdict.ConfirmBaseline(baseline, "Cascade-stub LLM confirmation."));
-            new ThesisValidatorAgent(thesisLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new ThesisValidatorAgent(new TestPathsService(), thesisLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
         }
         if (!File.Exists(step8Path))
         {
-            new RecommenderAgent().Run("2026-W18", runId);
+            new RecommenderAgent(new TestPathsService()).Run("2026-W18", runId);
         }
 
         var diffLlm = new Mock<IDifferentiatorLlmClient>();
@@ -661,7 +660,7 @@ public sealed class PortfolioConstructorAgentTests
                     Isin           = a.Isin,
                     Differentiator = $"Stub differentiator for {a.Metadata.Name}.",
                 }).ToArray());
-        new UniverseEnricherAgent(diffLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+        new UniverseEnricherAgent(new TestPathsService(), diffLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
     }
 
     private static MacroContext MakeSyntheticMacroContext(string isoWeek) => new()

@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="FikaFinans.Wpf.Views.Charts.NavSparkline"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF"
+    xmlns:lvcsk="clr-namespace:LiveChartsCore.SkiaSharpView;assembly=LiveChartsCore.SkiaSharpView"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    d:DesignHeight="60"
+    d:DesignWidth="200"
+    mc:Ignorable="d">
+
+    <lvc:CartesianChart
+        x:Name="SparkChart"
+        Series="{Binding Series, RelativeSource={RelativeSource AncestorType=UserControl}}"
+        DrawMarginFrame="False"
+        AnimationsSpeed="0:0:0">
+        <lvc:CartesianChart.XAxes>
+            <lvcsk:Axis IsVisible="False"/>
+        </lvc:CartesianChart.XAxes>
+        <lvc:CartesianChart.YAxes>
+            <lvcsk:Axis IsVisible="False"/>
+        </lvc:CartesianChart.YAxes>
+    </lvc:CartesianChart>
+</UserControl>

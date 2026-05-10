@@ -17,7 +17,10 @@
     <PackageReference Include="Azure.AI.Projects" Version="2.0.1" />
     <PackageReference Include="Azure.AI.Projects.Agents" Version="2.0.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="CsvHelper" Version="33.0.1" />
+    <PackageReference Include="FluentResults" Version="4.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="6.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
     <PackageReference Include="NLog" Version="6.0.7" />
     <PackageReference Include="System.Reactive" Version="6.1.0" />
   </ItemGroup>
@@ -29,6 +32,17 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\Docs\prompt_analytics.md" Link="Prompts\fund_analytics.prompt.md" />
+    <!-- MacroAnalyst default prompts — extracted to Documents\{AppName}\Agents\03-macroanalyst\Prompts\ on first run.
+         Edit the copies in Documents to customise; use "Reset to defaults" in Settings to re-extract these originals. -->
+    <EmbeddedResource Include="Pipeline\Agents\MacroAnalyst\Prompts\system.md" LogicalName="Defaults.Prompts.MacroAnalyst.system.md" />
+    <EmbeddedResource Include="Pipeline\Agents\MacroAnalyst\Prompts\user-template.md" LogicalName="Defaults.Prompts.MacroAnalyst.user-template.md" />
+    <EmbeddedResource Include="Pipeline\Agents\MacroAnalyst\Prompts\retry.md" LogicalName="Defaults.Prompts.MacroAnalyst.retry.md" />
+
+    <!-- Pipeline config defaults — extracted to the inputs folder on first run if absent. -->
+    <EmbeddedResource Include="Pipeline\Configs\Defaults\config-02-metrics.json" LogicalName="Defaults.Configs.config-02-metrics.json" />
+    <EmbeddedResource Include="Pipeline\Configs\Defaults\config-04-signals.json" LogicalName="Defaults.Configs.config-04-signals.json" />
+    <EmbeddedResource Include="Pipeline\Configs\Defaults\config-09-conviction.json" LogicalName="Defaults.Configs.config-09-conviction.json" />
+    <EmbeddedResource Include="Pipeline\Configs\Defaults\config-10-portfolio.json" LogicalName="Defaults.Configs.config-10-portfolio.json" />
   </ItemGroup>
 
 </Project>

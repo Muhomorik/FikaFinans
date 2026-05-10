@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "config_version": "1.0.0",
+    "consumed_by_step": "10-portfolioconstructor",
+    "matches_plan": "10-portfolioconstructor.md",
+    "notes": "Cash policy, position constraints, and conviction-gating guards. PortfolioConstructor is the ONLY agent that knows about portfolio state. Macro override defaults off based on backtest finding (-1.3 to -2.1% drag against +32.7% portfolio return on test universe)."
+  },
+
+  "cash_policy": {
+    "floor_pct": 0.05,
+    "_floor_pct_doc": "Minimum cash reserve as % of total portfolio value. Always enforced. 5% provides operational dry powder without meaningful drag.",
+
+    "macro_override_enabled": false,
+    "_macro_override_enabled_doc": "When true, raises floor based on macro_regime (see macro_override_table). Defaults off — backtest showed it loses money on bull regimes because regime tags fire AFTER drawdowns.",
+
+    "macro_override_table": {
+      "Crisis": 0.15,
+      "Stagflation": 0.10,
+      "Mixed": 0.07,
+      "Risk-on": 0.05
+    },
+    "_macro_override_table_doc": "Only applied when macro_override_enabled = true. Re-enable when there is multi-year backtest evidence including a real bear cycle."
+  },
+
+  "constraints": {
+    "max_position_pct_of_portfolio": 0.10,
+    "_max_position_pct_of_portfolio_doc": "Single fund cannot exceed 10% of total portfolio value. Triggers Trim when held position drifts past this.",
+
+    "max_sector_pct_of_portfolio": 0.30,
+    "_max_sector_pct_of_portfolio_doc": "All funds sharing a metadata.category cannot exceed 30% combined. Refuses Buys that would breach this.",
+
+    "min_trade_kr": 5000,
+    "_min_trade_kr_doc": "Trades smaller than 5,000 kr are dropped to avoid uneconomic micro-allocations after conviction-rank scaling."
+  },
+
+  "guards": {
+    "skip_sell_below_conviction": 0.40,
+    "_skip_sell_below_conviction_doc": "Sells with conviction < 0.40 are NOT executed unless thesis_validity = Invalid. Defense-in-depth against the false-positive sell pattern (Taiwan / China A / Glb Clmt Chg with strong metrics).",
+
+    "skip_sell_below_conviction_unless_thesis_invalid": true,
+    "_skip_sell_below_conviction_unless_thesis_invalid_doc": "Override the conviction floor for sells when thesis is Invalid (e.g. catalyst broke). These are decisive exits regardless of conviction.",
+
+    "skip_buy_below_conviction": 0.30,
+    "_skip_buy_below_conviction_doc": "Buys with conviction < 0.30 are not executed. Lower threshold than sells — buys are reversible (you can always sell)."
+  },
+
+  "sizing": {
+    "scale_buys_by_conviction_rank": true,
+    "_scale_buys_by_conviction_rank_doc": "When sum(buys) > deployable cash, scale all buys proportionally by descending conviction. Highest-conviction buy keeps closest to its requested amount.",
+
+    "smallest_first_when_shrinking": false,
+    "_smallest_first_when_shrinking_doc": "If true, shrink the smallest (lowest-rank) buys to zero first. If false (default), proportional scaling.",
+
+    "drop_buy_if_falls_below_min_trade": true,
+    "_drop_buy_if_falls_below_min_trade_doc": "After scaling, any buy below min_trade_kr is dropped entirely, freeing cash for the remaining buys."
+  },
+
+  "rotation_pair_handling": {
+    "execute_atomically_if_possible": true,
+    "_execute_atomically_if_possible_doc": "When a Sell + Buy share rotation_pair_id, prefer to execute both legs together. Sell proceeds fund the Buy.",
+
+    "if_one_leg_fails": "execute_other_leg_alone_and_flag_constraint_violation",
+    "_if_one_leg_fails_doc": "If one leg can't execute (e.g. Buy half breaches concentration cap), execute the other leg alone and surface as constraint_violations entry. Don't cancel both."
+  },
+
+  "default_buy_target_pct": 0.05,
+  "_default_buy_target_pct_doc": "When step 6 doesn't specify a recommended_weight, use 5% of deployable per Buy. Will be overridden by conviction-based scaling when buys compete for cash."
+}

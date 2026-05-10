@@ -1,7 +1,11 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -19,7 +23,11 @@ public class DataLoaderAgentTests
     private IFixture _fixture = null!;
 
     [SetUp]
-    public void SetUp() => _fixture = new Fixture().Customize(new AutoMoqCustomization());
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
+    }
 
     // ─── #1. Happy path: real fixtures via Paths.cs ─────────────────────────
     [Test]
@@ -195,7 +203,7 @@ public class DataLoaderAgentTests
         {
             Assert.That(result.Funds.Any(f => f.Isin == "LU0000000002"), Is.False, "writeoff fund excluded from funds[]");
             Assert.That(result.FrozenPositions, Has.Count.EqualTo(1));
-            Assert.That(result.FrozenPositions[0].Isin, Is.EqualTo("LU0000000002"));
+            Assert.That(result.FrozenPositions[0].Isin?.Value, Is.EqualTo("LU0000000002"));
             Assert.That(result.FrozenPositions[0].CurrentValueKr, Is.EqualTo(5000m));
             Assert.That(result.FrozenPositions[0].CostBasisKr, Is.EqualTo(4000m));
             Assert.That(result.DataQuality.WriteoffCount, Is.EqualTo(1));

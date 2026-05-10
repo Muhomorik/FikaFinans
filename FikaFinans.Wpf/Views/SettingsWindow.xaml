@@ -3,106 +3,420 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:dxmvvm="http://schemas.devexpress.com/winfx/2008/xaml/mvvm"
     xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+    xmlns:mahShared="http://metro.mahapps.com/winfx/xaml/shared"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:viewModels="clr-namespace:FikaFinans.Wpf.ViewModels"
-    Title="FikaFinans — Settings"
-    Width="640"
-    Height="420"
-    d:DataContext="{d:DesignInstance Type=viewModels:SettingsViewModel,
-                                     IsDesignTimeCreatable=True}"
-    ResizeMode="NoResize"
+    Title="Settings — FikaFinans"
+    Width="680"
+    Height="520"
+    MinWidth="560"
+    d:DataContext="{d:DesignInstance Type=viewModels:SettingsViewModel, IsDesignTimeCreatable=True}"
     ShowInTaskbar="False"
     WindowStartupLocation="CenterOwner"
     mc:Ignorable="d">
-    <Grid Margin="20">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
 
-        <TextBlock
-            Grid.Row="0"
-            Margin="0,0,0,10"
-            FontSize="14"
-            Text="Data folder — where the canonical fund-data files live (summary.csv, metadata.csv, positions.csv, portfolio_structure.md, analytics-rotation-targets.md, analytics-substitution-chain.md, analytics-weekly-summary.md)."
-            TextWrapping="Wrap" />
+    <mah:MetroWindow.Resources>
+        <DataTemplate x:Key="ff.TabHeaderWithIcon">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding Tag, RelativeSource={RelativeSource AncestorType=TabItem}}"
+                           FontFamily="Segoe Fluent Icons"
+                           FontSize="20"
+                           Margin="0,0,8,0"
+                           VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding}" VerticalAlignment="Center"/>
+            </StackPanel>
+        </DataTemplate>
+    </mah:MetroWindow.Resources>
 
-        <Grid Grid.Row="1" Margin="0,0,0,8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBox
-                Grid.Column="0"
-                Margin="0,0,8,0"
-                VerticalContentAlignment="Center"
-                Text="{Binding DataFolder, UpdateSourceTrigger=PropertyChanged}" />
-            <Button
-                Grid.Column="1"
-                Padding="14,4"
-                Command="{Binding BrowseCommand}"
-                Content="Browse…" />
-        </Grid>
+    <dxmvvm:Interaction.Behaviors>
+        <dxmvvm:CurrentWindowService ClosingCommand="{Binding WindowClosingCommand}" />
+    </dxmvvm:Interaction.Behaviors>
 
-        <StackPanel Grid.Row="2" Margin="0,0,0,10">
-            <TextBlock
-                FontSize="11"
-                Opacity="0.7"
-                Text="Settings file:" />
-            <TextBox
-                Padding="0"
-                Background="Transparent"
-                BorderThickness="0"
-                FontFamily="Consolas"
-                FontSize="11"
-                IsReadOnly="True"
-                IsReadOnlyCaretVisible="False"
-                Opacity="0.85"
-                Text="{Binding SettingsFilePath, Mode=OneWay}" />
-            <TextBlock
-                Margin="0,8,0,0"
-                FontSize="11"
-                Opacity="0.7"
-                Text="Foundry uploads sidecar:" />
-            <TextBox
-                Padding="0"
-                Background="Transparent"
-                BorderThickness="0"
-                FontFamily="Consolas"
-                FontSize="11"
-                IsReadOnly="True"
-                IsReadOnlyCaretVisible="False"
-                Opacity="0.85"
-                Text="{Binding FoundryFilesPath, Mode=OneWay}" />
-        </StackPanel>
+    <DockPanel Margin="16">
 
-        <TextBlock
-            Grid.Row="3"
-            VerticalAlignment="Top"
-            Foreground="{DynamicResource MahApps.Brushes.Accent}"
-            Text="{Binding ValidationMessage}"
-            TextWrapping="Wrap" />
+        <Border DockPanel.Dock="Bottom" Margin="0,8,0,0">
+            <StackPanel>
+                <TextBlock Text="{Binding SettingsFilePath, StringFormat='Settings file: {0}'}"
+                           Style="{StaticResource ff.SmallStyle}"
+                           TextTrimming="CharacterEllipsis"
+                           Cursor="Hand"
+                           ToolTip="Double-click to open in Explorer">
+                    <TextBlock.InputBindings>
+                        <MouseBinding MouseAction="LeftDoubleClick"
+                                      Command="{Binding OpenSettingsLocationCommand}"/>
+                    </TextBlock.InputBindings>
+                </TextBlock>
 
-        <StackPanel
-            Grid.Row="4"
-            HorizontalAlignment="Right"
-            Orientation="Horizontal">
-            <Button
-                MinWidth="90"
-                Margin="0,0,8,0"
-                Command="{Binding CancelCommand}"
-                Content="Cancel"
-                IsCancel="True" />
-            <Button
-                MinWidth="90"
-                Command="{Binding SaveCommand}"
-                Content="Save"
-                IsDefault="True"
-                Style="{DynamicResource MahApps.Styles.Button.Square.Accent}" />
-        </StackPanel>
-    </Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Command="{Binding ResetCommand}"
+                            Style="{StaticResource ff.ButtonFlatStyle}"
+                            Padding="16,6"
+                            Content="Reset"/>
+                    <Button Command="{Binding CancelCommand}"
+                            Style="{StaticResource ff.ButtonStyle}"
+                            Padding="16,6"
+                            Margin="8,0,0,0"
+                            Content="Cancel"/>
+                    <Button Command="{Binding SaveCommand}"
+                            Style="{StaticResource ff.ButtonAccentStyle}"
+                            Padding="16,6"
+                            Margin="8,0,0,0"
+                            Content="Save"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <TabControl>
+
+            <TabItem Header="Database"
+                     Tag="&#xE7DE;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" MaxWidth="500">
+
+                        <TextBlock Text="Database provider"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.LabelSpacing}"/>
+                        <ComboBox ItemsSource="{Binding DbProviders}"
+                                  SelectedItem="{Binding DbProvider}"
+                                  mah:ControlsHelper.CornerRadius="4"/>
+
+                        <TextBlock Text="Database location"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding DbPath, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:TextBoxHelper.Watermark="Leave empty for InMemory"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseDatabaseLocationCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                        <TextBlock Text="Backend API URL"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Backend API URL"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding BackendApiUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Text="Backend API key"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Backend API key"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding BackendApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Models"
+                     Tag="&#xE99A;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" MaxWidth="500">
+
+                        <TextBlock Text="Selected model"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.LabelSpacing}"/>
+                        <ComboBox ItemsSource="{Binding Deployments}"
+                                  DisplayMemberPath="ModelId"
+                                  SelectedValuePath="ModelId"
+                                  SelectedValue="{Binding SelectedModelId}"
+                                  mah:ControlsHelper.CornerRadius="4"/>
+
+                        <Grid Margin="{StaticResource ff.SectionSpacing}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0"
+                                       Text="Configured deployments"
+                                       Style="{StaticResource ff.SubheaderStyle}"/>
+                            <Button Grid.Row="0"
+                                    HorizontalAlignment="Right"
+                                    Content="Add model"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Command="{Binding AddModelCommand}"/>
+                            <ItemsControl Grid.Row="1" ItemsSource="{Binding Deployments}" Margin="0,8,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0"
+                                                     Text="{Binding ModelId, UpdateSourceTrigger=PropertyChanged}"
+                                                     mah:TextBoxHelper.Watermark="Model name"
+                                                     mah:ControlsHelper.CornerRadius="4"/>
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding DeploymentName, UpdateSourceTrigger=PropertyChanged}"
+                                                     mah:TextBoxHelper.Watermark="Azure deployment name"
+                                                     mah:ControlsHelper.CornerRadius="4"/>
+                                            <Button Grid.Column="4"
+                                                    Content="Remove"
+                                                    Style="{StaticResource ff.ButtonFlatStyle}"
+                                                    Padding="12,4"
+                                                    Command="{Binding DataContext.RemoveModelCommand, RelativeSource={RelativeSource AncestorType=mah:MetroWindow}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+
+                        <TextBlock Text="Foundry endpoint"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Foundry endpoint URL"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding FoundryEndpoint, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Text="Foundry API key"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Foundry API key"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding FoundryApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Text="Bing Grounding key (optional)"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Bing Grounding key"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding BingGroundingKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Folders"
+                     Tag="&#xE8B7;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" MaxWidth="560">
+
+                        <TextBlock Text="YieldRaccoon CSV inputs"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.LabelSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding YieldRaccoonInputs, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseInputsCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                        <TextBlock Text="Analytics JSON"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding AnalyticsJson, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseAnalyticsJsonCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                        <TextBlock Text="Step outputs"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding StepOutputs, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseOutputsCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                        <TextBlock Text="Examples (optional)"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding Examples, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseExamplesCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Schedules"
+                     Tag="&#xE787;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" MaxWidth="500">
+
+                        <TextBlock Text="Daily auto-run pipeline"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.LabelSpacing}"/>
+                        <mah:ToggleSwitch IsOn="{Binding DailyAutoRunEnabled}"
+                                          OffContent=""
+                                          OnContent=""
+                                          Margin="{StaticResource ff.CompactSpacing}"/>
+                        <Grid Margin="{StaticResource ff.CompactSpacing}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Time:" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+                            <mah:TimePicker Grid.Column="1"
+                                            SelectedDateTime="{Binding DailyAutoRunTime, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Culture="en-GB"
+                                            SelectedTimeFormat="Short"
+                                            PickerVisibility="HourMinute"
+                                            mah:ControlsHelper.CornerRadius="4"/>
+                        </Grid>
+                        <CheckBox Content="Pass --auto-list flag"
+                                  IsChecked="{Binding DailyPassAutoList}"
+                                  Margin="{StaticResource ff.CompactSpacing}"/>
+
+                        <TextBlock Text="Weekly export"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <mah:ToggleSwitch IsOn="{Binding WeeklyExportEnabled}"
+                                          OffContent=""
+                                          OnContent=""
+                                          Margin="{StaticResource ff.CompactSpacing}"/>
+                        <Grid Margin="{StaticResource ff.CompactSpacing}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Day:" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Row="0" Grid.Column="1"
+                                      ItemsSource="{Binding DaysOfWeek}"
+                                      SelectedItem="{Binding WeeklyExportDayOfWeek}"
+                                      mah:ControlsHelper.CornerRadius="4"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Time:" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+                            <mah:TimePicker Grid.Row="2" Grid.Column="1"
+                                            SelectedDateTime="{Binding WeeklyExportTime, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Culture="en-GB"
+                                            SelectedTimeFormat="Short"
+                                            PickerVisibility="HourMinute"
+                                            mah:ControlsHelper.CornerRadius="4"/>
+                        </Grid>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Pipeline configs"
+                     Tag="&#xE713;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <StackPanel Margin="16">
+                    <TextBlock Text="Edit the four pipeline configuration files. Changes take effect on the next run."
+                               Style="{StaticResource ff.SmallStyle}"
+                               TextWrapping="Wrap"
+                               Margin="{StaticResource ff.LabelSpacing}"/>
+
+                    <!-- Config list — wired to IConfigEditorDialogService in TODO 15 -->
+                    <Border Style="{StaticResource ff.PanelControlStyle}" Padding="8">
+                        <StackPanel>
+                            <TextBlock Text="config-02-metrics.json" Style="{StaticResource ff.BodyStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                            <TextBlock Text="config-04-signals.json" Style="{StaticResource ff.BodyStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                            <TextBlock Text="config-09-conviction.json" Style="{StaticResource ff.BodyStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                            <TextBlock Text="config-10-portfolio.json" Style="{StaticResource ff.BodyStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Use the 'Edit config…' button on each step tab to edit these files."
+                               Style="{StaticResource ff.SmallStyle}"
+                               Margin="{StaticResource ff.SubsectionSpacing}"
+                               Foreground="{StaticResource MahApps.Brushes.Gray3}"/>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Sync"
+                     Tag="&#xE895;"
+                     HeaderTemplate="{StaticResource ff.TabHeaderWithIcon}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16" MaxWidth="500">
+
+                        <TextBlock Text="Sync base URL"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.LabelSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Sync base URL"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding SyncBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Text="Auth token"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <PasswordBox Style="{StaticResource MahApps.Styles.PasswordBox.Win8}"
+                                     mah:TextBoxHelper.Watermark="Auth token"
+                                     mah:ControlsHelper.CornerRadius="4"
+                                     mahShared:PasswordBoxBindingBehavior.Password="{Binding SyncAuthToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
 </mah:MetroWindow>

@@ -1,13 +1,18 @@
 using Autofac;
+using FikaFinans.Wpf.Services;
 
 namespace FikaFinans.Wpf.Modules;
 
-/// <summary>
-/// Registers Application layer services. Empty for now — fill in as services are added.
-/// </summary>
 public class ApplicationModule : Module
 {
     protected override void Load(ContainerBuilder builder)
     {
+        builder.RegisterType<ConfigEditorDialogService>()
+            .As<IConfigEditorDialogService>()
+            .SingleInstance();
+
+        builder.RegisterType<FundDetailDialogService>()
+            .As<IFundDetailDialogService>()
+            .SingleInstance();
     }
 }

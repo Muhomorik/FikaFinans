@@ -10,8 +10,11 @@
                 <ResourceDictionary Source="pack://application:,,,/MahApps.Metro;component/Styles/Controls.xaml" />
                 <ResourceDictionary Source="pack://application:,,,/MahApps.Metro;component/Styles/Fonts.xaml" />
 
-                <!--  MahApps.Metro theme (Light Blue)  -->
+                <!--  MahApps.Metro theme — XAML designer fallback only; overridden at runtime via RuntimeThemeGenerator  -->
                 <ResourceDictionary Source="pack://application:,,,/MahApps.Metro;component/Styles/Themes/Light.Blue.xaml" />
+
+                <!--  FikaFinans design tokens (ff.*) — signals palette, spacing, elevation, typography  -->
+                <ResourceDictionary Source="pack://application:,,,/FikaFinans.Wpf;component/Themes/FikaFinansTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

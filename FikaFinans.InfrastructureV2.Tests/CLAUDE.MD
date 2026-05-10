@@ -6,15 +6,14 @@
 
 ## What this project is
 
-A **greenfield, TDD-only sandbox** for completely new infrastructure features.
-It is *not* a V2 rewrite of [FikaFinans.Infrastructure](../FikaFinans.Infrastructure/) —
-it is a clean room where new ideas get written test-first, in isolation, before
-they ever earn a place in the main projects.
+The **canonical Infrastructure test project** for FikaFinans. It tests the
+10-agent fund-rotation pipeline that lives in [FikaFinans.Infrastructure](../FikaFinans.Infrastructure/)
+and the domain/application contracts in [FikaFinans.Domain](../FikaFinans.Domain/)
+and [FikaFinans.Application](../FikaFinans.Application/).
 
-The current focus is the **fund-rotation pipeline** — 10 agents (01 → 10) that
-turn weekly fund data and macro narrative into executable trade decisions. The
-navigator below is auto-loaded into every session; deeper specs are read on
-demand.
+The pipeline turns weekly fund data and macro narrative into executable trade
+decisions across 10 agents (01 → 10). The navigator below is auto-loaded into
+every session; deeper specs are read on demand.
 
 @docs/instructions.md
 
@@ -56,31 +55,16 @@ demand.
 
 ## 🚦 Hard rules
 
-1. **New functionality only.** Nothing in here should reproduce, port, or extend
-   code that already lives in [FikaFinans.Infrastructure](../FikaFinans.Infrastructure/)
-   or [FikaFinans.Infrastructure.Tests](../FikaFinans.Infrastructure.Tests/).
-   If a feature already has a home, work there instead.
-2. **Stay isolated.** No edits to other FikaFinans projects (`Domain`,
-   `Application`, `Infrastructure`, `Wpf`, or their test projects), and no
-   `<ProjectReference>` to them either. If you need a class from an existing
-   project, **copy it locally** into this project (with a comment noting the
-   source) rather than referencing it. This project must compile and pass even
-   if every other project in the solution were deleted from the working tree.
+1. **Test Infrastructure types directly.** This project references
+   `FikaFinans.Domain`, `FikaFinans.Application`, and `FikaFinans.Infrastructure`
+   as `<ProjectReference>`s — use their types directly, never copy them locally.
+2. **Test fixtures stay local.** Hardcoded fixture data (CSV inputs, JSON
+   examples) and the `[CallerFilePath]`-based `Paths.cs` stay in this project.
+   Production code uses `IPathsService` from Application instead.
 3. **TDD always.** Write the failing test first, watch it go red, *then* write
-   the production code (which also lives in this project for now) to turn it
-   green. No "I'll add tests later."
+   the production code in Infrastructure to turn it green. No "I'll add tests later."
 
-## 📚 Reference implementation
-
-When tooling, fixtures, AutoFixture/AutoMoq wiring, user-secrets, or NUnit
-conventions are unclear, check
-[FikaFinans.Infrastructure.Tests.csproj](../FikaFinans.Infrastructure.Tests/FikaFinans.Infrastructure.Tests.csproj)
-and the test base classes in that project (e.g.
-[FundPipelineSandboxTestBase.cs](../FikaFinans.Infrastructure.Tests/FundPipelineSandbox/Tests/FundPipelineSandboxTestBase.cs)) —
-they are the **known-good reference** for how this stack likes to be set up.
-Mirror their patterns; do not reference them.
-
-Notable conventions worth copying when you get there:
+## 📚 Tooling conventions
 
 - **.NET 9** target, **NUnit 4.x**, NUnit.Analyzers 4.x.
 - **AutoFixture + AutoFixture.AutoMoq + Moq** for SUT resolution

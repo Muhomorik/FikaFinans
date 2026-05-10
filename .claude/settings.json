@@ -1,3 +1,15 @@
 {
+  "permissions": {
+    "allow": [
+      "Skill(dotnet-domain-driven-design)",
+      "Skill(dotnet-domain-driven-design:*)",
+      "Skill(wpf-fluent-design)",
+      "Skill(wpf-fluent-design:*)",
+      "Skill(dotnet-wpf-mvvm)",
+      "Skill(dotnet-wpf-mvvm:*)",
+      "Skill(dotnet-unit-testing-nunit)",
+      "Skill(dotnet-unit-testing-nunit:*)"
+    ]
+  },
   "enableAllProjectMcpServers": true
 }

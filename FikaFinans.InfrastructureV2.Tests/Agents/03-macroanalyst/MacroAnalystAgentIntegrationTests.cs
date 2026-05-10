@@ -1,10 +1,15 @@
+using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.Identity;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Domain.Macro;
 using Microsoft.Extensions.Configuration;
-using DataLoaderJsonOptions = FikaFinans.InfrastructureV2.Tests.Models.DataLoader.JsonOptions;
+using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOptions;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MacroAnalyst;
 
@@ -63,7 +68,7 @@ public sealed class MacroAnalystAgentIntegrationTests
         var dl = MakeSyntheticDataLoaderOutput(summary.PeriodIsoWeek);
 
         var llm = new FoundryMacroLlmClient(_projectClient, _modelId);
-        var sut = new MacroAnalystAgent(llm);
+        var sut = new MacroAnalystAgent(new TestPathsService(), llm);
 
         var ctx = await sut.RunInMemoryAsync(summary, chain, targets, dl, summary.PeriodIsoWeek);
 

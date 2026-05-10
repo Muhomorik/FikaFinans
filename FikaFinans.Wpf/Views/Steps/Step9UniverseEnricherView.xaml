@@ -1,0 +1,161 @@
+<UserControl
+    x:Class="FikaFinans.Wpf.Views.Steps.Step9UniverseEnricherView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:charts="clr-namespace:FikaFinans.Wpf.Views.Charts"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:steps="clr-namespace:FikaFinans.Wpf.ViewModels.Steps"
+    d:DataContext="{d:DesignInstance Type=steps:Step9UniverseEnricherViewModel, IsDesignTimeCreatable=True}"
+    d:DesignHeight="600"
+    d:DesignWidth="1048"
+    mc:Ignorable="d">
+
+    <DockPanel Margin="16">
+
+        <!-- ── Header row ───────────────────────────────────────────── -->
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{Binding HeaderText}"
+                       Style="{StaticResource ff.TitleStyle}"
+                       VerticalAlignment="Center"/>
+
+            <Button Grid.Column="1"
+                    Command="{Binding EditConfigCommand}"
+                    Style="{StaticResource ff.ButtonFlatStyle}"
+                    Padding="12,4"
+                    Content="Edit config…"/>
+
+            <Button Grid.Column="3"
+                    Command="{Binding RunStepCommand}"
+                    Style="{StaticResource ff.ButtonAccentStyle}"
+                    Padding="16,4">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE768;"
+                               FontFamily="Segoe Fluent Icons"
+                               FontSize="14"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text=" Run step" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- ── Error / log (collapsible, bottom) ───────────────────── -->
+        <Border DockPanel.Dock="Bottom"
+                Margin="0,8,0,0"
+                Style="{StaticResource ff.PanelControlStyle}"
+                Padding="8">
+            <Expander Header="Errors / log"
+                      IsExpanded="{Binding ErrorsExpanded}">
+                <TextBox Text="{Binding ErrorText, Mode=OneWay}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         MaxHeight="100"
+                         VerticalScrollBarVisibility="Auto"
+                         FontSize="11"
+                         FontFamily="Consolas"
+                         BorderThickness="0"
+                         Background="Transparent"/>
+            </Expander>
+        </Border>
+
+        <!-- ── Left status + Right signals chart ────────────────────── -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" MinWidth="160"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: run status -->
+            <Border Grid.Column="0" Style="{StaticResource ff.PanelStyle}" Padding="12">
+                <StackPanel>
+                    <TextBlock Text="Run status"
+                               Style="{StaticResource ff.SubheaderStyle}"
+                               Margin="{StaticResource ff.LabelSpacing}"/>
+
+                    <Grid Margin="{StaticResource ff.CompactSpacing}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Last run:" Style="{StaticResource ff.SmallStyle}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding LastRunText}" Style="{StaticResource ff.SmallStyle}" FontWeight="SemiBold"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Duration:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DurationText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Summary:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding OutputSummaryText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Status:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding StatusPip}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Style="{StaticResource ff.SplitterStyle}"/>
+
+            <!-- Right: signals chart + raw output -->
+            <Border Grid.Column="2" Style="{StaticResource ff.PanelStyle}" Padding="0">
+                <DockPanel LastChildFill="True">
+
+                    <!-- Header hint -->
+                    <StackPanel DockPanel.Dock="Top"
+                                Orientation="Horizontal"
+                                Margin="12,8,12,4">
+                        <TextBlock Text="Signals"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="  — click a line to open fund detail"
+                                   Style="{StaticResource ff.SmallStyle}"
+                                   Foreground="{StaticResource MahApps.Brushes.Gray2}"
+                                   VerticalAlignment="Center"
+                                   Margin="4,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- Collapsible raw output at bottom -->
+                    <Border DockPanel.Dock="Bottom"
+                            BorderThickness="0,1,0,0"
+                            BorderBrush="{StaticResource MahApps.Brushes.Gray7}"
+                            Padding="8">
+                        <Expander Header="Raw output" IsExpanded="False">
+                            <TextBox Text="{Binding OutputJson, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     VerticalScrollBarVisibility="Auto"
+                                     MaxHeight="120"
+                                     FontFamily="Consolas"
+                                     FontSize="11"
+                                     BorderThickness="0"
+                                     Background="Transparent"/>
+                        </Expander>
+                    </Border>
+
+                    <!-- Signals chart fills remaining space -->
+                    <charts:SignalsChart
+                        Margin="8,4"
+                        Series="{Binding SignalsSeries}"
+                        LegendItems="{Binding SignalsLegend}"
+                        FundClickedCommand="{Binding FundClickedCommand}"/>
+
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

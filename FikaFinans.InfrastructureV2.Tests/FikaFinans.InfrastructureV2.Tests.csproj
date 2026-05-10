@@ -44,7 +44,6 @@
 
   <ItemGroup>
     <Folder Include="Agents\" />
-    <Folder Include="Models\" />
     <Folder Include="docs\" />
     <Folder Include="stepOutputs\" />
   </ItemGroup>
@@ -52,6 +51,12 @@
   <ItemGroup>
     <None Include="Agents\03-macroanalyst\Prompts\**\*.md"
           CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FikaFinans.Domain\FikaFinans.Domain.csproj" />
+    <ProjectReference Include="..\FikaFinans.Application\FikaFinans.Application.csproj" />
+    <ProjectReference Include="..\FikaFinans.Infrastructure\FikaFinans.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,17 +1,17 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Agents.CatalystTagger;
-using FikaFinans.InfrastructureV2.Tests.Agents.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Agents.ThesisValidator;
-using FikaFinans.InfrastructureV2.Tests.Models.CatalystTagger;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAligner;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
-using FikaFinans.InfrastructureV2.Tests.Models.MetricsCalculator;
-using FikaFinans.InfrastructureV2.Tests.Models.Recommender;
-using FikaFinans.InfrastructureV2.Tests.Models.SignalScorer;
-using FikaFinans.InfrastructureV2.Tests.Models.ThesisValidator;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Application.Pipeline.Configs;
+using FikaFinans.Domain.Portfolio;
 using Moq;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.Recommender;
@@ -27,6 +27,7 @@ public sealed class RecommenderAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
         _sut = _fixture.Create<RecommenderAgent>();
     }
 
@@ -406,13 +407,13 @@ public sealed class RecommenderAgentTests
                 var step1Path = Paths.DataLoaderOutput("2026-W18", runId);
                 if (!File.Exists(step1Path))
                 {
-                    new FikaFinans.InfrastructureV2.Tests.Agents.DataLoader.DataLoaderAgent()
+                    new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService())
                         .Run("schroder", "2026-W18", runId);
                 }
-                new FikaFinans.InfrastructureV2.Tests.Agents.MetricsCalculator.MetricsCalculatorAgent()
+                new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
                     .Run("2026-W18", runId);
             }
-            new FikaFinans.InfrastructureV2.Tests.Agents.SignalScorer.SignalScorerAgent()
+            new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
                 .Run("2026-W18", runId);
         }
 
@@ -433,7 +434,7 @@ public sealed class RecommenderAgentTests
                     It.IsAny<IReadOnlyList<RotationTheme>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ThemeAdjacencyVerdict.NoneVerdict);
-            await new MacroAlignerAgent(alignLlm.Object).RunAsync("2026-W18", runId);
+            await new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", runId);
         }
 
         if (!File.Exists(step6Path))
@@ -445,7 +446,7 @@ public sealed class RecommenderAgentTests
                     It.IsAny<IReadOnlyList<Catalyst>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Array.Empty<CatalystExposureClassification>());
-            await new CatalystTaggerAgent(taggerLlm.Object).RunAsync("2026-W18", runId);
+            await new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", runId);
         }
 
         if (!File.Exists(step7Path))
@@ -458,7 +459,7 @@ public sealed class RecommenderAgentTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync((FundRecord _, ThesisValidity baseline, CancellationToken _) =>
                     ThesisRefinementVerdict.ConfirmBaseline(baseline, "Cascade-stub LLM confirmation."));
-            await new ThesisValidatorAgent(thesisLlm.Object).RunAsync("2026-W18", runId);
+            await new ThesisValidatorAgent(new TestPathsService(), thesisLlm.Object).RunAsync("2026-W18", runId);
         }
     }
 

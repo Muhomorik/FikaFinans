@@ -1,6 +1,9 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -12,7 +15,11 @@ public class PositionsCsvParserTests
     private IFixture _fixture = null!;
 
     [SetUp]
-    public void SetUp() => _fixture = new Fixture().Customize(new AutoMoqCustomization());
+    public void SetUp()
+    {
+        _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
+    }
 
     [Test]
     public void Parse_HoldingsAndCashRow_CarvesOutCash()
@@ -30,7 +37,7 @@ public class PositionsCsvParserTests
         Assert.Multiple(() =>
         {
             Assert.That(result.Holdings, Has.Count.EqualTo(2));
-            Assert.That(result.Holdings.Select(h => h.Isin), Is.EquivalentTo(new[] { "LU0000000001", "LU0000000002" }));
+            Assert.That(result.Holdings.Select(h => h.Isin.Value), Is.EquivalentTo(new[] { "LU0000000001", "LU0000000002" }));
             Assert.That(result.CashAvailableKr, Is.EqualTo(50000m));
             Assert.That(result.Warnings, Is.Empty);
         });

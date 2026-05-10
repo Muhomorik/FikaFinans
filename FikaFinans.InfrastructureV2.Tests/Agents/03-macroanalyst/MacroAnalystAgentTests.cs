@@ -1,10 +1,16 @@
+using FikaFinans.Application.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
-using FikaFinans.InfrastructureV2.Tests.Models.DataLoader;
-using FikaFinans.InfrastructureV2.Tests.Models.MacroAnalyst;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Domain.Macro;
 using Moq;
-using DataLoaderJsonOptions = FikaFinans.InfrastructureV2.Tests.Models.DataLoader.JsonOptions;
+using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOptions;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MacroAnalyst;
 
@@ -22,6 +28,7 @@ public sealed class MacroAnalystAgentTests
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject<IPathsService>(new TestPathsService());
         _llmMock = _fixture.Freeze<Mock<IMacroLlmClient>>();
         _sut = _fixture.Create<MacroAnalystAgent>();
     }

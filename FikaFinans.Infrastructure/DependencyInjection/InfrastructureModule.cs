@@ -2,11 +2,23 @@ using Autofac;
 using Azure.AI.Projects;
 using Azure.Identity;
 using FikaFinans.Application.Agents;
+using FikaFinans.Application.Bank;
+using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Application.Settings;
 using FikaFinans.Application.UseCases;
+using FikaFinans.Application.Schedules;
+using FikaFinans.Infrastructure.Bank;
+using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Foundry;
+using FikaFinans.Infrastructure.Paths;
+using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Prompts;
+using FikaFinans.Infrastructure.Schedules;
 using FikaFinans.Infrastructure.Settings;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NLog;
 
@@ -50,12 +62,110 @@ public sealed class InfrastructureModule : Autofac.Module
         return missing;
     }
 
+    /// <summary>
+    /// Inspect the persisted AppSettings and return a warning if no model is usable at runtime —
+    /// either no deployments exist, the selected model has no matching deployment, or the matched
+    /// deployment's name is blank. Returns <c>null</c> when settings are usable.
+    /// The runtime falls back to a hardcoded model id so DI never crashes; this check exists to
+    /// nudge the user to Settings → Models before the next pipeline run.
+    /// </summary>
+    public static MissingConfiguration? FindMissingModelConfiguration(AppSettings settings)
+    {
+        var models = settings.Models;
+
+        if (models.Deployments.Count == 0)
+        {
+            return new MissingConfiguration(
+                "Models.Deployments",
+                "No model deployments configured. Open Settings → Models to add at least one.");
+        }
+
+        var selected = models.Deployments.FirstOrDefault(d => d.ModelId == models.SelectedModelId);
+        if (selected is null)
+        {
+            return new MissingConfiguration(
+                "Models.SelectedModelId",
+                $"No deployment matches the selected model '{models.SelectedModelId.Value}'. Open Settings → Models.");
+        }
+
+        if (string.IsNullOrWhiteSpace(selected.DeploymentName.Value))
+        {
+            return new MissingConfiguration(
+                $"Models.Deployments[{selected.ModelId.Value}].DeploymentName",
+                $"Deployment name for '{selected.ModelId.Value}' is empty. Open Settings → Models.");
+        }
+
+        return null;
+    }
+
     protected override void Load(ContainerBuilder builder)
+    {
+        RegisterSettings(builder);
+        RegisterBankServices(builder);
+        RegisterFoundryServices(builder);
+        RegisterPipelineServices(builder);
+    }
+
+    private static void RegisterSettings(ContainerBuilder builder)
     {
         builder.RegisterType<JsonAppSettingsStore>()
             .As<IAppSettingsStore>()
             .SingleInstance();
 
+        builder.RegisterType<WindowsTaskSchedulerWriter>()
+            .As<IScheduleWriter>()
+            .SingleInstance();
+    }
+
+    private static void RegisterBankServices(ContainerBuilder builder)
+    {
+        // EF Core in-memory DbContext — one shared instance (simulated bank has no concurrency needs)
+        builder.Register(_ =>
+        {
+            var opts = new DbContextOptionsBuilder<BankDbContext>()
+                .UseInMemoryDatabase("FikaFinansBankDb")
+                .Options;
+            return new BankDbContext(opts);
+        })
+        .AsSelf()
+        .SingleInstance();
+
+        // BankSimulator is SingleInstance so the Bank tab and all bank services share one virtual clock.
+        builder.RegisterType<BankSimulator>()
+            .AsSelf()
+            .SingleInstance();
+
+        builder.RegisterType<LedgerService>()
+            .As<ILedgerService>()
+            .SingleInstance();
+
+        builder.RegisterType<TradingService>()
+            .As<ITradingService>()
+            .SingleInstance();
+
+        builder.RegisterType<PortfolioQueryService>()
+            .As<IPortfolioQueryService>()
+            .SingleInstance();
+
+        builder.RegisterType<SettlementEngine>()
+            .As<ISettlementEngine>()
+            .SingleInstance();
+
+        builder.RegisterType<BankCsvImporter>()
+            .As<IBankCsvImporter>()
+            .SingleInstance();
+
+        builder.RegisterType<DataSeeder>()
+            .AsSelf()
+            .SingleInstance();
+
+        builder.RegisterType<AppStartupInitializer>()
+            .AsSelf()
+            .SingleInstance();
+    }
+
+    private static void RegisterFoundryServices(ContainerBuilder builder)
+    {
         builder.RegisterType<EmbeddedPromptProvider>()
             .As<IPromptProvider>()
             .SingleInstance();
@@ -139,5 +249,82 @@ public sealed class InfrastructureModule : Autofac.Module
         // Hand the SDK a placeholder so DI graph builds; any actual call surfaces a network error
         // through the per-panel Fail() path instead of crashing startup.
         return string.IsNullOrWhiteSpace(raw) ? PlaceholderEndpoint : new Uri(raw);
+    }
+
+    private static void RegisterPipelineServices(ContainerBuilder builder)
+    {
+        // Paths service — reads AppSettings.Folders at runtime so Settings dialog saves take effect.
+        builder.RegisterType<SettingsBackedPathsService>()
+            .As<IPathsService>()
+            .SingleInstance();
+
+        // Foundry LLM clients used by the hybrid/LLM pipeline steps.
+        // All take AIProjectClient (already registered) + the default model ID from settings.
+        builder.Register(ctx =>
+            new FoundryMacroLlmClient(
+                ctx.Resolve<AIProjectClient>(),
+                ResolveDefaultModelId(ctx)))
+            .As<IMacroLlmClient>()
+            .SingleInstance();
+
+        builder.Register(ctx =>
+            new FoundryThemeAdjacencyLlmClient(
+                ctx.Resolve<AIProjectClient>(),
+                ResolveDefaultModelId(ctx)))
+            .As<IThemeAdjacencyLlmClient>()
+            .SingleInstance();
+
+        builder.Register(ctx =>
+            new FoundryFundCatalystLlmClient(
+                ctx.Resolve<AIProjectClient>(),
+                ResolveDefaultModelId(ctx)))
+            .As<IFundCatalystLlmClient>()
+            .SingleInstance();
+
+        builder.Register(ctx =>
+            new FoundryThesisRefinementLlmClient(
+                ctx.Resolve<AIProjectClient>(),
+                ResolveDefaultModelId(ctx)))
+            .As<IThesisRefinementLlmClient>()
+            .SingleInstance();
+
+        builder.Register(ctx =>
+            new FoundryDifferentiatorLlmClient(
+                ctx.Resolve<AIProjectClient>(),
+                ResolveDefaultModelId(ctx)))
+            .As<IDifferentiatorLlmClient>()
+            .SingleInstance();
+
+        // Pipeline agents — simple ones auto-wire via RegisterType; agents with optional
+        // constructor params are registered explicitly to avoid Autofac guessing.
+        builder.RegisterType<DataLoaderAgent>().As<IDataLoaderAgent>().SingleInstance();
+        builder.RegisterType<MetricsCalculatorAgent>().As<IMetricsCalculatorAgent>().SingleInstance();
+
+        builder.Register(ctx => new MacroAnalystAgent(
+                paths: ctx.Resolve<IPathsService>(),
+                llm: ctx.Resolve<IMacroLlmClient>()))
+            .As<IMacroAnalystAgent>()
+            .SingleInstance();
+
+        builder.RegisterType<SignalScorerAgent>().As<ISignalScorerAgent>().SingleInstance();
+        builder.RegisterType<MacroAlignerAgent>().As<IMacroAlignerAgent>().SingleInstance();
+        builder.RegisterType<CatalystTaggerAgent>().As<ICatalystTaggerAgent>().SingleInstance();
+        builder.RegisterType<ThesisValidatorAgent>().As<IThesisValidatorAgent>().SingleInstance();
+        builder.RegisterType<RecommenderAgent>().As<IRecommenderAgent>().SingleInstance();
+        builder.RegisterType<UniverseEnricherAgent>().As<IUniverseEnricherAgent>().SingleInstance();
+
+        // PortfolioConstructorAgent has two ctors; register explicitly so Autofac
+        // uses the (IPathsService) one that defaults to PortfolioConstructorConfig.Default.
+        builder.Register(ctx => new PortfolioConstructorAgent(ctx.Resolve<IPathsService>()))
+            .As<IPortfolioConstructorAgent>()
+            .SingleInstance();
+    }
+
+    private static string ResolveDefaultModelId(IComponentContext ctx)
+    {
+        var models = ctx.Resolve<IAppSettingsStore>().Load().Models;
+        var selected = models.Deployments.FirstOrDefault(d => d.ModelId == models.SelectedModelId);
+        var name = selected?.DeploymentName.Value;
+        return string.IsNullOrWhiteSpace(name) ? FoundryModelIds.Gpt5_4_1 : name;
     }
 }

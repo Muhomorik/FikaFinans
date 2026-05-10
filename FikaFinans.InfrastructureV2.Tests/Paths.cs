@@ -47,6 +47,9 @@ public static class Paths
     public const string PortfolioConstructorOutputTemplate = "stepOutputs/10-trades-{isoWeek}-{runId}.json";
     public const string PortfolioConstructorErrorTemplate = "stepOutputs/10-error-{isoWeek}-{runId}.json";
 
+    public const string MacroAnalystPromptsRelative = "Agents/03-macroanalyst/Prompts";
+    public static string MacroAnalystPromptsAbs => Path.Combine(ProjectRoot, MacroAnalystPromptsRelative);
+
     public static string MetadataCsv(string family, string isoWeek) =>
         Path.Combine(ProjectRoot, MetadataCsvTemplate.Replace("{family}", family).Replace("{isoWeek}", isoWeek));
 
