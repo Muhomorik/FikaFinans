@@ -18,14 +18,22 @@
 
 # Backend + NAV Sync — Feature Plan
 
-TODO: weekly analytics json
-TODO: current holding and send orders back to bank.
-
-> **Related:** the 10-step orchestrator the FikaFinans Function will run is
-> specified in
-> [FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md](../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md).
-> That document defines *what* the orchestrator does; this document plans
-> *how* messages reach it and which Azure messaging service ferries them.
+> **Related:**
+>
+> - The 10-step orchestrator the FikaFinans Function will run is
+>   specified in
+>   [FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md](../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md).
+>   That document defines *what* the orchestrator does; this document
+>   plans *how* messages reach it and which Azure messaging service
+>   ferries them.
+> - The storage layer underneath — pluggable SQLite-vs-Azure-Tables,
+>   the new Positions table that replaces `positions.csv`, and Step 10's
+>   SendToBank moving out of WPF and into the Function — is planned in
+>   [storage-migration-plan.md](./storage-migration-plan.md).
+> - How Step 03's three weekly analytics JSONs stop being files in
+>   `docs/inputs/` and start coming from the KanelBrief API (live or
+>   cached) is planned in
+>   [analytics-json-migration-plan.md](./analytics-json-migration-plan.md).
 
 FikaFinans's new backend will run on **Azure Functions (Consumption
 plan)**. The workload — small per-fund jobs arriving in a slow drip,
