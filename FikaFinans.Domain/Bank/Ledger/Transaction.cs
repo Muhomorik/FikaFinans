@@ -68,4 +68,28 @@ public class Transaction
         Status = TransactionStatus.Reversed;
         return Result.Ok();
     }
+
+    // Storage rehydration: builds a Transaction from already-validated row
+    // data (status string, existing Id, ready-made entries) without re-running
+    // Create's balance/sign checks. Repos and the LedgerService stitch use this;
+    // domain code keeps using Create.
+    public static Transaction Rehydrate(
+        TransactionId id,
+        DateTimeOffset timestamp,
+        string description,
+        TransactionStatus status,
+        TradingOrderId? relatedOrderId,
+        IEnumerable<JournalEntry> entries)
+    {
+        var transaction = new Transaction
+        {
+            Id = id,
+            Timestamp = timestamp,
+            Description = description,
+            Status = status,
+            RelatedOrderId = relatedOrderId
+        };
+        transaction._entries.AddRange(entries);
+        return transaction;
+    }
 }

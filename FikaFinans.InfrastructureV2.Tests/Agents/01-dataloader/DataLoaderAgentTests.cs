@@ -1,7 +1,9 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.InfrastructureV2.Tests.Storage;
 using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
@@ -27,7 +29,14 @@ public class DataLoaderAgentTests
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
         _fixture.Inject<IPathsService>(new TestPathsService());
+        // Seed from the same positions.csv the runtime path used to read directly,
+        // so the happy-path Run() test sees the original cash row + zero holdings.
+        _fixture.Inject<IPositionsRepository>(
+            InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs));
     }
+
+    private static PositionsParseResult ParsePos(string csv) =>
+        new PositionsCsvParser().Parse(new StringReader(csv));
 
     // ─── #1. Happy path: real fixtures via Paths.cs ─────────────────────────
     [Test]
@@ -74,7 +83,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
-            new StringReader(PositionsHeader + "\n,Cash,100000,100000"),
+            ParsePos(PositionsHeader + "\n,Cash,100000,100000"),
             new StringReader(""));
 
         Assert.Multiple(() =>
@@ -96,7 +105,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo") + "\n" + RowMeta("LU0000000002", "Bar")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")), // LU0000000002 missing
-            new StringReader(PositionsHeader + "\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\n,Cash,0,0"),
             new StringReader(""));
 
         var bar = result.Funds.Single(f => f.Isin == "LU0000000002");
@@ -127,7 +136,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
-            new StringReader(PositionsHeader),
+            ParsePos(PositionsHeader),
             new StringReader(""));
 
         Assert.Multiple(() =>
@@ -163,7 +172,7 @@ public class DataLoaderAgentTests
                              RowSnap("LU0000000001") + "\n" +
                              RowSnap("LU0000000002") + "\n" +
                              RowSnap("LU0000000003")),
-            new StringReader(PositionsHeader + "\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\n,Cash,0,0"),
             new StringReader(md));
 
         Assert.Multiple(() =>
@@ -196,7 +205,7 @@ public class DataLoaderAgentTests
             new StringReader(SnapshotHeader + "\n" +
                              RowSnap("LU0000000001") + "\n" +
                              RowSnap("LU0000000002")),
-            new StringReader(PositionsHeader + "\nLU0000000002,Bar,4000,5000\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\nLU0000000002,Bar,4000,5000\n,Cash,0,0"),
             new StringReader(md));
 
         Assert.Multiple(() =>
@@ -231,7 +240,7 @@ public class DataLoaderAgentTests
             new StringReader(SnapshotHeader + "\n" +
                              RowSnap("LU0000000001") + "\n" +
                              RowSnap("LU0000000002")),
-            new StringReader(PositionsHeader + "\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\n,Cash,0,0"),
             new StringReader(md));
 
         Assert.Multiple(() =>
@@ -257,7 +266,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
-            new StringReader(PositionsHeader + "\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\n,Cash,0,0"),
             new StringReader(md));
 
         Assert.Multiple(() =>
@@ -279,7 +288,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(summary),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
-            new StringReader(PositionsHeader + "\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\n,Cash,0,0"),
             new StringReader(""));
 
         Assert.That(result.Funds[0].NavBuckets[0].Sharpe2w, Is.Null);
@@ -299,7 +308,7 @@ public class DataLoaderAgentTests
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
-            new StringReader(PositionsHeader + "\nLU9999999999,Ghost,1000,1000\n,Cash,0,0"),
+            ParsePos(PositionsHeader + "\nLU9999999999,Ghost,1000,1000\n,Cash,0,0"),
             new StringReader("")));
     }
 

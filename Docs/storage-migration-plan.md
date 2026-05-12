@@ -356,10 +356,17 @@ path is in.
 Each phase is independently mergeable and testable. Only ordering
 constraint: Phase 4 needs Phase 3.
 
-1. **Stand up real SQLite locally.** Replace `UseInMemoryDatabase`
-   with `UseSqlite` against
-   `%LOCALAPPDATA%\FikaFinans\fikafinans.db`. Keep the existing 7
-   tables for now — this phase is purely "stop losing state on exit."
+1. **Stand up real SQLite locally.** ✅ **Done — 2026-05-10.**
+   Replaced `UseInMemoryDatabase` with `UseSqlite` against
+   `%USERPROFILE%\Documents\FikaFinans\fikafinans.db` (configurable via
+   `AppSettings.Database.Path`). All seven `BankDbContext` consumers now
+   take an `IDbContextFactory<BankDbContext>` and open a fresh context per
+   public method — fixes the singleton-DbContext bug that was unsafe
+   under real SQLite. Schema setup via `EnsureCreatedAsync()` in
+   `DataSeeder.SeedAsync()`. The existing 7 tables stay as-is — this
+   phase is purely "stop losing state on exit." `Provider` setting now
+   accepts `Sqlite` (default), `InMemory` (kept for tests), or
+   `AzureTables` (placeholder, throws — wired up in Phase 6).
 2. **Introduce the repository abstraction.** Each `BankDbContext`
    consumer migrates to a repository interface, even if SQLite/EF is
    the only implementation for now. Sets up the swap point.

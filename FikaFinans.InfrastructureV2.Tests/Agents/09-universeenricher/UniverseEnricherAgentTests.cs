@@ -680,7 +680,7 @@ public sealed class UniverseEnricherAgentTests
 
         if (!File.Exists(step1Path))
         {
-            new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService())
+            new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService(), FikaFinans.InfrastructureV2.Tests.Storage.InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs))
                 .Run("schroder", "2026-W18", runId);
         }
         if (!File.Exists(step2Path))

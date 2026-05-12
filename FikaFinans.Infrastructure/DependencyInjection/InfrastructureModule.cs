@@ -7,6 +7,7 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Application.Settings;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.UseCases;
 using FikaFinans.Application.Schedules;
 using FikaFinans.Infrastructure.Bank;
@@ -18,6 +19,7 @@ using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Prompts;
 using FikaFinans.Infrastructure.Schedules;
 using FikaFinans.Infrastructure.Settings;
+using FikaFinans.Infrastructure.Storage.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NLog;
@@ -119,16 +121,18 @@ public sealed class InfrastructureModule : Autofac.Module
 
     private static void RegisterBankServices(ContainerBuilder builder)
     {
-        // EF Core in-memory DbContext — one shared instance (simulated bank has no concurrency needs)
-        builder.Register(_ =>
-        {
-            var opts = new DbContextOptionsBuilder<BankDbContext>()
-                .UseInMemoryDatabase("FikaFinansBankDb")
-                .Options;
-            return new BankDbContext(opts);
-        })
-        .AsSelf()
-        .SingleInstance();
+        // BankDbContext is fronted by a factory — services open a short-lived context
+        // per public method via `using var db = _factory.CreateDbContext()`. Singleton
+        // DbContext + real SQLite is unsafe under concurrent use; the factory gives us
+        // thread-safe context creation while staying cheap.
+        builder.Register(ctx =>
+            {
+                var settings = ctx.Resolve<IAppSettingsStore>().Load();
+                var options = BuildBankDbContextOptions(settings.Database);
+                return new BankDbContextFactory(options);
+            })
+            .As<IDbContextFactory<BankDbContext>>()
+            .SingleInstance();
 
         // BankSimulator is SingleInstance so the Bank tab and all bank services share one virtual clock.
         builder.RegisterType<BankSimulator>()
@@ -161,6 +165,39 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.RegisterType<AppStartupInitializer>()
             .AsSelf()
+            .SingleInstance();
+
+        RegisterStorageRepositories(builder);
+    }
+
+    /// <summary>
+    /// Tables-shaped SQLite repositories. Each repo owns its
+    /// <see cref="IDbContextFactory{BankDbContext}"/>; they're stateless and
+    /// safe as singletons. Chunk 4 wired <c>LedgerService</c> + <c>TradingService</c>
+    /// onto the trading-orders / transactions / journal-entries repos;
+    /// <c>BankCsvImporter</c> still touches <c>FundHolding</c>/<c>Fund</c>
+    /// via direct EF until chunks 5 / Phase 5 retire those.
+    /// </summary>
+    private static void RegisterStorageRepositories(ContainerBuilder builder)
+    {
+        builder.RegisterType<SqliteAccountsRepository>()
+            .As<IAccountsRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqliteTradingOrdersRepository>()
+            .As<ITradingOrdersRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqliteTransactionsRepository>()
+            .As<ITransactionsRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqliteJournalEntriesRepository>()
+            .As<IJournalEntriesRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqlitePositionsRepository>()
+            .As<IPositionsRepository>()
             .SingleInstance();
     }
 
@@ -326,5 +363,55 @@ public sealed class InfrastructureModule : Autofac.Module
         var selected = models.Deployments.FirstOrDefault(d => d.ModelId == models.SelectedModelId);
         var name = selected?.DeploymentName.Value;
         return string.IsNullOrWhiteSpace(name) ? FoundryModelIds.Gpt5_4_1 : name;
+    }
+
+    private const string DefaultSqliteFileName = "fikafinans.db";
+    private const string DocumentsAppFolder = "FikaFinans";
+
+    /// <summary>
+    /// Build EF Core options for the BankDbContext based on
+    /// <see cref="DatabaseSettings.Provider"/>. Default is SQLite at
+    /// <c>%USERPROFILE%\Documents\FikaFinans\fikafinans.db</c>; override via
+    /// <see cref="DatabaseSettings.Path"/>. Provider <c>"InMemory"</c> keeps the
+    /// legacy transient store for tests; <c>"AzureTables"</c> is reserved for Phase 6.
+    /// </summary>
+    internal static DbContextOptions<BankDbContext> BuildBankDbContextOptions(DatabaseSettings db)
+    {
+        var optsBuilder = new DbContextOptionsBuilder<BankDbContext>();
+
+        var provider = string.IsNullOrWhiteSpace(db.Provider) ? "Sqlite" : db.Provider.Trim();
+
+        if (string.Equals(provider, "InMemory", StringComparison.OrdinalIgnoreCase))
+        {
+            optsBuilder.UseInMemoryDatabase("FikaFinansBankDb");
+        }
+        else if (string.Equals(provider, "AzureTables", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotImplementedException(
+                "Database.Provider 'AzureTables' is reserved for Phase 6 of the storage migration and is not yet wired up. " +
+                "Use 'Sqlite' (default) or 'InMemory'.");
+        }
+        else if (string.Equals(provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = ResolveSqlitePath(db.Path);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            optsBuilder.UseSqlite($"Data Source={path}");
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"Unknown Database.Provider '{db.Provider}'. Expected 'Sqlite', 'InMemory', or 'AzureTables'.");
+        }
+
+        return optsBuilder.Options;
+    }
+
+    private static string ResolveSqlitePath(string configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        return Path.Combine(docs, DocumentsAppFolder, DefaultSqliteFileName);
     }
 }

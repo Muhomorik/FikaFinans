@@ -15,7 +15,7 @@ public class SettlementEngine : ISettlementEngine
     private readonly ILogger _logger;
     private readonly BankSimulator _clock;
     private readonly ITradingService _tradingService;
-    private readonly BankDbContext _db;
+    private readonly IDbContextFactory<BankDbContext> _dbFactory;
     private readonly Subject<OrderSettledEvent> _orderSettled = new();
     private readonly Subject<SettlementRunCompleteEvent> _settlementRunComplete = new();
     private readonly CompositeDisposable _disposables = new();
@@ -27,12 +27,12 @@ public class SettlementEngine : ISettlementEngine
         ILogger logger,
         BankSimulator clock,
         ITradingService tradingService,
-        BankDbContext db)
+        IDbContextFactory<BankDbContext> dbFactory)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _tradingService = tradingService ?? throw new ArgumentNullException(nameof(tradingService));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
     public void Start()
@@ -54,9 +54,10 @@ public class SettlementEngine : ISettlementEngine
 
         _logger.Info("Settlement run starting: {0} pending orders at {1}", pendingOrders.Count, settlementTime);
 
+        await using var db = await _dbFactory.CreateDbContextAsync();
         foreach (var order in pendingOrders)
         {
-            var fund = await _db.Funds
+            var fund = await db.Funds
                 .Include(f => f.NavHistory)
                 .FirstOrDefaultAsync(f => f.Id == order.FundId);
 

@@ -24,5 +24,8 @@ public class JournalEntryConfiguration : IEntityTypeConfiguration<JournalEntry>
         builder.Property(e => e.CreditAmount).HasPrecision(18, 4);
 
         builder.HasIndex(e => e.AccountId);
+        // Stitching index — LedgerService joins entries to transactions in
+        // memory by TransactionId now that the FK relationship is gone.
+        builder.HasIndex(e => e.TransactionId);
     }
 }

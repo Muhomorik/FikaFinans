@@ -21,8 +21,19 @@ public sealed record AppSettings
 
 public sealed record DatabaseSettings
 {
-    public string Provider { get; init; } = "InMemory";
+    /// <summary>
+    /// Which storage backend to use: <c>"Sqlite"</c> (default, on-disk file),
+    /// <c>"InMemory"</c> (transient — loses state on exit; tests use this),
+    /// or <c>"AzureTables"</c> (Phase 6, not yet implemented).
+    /// </summary>
+    public string Provider { get; init; } = "Sqlite";
+
+    /// <summary>
+    /// Optional override for the SQLite file path. When blank, defaults to
+    /// <c>%USERPROFILE%\Documents\FikaFinans\fikafinans.db</c>.
+    /// </summary>
     public string Path { get; init; } = string.Empty;
+
     public string BackendApiUrl { get; init; } = string.Empty;
     public string BackendApiKey { get; init; } = string.Empty;
 }

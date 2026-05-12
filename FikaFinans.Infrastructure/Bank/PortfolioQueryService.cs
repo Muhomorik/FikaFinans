@@ -1,55 +1,79 @@
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Bank.Events;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Bank.Common;
+using FikaFinans.Domain.Bank.Identifiers;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank;
 
+/// <summary>
+/// Read-only portfolio queries. Holdings come from the Positions repo
+/// (chunk 5); <see cref="Domain.Bank.Funds.Fund"/> NAV history still
+/// goes via direct EF until Phase 5 retires it.
+/// </summary>
 public class PortfolioQueryService : IPortfolioQueryService
 {
+    private const string PositionsPartition = "positions";
+    private const string CashRowKey = "CASH";
+
     private readonly ILogger _logger;
-    private readonly BankDbContext _db;
+    private readonly IDbContextFactory<BankDbContext> _dbFactory;
+    private readonly IAccountsRepository _accounts;
+    private readonly IPositionsRepository _positions;
     private readonly ILedgerService _ledgerService;
 
-    public PortfolioQueryService(ILogger logger, BankDbContext db, ILedgerService ledgerService)
+    public PortfolioQueryService(
+        ILogger logger,
+        IDbContextFactory<BankDbContext> dbFactory,
+        IAccountsRepository accounts,
+        IPositionsRepository positions,
+        ILedgerService ledgerService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _positions = positions ?? throw new ArgumentNullException(nameof(positions));
         _ledgerService = ledgerService ?? throw new ArgumentNullException(nameof(ledgerService));
     }
 
     public async Task<Money> GetAvailableCashAsync(CancellationToken ct = default)
     {
-        var cashAccount = await _db.Accounts.FirstOrDefaultAsync(a => a.Code == "1000", ct);
-        if (cashAccount == null)
+        var cashAccount = await _accounts.GetByCodeAsync("1000", ct);
+        if (cashAccount is null)
             return Money.Zero();
-        return await _ledgerService.GetAccountBalanceAsync(cashAccount.Id, ct);
+        return await _ledgerService.GetAccountBalanceAsync(new AccountId(cashAccount.AccountId), ct);
     }
 
     public async Task<IReadOnlyList<FundPositionDto>> GetFundPositionsAsync(CancellationToken ct = default)
     {
-        var holdings = await _db.FundHoldings.Where(h => h.Units > 0).ToListAsync(ct);
-        var positions = new List<FundPositionDto>();
+        var rows = await _positions.QueryPartitionAsync(PositionsPartition, ct);
+        var holdings = rows.Where(r => r.RowKey != CashRowKey && r.Units > 0).ToList();
+        if (holdings.Count == 0) return Array.Empty<FundPositionDto>();
 
-        foreach (var holding in holdings)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var allFunds = await db.Funds.AsNoTracking().Include(f => f.NavHistory).ToListAsync(ct);
+        var fundsByIsin = allFunds.ToDictionary(f => f.Isin.Value, f => f);
+
+        var positions = new List<FundPositionDto>(holdings.Count);
+        foreach (var h in holdings)
         {
-            var fund = await _db.Funds
-                .Include(f => f.NavHistory)
-                .FirstOrDefaultAsync(f => f.Id == holding.FundId, ct);
-            if (fund == null) continue;
+            if (!fundsByIsin.TryGetValue(h.Isin, out var fund))
+                continue;
 
             var currentNav = fund.GetLatestNav();
-            var currentValue = holding.GetCurrentValue(currentNav);
-            var costBasis = new Money(holding.TotalCostBasis, holding.Currency);
-            var unrealizedGainLoss = holding.GetUnrealizedGainLoss(currentNav);
-            var gainLossPercent = holding.TotalCostBasis > 0
-                ? unrealizedGainLoss.Amount / holding.TotalCostBasis * 100
+            var currency = "SEK";
+            var currentValue = new Money(h.Units * currentNav, currency);
+            var costBasis = new Money(h.CostBasisKr, currency);
+            var unrealizedGainLoss = currentValue - costBasis;
+            var gainLossPercent = h.CostBasisKr > 0
+                ? unrealizedGainLoss.Amount / h.CostBasisKr * 100
                 : 0;
 
             positions.Add(new FundPositionDto(
-                holding.FundId, fund.Name, fund.Isin, holding.Units,
+                fund.Id, fund.Name, fund.Isin, h.Units,
                 currentValue, costBasis, unrealizedGainLoss, gainLossPercent));
         }
 

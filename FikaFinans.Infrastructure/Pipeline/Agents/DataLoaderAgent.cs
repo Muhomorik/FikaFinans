@@ -1,5 +1,7 @@
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Infrastructure.Pipeline.Csv;
@@ -10,17 +12,22 @@ namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class DataLoaderAgent : IDataLoaderAgent
 {
+    private const string PositionsPartition = "positions";
+    private const string CashRowKey = "CASH";
+
     private readonly IPathsService _paths;
+    private readonly IPositionsRepository _positions;
     private readonly MetadataCsvParser _metadataParser = new();
     private readonly SummaryCsvParser _summaryParser = new();
     private readonly SnapshotCsvParser _snapshotParser = new();
-    private readonly PositionsCsvParser _positionsParser = new();
     private readonly PortfolioStructureMdParser _portfolioParser = new();
 
-    public DataLoaderAgent(IPathsService paths)
+    public DataLoaderAgent(IPathsService paths, IPositionsRepository positions)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(positions);
         _paths = paths;
+        _positions = positions;
     }
 
     public DataLoaderOutput Run(string family, string isoWeek, string runId)
@@ -28,7 +35,6 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         var metadataPath  = _paths.MetadataCsv(family, isoWeek);
         var summaryPath   = _paths.SummaryCsv(family, isoWeek);
         var snapshotPath  = _paths.SnapshotCsv(family, isoWeek);
-        var positionsPath = _paths.PositionsCsv;
         var structurePath = _paths.PortfolioStructureMd;
 
         try
@@ -38,11 +44,13 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
             using var metaReader     = new StreamReader(metadataPath);
             using var sumReader      = new StreamReader(summaryPath);
             using var snapReader     = new StreamReader(snapshotPath);
-            using var posReader      = new StreamReader(positionsPath);
             using var structReader   = new StreamReader(structurePath);
 
+            var positions = _positions.QueryPartitionAsync(PositionsPartition).GetAwaiter().GetResult();
+            var positionsResult = ToPositionsParseResult(positions);
+
             var output = RunInMemory(family, isoWeek, runId,
-                metaReader, sumReader, snapReader, posReader, structReader);
+                metaReader, sumReader, snapReader, positionsResult, structReader);
 
             WriteJson(_paths.DataLoaderOutput(isoWeek, runId), output);
             return output;
@@ -57,15 +65,50 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
     public DataLoaderOutput RunInMemory(
         string family, string isoWeek, string runId,
         TextReader metadataCsv, TextReader summaryCsv, TextReader snapshotCsv,
-        TextReader positionsCsv, TextReader portfolioStructureMd)
+        PositionsParseResult positions, TextReader portfolioStructureMd)
     {
         var metadata  = _metadataParser.Parse(metadataCsv);
         var summary   = _summaryParser.Parse(summaryCsv);
         var snapshots = _snapshotParser.Parse(snapshotCsv);
-        var positions = _positionsParser.Parse(positionsCsv);
         var structure = _portfolioParser.Parse(portfolioStructureMd);
 
         return Join(family, isoWeek, runId, metadata, summary, snapshots, positions, structure);
+    }
+
+    /// <summary>
+    /// Adapter from repo rows back to <see cref="PositionsParseResult"/> so
+    /// the rest of the agent (and downstream code) doesn't notice the read
+    /// path swap. Cash row is split out by RowKey, holdings preserve the
+    /// CSV-shape (<c>Isin</c>/<c>Name</c>/<c>CurrentValueKr</c>/<c>CostBasisKr</c>)
+    /// and the unit-level fields ride along on the row but aren't surfaced
+    /// here — they're a bank-sim concern.
+    /// </summary>
+    internal static PositionsParseResult ToPositionsParseResult(IReadOnlyList<PositionEntity> rows)
+    {
+        var warnings = new List<string>();
+        var cashRow = rows.FirstOrDefault(r => r.RowKey == CashRowKey);
+        decimal cashAvailable = cashRow?.CurrentValueKr ?? 0m;
+        if (cashRow is null)
+            warnings.Add("Positions repo has no CASH row; cash_available_kr defaults to 0.");
+
+        var holdings = rows
+            .Where(r => r.RowKey != CashRowKey)
+            .Select(r => new Position
+            {
+                Isin = new Isin(r.Isin),
+                Name = r.Name,
+                CurrentValueKr = r.CurrentValueKr,
+                CostBasisKr = r.CostBasisKr,
+            })
+            .ToList();
+
+        return new PositionsParseResult
+        {
+            Holdings = holdings,
+            CashAvailableKr = cashAvailable,
+            Warnings = warnings,
+            TotalRowCount = rows.Count,
+        };
     }
 
     internal static void VerifyFilenameIsoWeekTags(string expected, params string[] paths)

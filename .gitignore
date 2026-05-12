@@ -541,3 +541,13 @@ FikaFinans/DataExamples/*
 FikaFinans.InfrastructureV2.Tests/stepOutputs/*
 !FikaFinans.InfrastructureV2.Tests/stepOutputs/.gitkeep
 
+# Archive files
+*.7z
+*.zip
+*.rar
+*.tar
+*.gz
+*.tgz
+*.bz2
+*.xz
+

@@ -34,6 +34,27 @@ public class JournalEntry
         };
     }
 
+    // Storage rehydration: bypasses Create's NewId/validation so a row
+    // round-trips with stable identity. Repos call this; domain code uses Create.
+    public static JournalEntry Rehydrate(
+        JournalEntryId id,
+        TransactionId transactionId,
+        AccountId accountId,
+        decimal debitAmount,
+        decimal creditAmount,
+        string currency)
+    {
+        return new JournalEntry
+        {
+            Id = id,
+            TransactionId = transactionId,
+            AccountId = accountId,
+            DebitAmount = debitAmount,
+            CreditAmount = creditAmount,
+            Currency = currency
+        };
+    }
+
     public Money GetDebit() => new(DebitAmount, Currency);
     public Money GetCredit() => new(CreditAmount, Currency);
 }

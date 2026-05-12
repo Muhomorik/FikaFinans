@@ -1,6 +1,7 @@
 using FikaFinans.Domain.Bank.Accounts;
 using FikaFinans.Domain.Bank.Funds;
 using FikaFinans.Domain.Bank.Ledger;
+using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank.Persistence;
@@ -8,33 +9,38 @@ namespace FikaFinans.Infrastructure.Bank.Persistence;
 public class DataSeeder
 {
     private readonly ILogger _logger;
-    private readonly BankDbContext _db;
+    private readonly IDbContextFactory<BankDbContext> _dbFactory;
     private readonly BankSimulator _clock;
 
-    public DataSeeder(ILogger logger, BankDbContext db, BankSimulator clock)
+    public DataSeeder(ILogger logger, IDbContextFactory<BankDbContext> dbFactory, BankSimulator clock)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     public async Task SeedAsync()
     {
-        if (_db.Accounts.Any())
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Ensure the SQLite schema exists before any read. No-op for InMemory.
+        await db.Database.EnsureCreatedAsync();
+
+        if (db.Accounts.Any())
         {
             _logger.Debug("DataSeeder: already seeded, skipping");
             return;
         }
 
         _logger.Info("Seeding database...");
-        SeedChartOfAccounts();
-        SeedFunds();
-        await _db.SaveChangesAsync();
-        await SeedInitialDepositAsync();
+        SeedChartOfAccounts(db);
+        SeedFunds(db);
+        await db.SaveChangesAsync();
+        await SeedInitialDepositAsync(db);
         _logger.Info("Database seeding complete");
     }
 
-    private void SeedChartOfAccounts()
+    private void SeedChartOfAccounts(BankDbContext db)
     {
         var accounts = new[]
         {
@@ -45,11 +51,11 @@ public class DataSeeder
             Account.Create("Realized Gains", "4000", AccountType.Revenue),
             Account.Create("Realized Losses", "5000", AccountType.Expense),
         };
-        _db.Accounts.AddRange(accounts);
+        db.Accounts.AddRange(accounts);
         _logger.Info("Seeded {0} chart of accounts entries", accounts.Length);
     }
 
-    private void SeedFunds()
+    private void SeedFunds(BankDbContext db)
     {
         var baseDate = _clock.Now.AddDays(-30);
 
@@ -74,14 +80,14 @@ public class DataSeeder
         bondFund.RecordNav(baseDate.AddDays(21), 108.60m);
         bondFund.RecordNav(baseDate.AddDays(28), 108.75m);
 
-        _db.Funds.AddRange(globalIndex, techFund, bondFund);
+        db.Funds.AddRange(globalIndex, techFund, bondFund);
         _logger.Info("Seeded 3 funds with NAV history");
     }
 
-    private async Task SeedInitialDepositAsync()
+    private async Task SeedInitialDepositAsync(BankDbContext db)
     {
-        var cashAccount = _db.Accounts.Local.First(a => a.Code == "1000");
-        var equityAccount = _db.Accounts.Local.First(a => a.Code == "3000");
+        var cashAccount = db.Accounts.Local.First(a => a.Code == "1000");
+        var equityAccount = db.Accounts.Local.First(a => a.Code == "3000");
 
         const decimal depositAmount = 100_000m;
         var result = Transaction.Create(
@@ -95,8 +101,8 @@ public class DataSeeder
 
         if (result.IsSuccess)
         {
-            _db.Transactions.Add(result.Value);
-            await _db.SaveChangesAsync();
+            db.Transactions.Add(result.Value);
+            await db.SaveChangesAsync();
             _logger.Info("Seeded initial deposit of {0:N0} SEK", depositAmount);
         }
     }

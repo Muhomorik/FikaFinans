@@ -73,4 +73,35 @@ public class TradingOrder
         Status = OrderStatus.Cancelled;
         return Result.Ok();
     }
+
+    // Storage rehydration: full state from a row, no factory branching.
+    // Repos call this; domain code keeps using CreateBuyOrder/CreateSellOrder.
+    public static TradingOrder Rehydrate(
+        TradingOrderId id,
+        FundId fundId,
+        OrderSide side,
+        decimal amountValue,
+        string currency,
+        decimal? units,
+        OrderStatus status,
+        DateTimeOffset createdAt,
+        DateTimeOffset? settledAt,
+        decimal? settlementNavPerUnit,
+        decimal? settledUnits)
+    {
+        return new TradingOrder
+        {
+            Id = id,
+            FundId = fundId,
+            Side = side,
+            AmountValue = amountValue,
+            Currency = currency,
+            Units = units,
+            Status = status,
+            CreatedAt = createdAt,
+            SettledAt = settledAt,
+            SettlementNavPerUnit = settlementNavPerUnit,
+            SettledUnits = settledUnits
+        };
+    }
 }

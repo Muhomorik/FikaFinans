@@ -20,11 +20,10 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
                 id => id.HasValue ? id.Value.Value : (Guid?)null,
                 guid => guid.HasValue ? new TradingOrderId(guid.Value) : null);
 
-        builder.HasMany(t => t.Entries)
-            .WithOne()
-            .HasForeignKey(e => e.TransactionId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        builder.Navigation(t => t.Entries).UsePropertyAccessMode(PropertyAccessMode.Field);
+        // Entries is no longer an EF nav prop — JournalEntry is its own
+        // top-level DbSet, stitched in memory by LedgerService. Removing
+        // the cascade FK lets repo upserts persist Transaction and
+        // JournalEntry rows independently (Tables-shaped writes).
+        builder.Ignore(t => t.Entries);
     }
 }
