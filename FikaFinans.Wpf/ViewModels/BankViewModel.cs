@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
@@ -7,8 +9,10 @@ using DevExpress.Mvvm;
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Bank.Events;
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Bank.Trading;
 using FikaFinans.Infrastructure.Bank;
+using FikaFinans.Infrastructure.Pipeline.Csv;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels;
@@ -23,6 +27,7 @@ public sealed class BankViewModel : ViewModelBase, IDisposable
     private readonly ISettlementEngine? _settlementEngine;
     private readonly BankSimulator? _clock;
     private readonly IBankCsvImporter? _csvImporter;
+    private readonly IPositionsRepository? _positions;
     private readonly IPathsService? _paths;
     private readonly CompositeDisposable _disposables = new();
 
@@ -89,6 +94,7 @@ public sealed class BankViewModel : ViewModelBase, IDisposable
         ISettlementEngine settlementEngine,
         BankSimulator clock,
         IBankCsvImporter csvImporter,
+        IPositionsRepository positions,
         IPathsService paths) : this()
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -99,6 +105,7 @@ public sealed class BankViewModel : ViewModelBase, IDisposable
         _settlementEngine = settlementEngine ?? throw new ArgumentNullException(nameof(settlementEngine));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _csvImporter = csvImporter ?? throw new ArgumentNullException(nameof(csvImporter));
+        _positions = positions ?? throw new ArgumentNullException(nameof(positions));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
     }
 
@@ -189,10 +196,49 @@ public sealed class BankViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
-    private Task OnExportCsvAsync()
+    private async Task OnExportCsvAsync()
     {
-        _logger?.Info("Export positions.csv — not yet implemented");
-        return Task.CompletedTask;
+        if (_positions is null) return;
+        IsBusy = true;
+        try
+        {
+            var path = ResolveExportPath(DateTime.Now);
+            var dir = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(dir);
+
+            var rows = await _positions.QueryPartitionAsync("positions");
+            var csvRows = rows
+                .OrderBy(r => r.RowKey == "CASH" ? 1 : 0)
+                .ThenBy(r => r.Isin, StringComparer.Ordinal)
+                .Select(r => new PositionsCsvRow
+                {
+                    Isin = r.RowKey == "CASH" ? string.Empty : r.Isin,
+                    Name = r.Name,
+                    CurrentValueKr = r.CurrentValueKr,
+                    CostBasisKr = r.CostBasisKr,
+                });
+
+            await using var writer = new StreamWriter(path);
+            new PositionsCsvWriter().Write(writer, csvRows);
+            _logger?.Info("Exported positions to {Path}", path);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Error(ex, "Export positions CSV failed");
+        }
+        finally { IsBusy = false; }
+    }
+
+    // Same convention as the SQLite DB: %USERPROFILE%\Documents\FikaFinans\exports.
+    // Filename stamps the ISO week so cross-week exports accumulate a per-week
+    // history; same-week re-export overwrites.
+    private static string ResolveExportPath(DateTime now)
+    {
+        var week = ISOWeek.GetWeekOfYear(now);
+        var year = ISOWeek.GetYear(now);
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        return Path.Combine(docs, "FikaFinans", "exports",
+            $"positions-{year:D4}-W{week:D2}.csv");
     }
 
     private async Task RefreshAllAsync()
