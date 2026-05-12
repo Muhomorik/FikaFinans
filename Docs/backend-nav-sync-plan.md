@@ -1,19 +1,25 @@
 <!--
-  STATUS: NEW FEATURE — PLANNING ONLY.
-  No code exists yet. This document is a design sketch.
+  STATUS: BACKEND PIPELINE IS STILL PLANNING-ONLY (no Functions, no
+  Queue Storage, no Azure Tables binding, no IsinProgress table).
+  The local storage foundation this plan rests on (Tables-shaped repo
+  contract over SQLite) shipped 2026-05-10..2026-05-12 — see the inline
+  note in §"Storage — Azure Tables + Local SQLite Mirror" and the full
+  status in [storage-migration-plan.md §8](./storage-migration-plan.md#migration-phases).
 
   Authoring rules for AI assistants and humans editing this file:
   - DO NOT write code (no C#, no XAML, no JSON config snippets, no shell).
   - DO use Mermaid diagrams to express architecture, flows, and state.
   - Prose stays at the "what / why / where it lives" level — no API signatures,
-    no class names, no method bodies. Implementation belongs in a follow-up doc
-    once this plan is agreed on.
+    no class names, no method bodies. Implementation lives alongside the code;
+    this doc captures the intent.
   - DO NOT modify other documents from this plan. Cross-references are
     one-way: link out from this file to other docs, but never edit those
     other docs to point back here. This plan is self-contained; other
     docs (e.g. pipeline-plan.md) stay untouched.
   - DO NOT invent architecture. If a piece of the flow is not yet decided,
     write it as an open question, not as a confident design.
+  - When status changes, cross-link to the doc that owns the implementation
+    detail rather than restating it here.
 -->
 
 # Backend + NAV Sync — Feature Plan
@@ -425,9 +431,17 @@ orchestrator.
 
 ## Storage — Azure Tables + Local SQLite Mirror
 
-Azure Tables is the system of record. Local development uses SQLite as a
-faithful mirror, accessed via EF Core. Same shape, same access patterns —
-SQLite *behaves like* Tables, not the other way around.
+Azure Tables is the system of record in production. Local development
+uses SQLite as a faithful mirror behind the same repository contract.
+Same POCO, same access patterns — SQLite *behaves like* Tables, not the
+other way around.
+
+> **Status 2026-05-12.** The contract + the SQLite implementation are
+> live. The Azure Tables implementation is Phase 6 of the
+> [storage-migration-plan.md §8](./storage-migration-plan.md#migration-phases) —
+> not started. `AppSettings.Database.Provider` already accepts
+> `"AzureTables"` as a value; today it throws `NotImplementedException`
+> at DI startup.
 
 ```mermaid
 flowchart LR
@@ -442,26 +456,51 @@ flowchart LR
 
 ### Rules
 
-- **Shared entity shape.** `PartitionKey`, `RowKey`, `Timestamp`, `ETag`
-  are real properties on every entity. The same POCO serialises to both
-  stores.
-- **Repository hides the store.** Business code sees a storage interface;
-  one implementation targets Tables, the other EF/SQLite. Switching is a
-  DI swap.
-- **No relational features in the contract.** No foreign keys, no
-  navigation properties, no joins, no `IQueryable` leaks. Allowed query
-  shapes: PK lookup, PK + RK range scan, partition scan.
-- **Tables-shaped writes.** Batch transactions live within a single
-  partition (≤100 entities, ≤4 MB). The contract pretends SQLite has the
-  same constraint so behaviour matches in both modes.
-- **Explicit upsert / update.** No reliance on EF change tracking.
+- **Shared entity shape.** `PartitionKey` and `RowKey` are real properties
+  on every entity. ✅ Implemented locally via the
+  [`TableEntity`](../FikaFinans.Application/Storage/TableEntity.cs) base
+  class and the POCOs under
+  [`FikaFinans.Application/Storage/Bank/Entities/`](../FikaFinans.Application/Storage/Bank/Entities/).
+  Same POCO will serialise to both stores when the Tables binding lands.
+- **No ETag.** Last-write-wins everywhere — see
+  [storage-migration-plan.md §3.1](./storage-migration-plan.md#31-entity-shape-gap--keys-reshape-no-etag)
+  for the rationale and the per-entity safety argument. (Supersedes
+  the earlier draft of this section, which listed ETag as a required
+  property.) `Timestamp` survives only on rows where it carries
+  independent diagnostic value (`Positions.LastUpdatedAt`,
+  `TradingOrder.SubmittedAt`, `IsinProgress.ProcessingStartedAt`).
+- **Repository hides the store.** ✅ Implemented locally. Five repo
+  interfaces under
+  [`FikaFinans.Application/Storage/Bank/`](../FikaFinans.Application/Storage/Bank/);
+  SQLite implementations under
+  [`FikaFinans.Infrastructure/Storage/Sqlite/`](../FikaFinans.Infrastructure/Storage/Sqlite/);
+  the Tables implementations live behind the same interfaces in Phase 6.
+- **No relational features in the contract.** ✅ Implemented. No foreign
+  keys, no navigation properties, no joins, no `IQueryable` leaks. The
+  `Transaction.Entries` cascade-FK nav prop dropped in favour of a
+  two-reads + in-memory join in
+  [`LedgerService`](../FikaFinans.Infrastructure/Bank/LedgerService.cs).
+  Allowed query shapes on the contract: PK lookup, partition scan, and
+  a small set of typed cross-partition lookups (`QueryByStatusAsync`,
+  `QueryByAccountAsync`, etc.).
+- **Tables-shaped writes.** ✅ Implemented. Batch ops asserted to
+  single-partition + ≤100 rows via
+  [`TableBatchAsserts`](../FikaFinans.Infrastructure/Storage/Sqlite/TableBatchAsserts.cs);
+  the SQLite layer pretends to honour the Tables cap so behaviour
+  matches in both modes once Tables lands.
+- **Explicit upsert / update.** ✅ Implemented. Inserts go through
+  per-entity `Rehydrate(...)` factories (or row-POCO constructors for
+  `PositionRow`); updates use `db.Entry(...).CurrentValues.SetValues(...)`.
+  No reliance on EF change tracking across method boundaries.
 
 ### Acknowledged seams
 
-- Schema setup differs (EF migrations vs. "create table if not exists").
-  Run at startup, not unified.
-- A small dev-only utility refreshes SQLite from Azure Tables. The only
-  local-only code that exists.
+- Schema setup differs (`EnsureCreatedAsync` for SQLite at startup;
+  Tables is create-if-not-exists per-table at first write). Run at
+  startup, not unified.
+- A small dev-only utility refreshes SQLite from Azure Tables. **Not yet
+  built** — only earns its keep once a real Tables environment exists
+  to mirror from.
 
 ## Progress Table — Per-ISIN State
 

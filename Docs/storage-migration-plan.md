@@ -1,18 +1,20 @@
 <!--
-  STATUS: NEW FEATURE — PLANNING ONLY.
-  No code exists yet for this migration. This document is a design sketch.
+  STATUS: PHASES 1+2+3 SHIPPED 2026-05-10..2026-05-12; Phases 4-7 still
+  open. Per-phase status is annotated inline in §8 (Migration phases).
 
   Authoring rules for AI assistants and humans editing this file:
   - DO NOT write code (no C#, no XAML, no JSON config snippets, no shell).
   - DO use Mermaid diagrams to express architecture, flows, and state.
   - Prose stays at the "what / why / where it lives" level — no API
-    signatures, no class names, no method bodies. Implementation belongs
-    in a follow-up doc once this plan is agreed on.
+    signatures, no class names, no method bodies. Implementation lives
+    alongside the code; this doc captures the intent.
   - DO NOT modify other documents from this plan. Cross-references are
     one-way: link out from this file to other docs, but never edit those
     other docs to point back here.
   - DO NOT invent architecture. If a piece of the flow is not yet decided,
     write it as an open question, not as a confident design.
+  - When marking a phase done, link to the relevant code in the repo so
+    the doc stays a navigable map of what landed.
 -->
 
 # Storage Migration & Positions Table — Feature Plan
@@ -170,16 +172,16 @@ abstraction exists to prevent.
 
 ## Schema map
 
-| Today (EF in-memory) | Target | Notes |
+| Today (EF, SQLite-backed) | Target | Notes |
 | --- | --- | --- |
-| `Account` | `Account` (kept, repo-fronted) | Bank-sim ledger root. Reshaped per §3.2. |
-| `Fund` | dropped | Pipeline reads fund metadata from YR endpoint per [backend-nav-sync-plan.md §Data Fetch](./backend-nav-sync-plan.md#data-fetch--yr-fund-endpoint). No live consumer. |
-| `NavSnapshot` | dropped | NAV history flows through pipeline state, not a long-lived table. |
-| `FundHolding` | replaced by `Positions` (see §5) | Same data role; new shape, new consumer surface. |
-| `TradingOrder` | `TradingOrder` (kept, repo-fronted) | Output of Step 10's SendToBank. Backend pluggable. |
-| `Transaction`, `JournalEntry` | kept (bank-sim only) | Internal accounting; not on the pipeline path. |
-| _(none)_ | `IsinProgress` | New. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. |
-| _(none)_ | `PortfolioTrades` | New. Step 10 daily output. PK/RK shape an open question — see §10. |
+| `Account` | `Account` (kept, repo-fronted) ✅ | Bank-sim ledger root. Reshaped per §3.2. |
+| `Fund` | dropped — Phase 5 leftover | Still live in EF: read by `PortfolioQueryService`, `TradingService` settle, `BankCsvImporter` seed, `SettlementEngine`. Pipeline reads fund metadata from YR endpoint per [backend-nav-sync-plan.md §Data Fetch](./backend-nav-sync-plan.md#data-fetch--yr-fund-endpoint). |
+| `NavSnapshot` | dropped — Phase 5 leftover | Still live in EF as `Fund.NavHistory`. NAV history will flow through pipeline state, not a long-lived table. |
+| `FundHolding` | replaced by `Positions` ✅ | Done 2026-05-10. EF `DbSet`, configuration, and domain type all deleted. |
+| `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Backend pluggable (Phase 6). |
+| `Transaction`, `JournalEntry` | kept (bank-sim only) ✅ | Repo-fronted; cascade-FK nav prop replaced by two-reads + in-memory join in `LedgerService`. |
+| _(none)_ | `IsinProgress` | New. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. Phase 7. |
+| _(none)_ | `PortfolioTrades` | New. Step 10 daily output. PK/RK shape an open question — see §10. Phase 4. |
 
 ## Positions table
 
@@ -241,13 +243,12 @@ flowchart LR
 - **Different read shapes.** Step 1 wants *all* positions in one
   partition scan. Progress-row reads are PK lookups per ISIN.
 
-### 5.4 The table is the canonical input — CSV stops being a runtime concept
+### 5.4 The table is the canonical input — CSV stops being a runtime concept ✅ Done — 2026-05-10
 
 **Both Azure (Step 1 in the Function) and WPF read positions
 exclusively from the table.** No code path resolves them through a
-CSV file. The CSV format is not a parallel input, not a fallback,
-not an emergency seed mechanism. Once this section lands,
-`positions.csv` ceases to exist as a runtime concept.
+CSV file at runtime. The CSV format is not a parallel input, not a
+fallback, not an emergency read.
 
 Where CSV-shaped data still appears, it is generated *from* the
 table on the fly:
@@ -277,10 +278,14 @@ prime it. There is no "import positions.csv" runtime path.
 
 **Net effect.**
 [PositionsCsvParser.cs](../FikaFinans.Infrastructure/Pipeline/Csv/PositionsCsvParser.cs)
-and the `multiple_cash_rows` halt branch lose their runtime caller.
-They survive only if the test-fixture adapter keeps using them;
-otherwise they're deleted in the same phase that introduces the
-table.
+survives — used by
+[BankCsvImporter](../FikaFinans.Infrastructure/Bank/BankCsvImporter.cs)'s
+one-shot seed, by the test-fixture
+`InMemoryPositionsRepository.SeededFromCsv` adapter, and by the
+`PositionsCsvParserTests` unit tests. It just has no runtime caller
+from the agent pipeline anymore. A new
+[PositionsCsvWriter](../FikaFinans.Infrastructure/Pipeline/Csv/PositionsCsvWriter.cs)
+mirrors its column shape for the WPF diagnostic export.
 
 ## Step 10 + SendToBank rewiring
 
@@ -367,24 +372,73 @@ constraint: Phase 4 needs Phase 3.
    phase is purely "stop losing state on exit." `Provider` setting now
    accepts `Sqlite` (default), `InMemory` (kept for tests), or
    `AzureTables` (placeholder, throws — wired up in Phase 6).
-2. **Introduce the repository abstraction.** Each `BankDbContext`
-   consumer migrates to a repository interface, even if SQLite/EF is
-   the only implementation for now. Sets up the swap point.
-3. **Add the Positions table; switch Step 1 onto it.** Stop using
-   `FundHolding` from the pipeline path. Stop using `positions.csv`
-   from the runtime path entirely (per §5.4). Tests seed the
-   repository directly; production starts with an empty table that
-   SendToBank populates on first run.
-4. **Move SendToBank into the Step 10 Function.** Function reads
-   Positions, writes `TradingOrder`. WPF becomes the read-only view
-   (or keeps a manual trigger — open question in §10).
+2. **Introduce the repository abstraction.** ✅ **Done — 2026-05-10.**
+   Five Tables-shaped repo interfaces under
+   [FikaFinans.Application/Storage/Bank](../FikaFinans.Application/Storage/Bank/)
+   (`IAccountsRepository`, `ITradingOrdersRepository`,
+   `ITransactionsRepository`, `IJournalEntriesRepository`,
+   `IPositionsRepository`) plus POCO row entities under
+   `…/Storage/Bank/Entities/`. SQLite implementations under
+   [FikaFinans.Infrastructure/Storage/Sqlite](../FikaFinans.Infrastructure/Storage/Sqlite/);
+   each opens a fresh `BankDbContext` per public method via the
+   factory from Phase 1. Bank-sim consumers (`TradingService`,
+   `LedgerService`, `PortfolioQueryService`,
+   [BankCsvImporter](../FikaFinans.Infrastructure/Bank/BankCsvImporter.cs))
+   read/write through the interfaces. `Transaction.Entries` cascade-FK
+   nav prop dropped in favour of a two-reads + in-memory join in
+   `LedgerService`. **Consumers that touch `Fund`/`NavSnapshot` still
+   hold an `IDbContextFactory<BankDbContext>`** — closing that gap is
+   tracked under Phase 5 below.
+3. **Add the Positions table; switch Step 1 onto it.** ✅ **Done — 2026-05-10.**
+   New
+   [PositionRow](../FikaFinans.Infrastructure/Storage/Sqlite/Entities/PositionRow.cs)
+   table backs
+   [IPositionsRepository](../FikaFinans.Application/Storage/Bank/IPositionsRepository.cs)
+   (`PartitionKey = "positions"`; `RowKey = ISIN | "CASH"`). Schema
+   carries `Units` + `AvgCostPerUnit` beyond the CSV shape — needed
+   for the bank-sim's unit-based sell flow per the chunk-5 design
+   note. [DataLoaderAgent](../FikaFinans.Infrastructure/Pipeline/Agents/DataLoaderAgent.cs)
+   reads from the repo via an internal `ToPositionsParseResult`
+   adapter; the CSV-flavoured `PositionsParseResult` DTO survives only
+   as an in-process shape between the adapter and `Join(...)`.
+   [BankCsvImporter](../FikaFinans.Infrastructure/Bank/BankCsvImporter.cs)
+   is now a one-shot seed — first run reads `positions.csv` and
+   upserts; subsequent runs short-circuit. WPF gained a one-way
+   "Export Positions CSV" diagnostic that writes
+   `%USERPROFILE%\Documents\FikaFinans\exports\positions-{yyyy}-W{ww}.csv`
+   via a new
+   [PositionsCsvWriter](../FikaFinans.Infrastructure/Pipeline/Csv/PositionsCsvWriter.cs).
+   `positions.csv` is no longer a runtime read path — only a seed +
+   test-fixture input + diagnostic output, exactly per §5.4.
+4. **Move SendToBank into the Step 10 Function.** **Not started.**
+   Blocked on the queue-driven backend from
+   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md) existing.
+   Function reads Positions, writes `TradingOrder`. WPF becomes the
+   read-only view (or keeps a manual trigger — open question in §10).
 5. **Drop `Fund`, `NavSnapshot`, `FundHolding`** once nothing reads
-   them.
+   them. 🟡 **Partial — `FundHolding` retired 2026-05-10.** The EF
+   `DbSet<FundHolding>`, its configuration, the `FundHolding` domain
+   type, and `FundHoldingId` are all gone. `Fund` + `NavSnapshot`
+   still alive in EF: `PortfolioQueryService.GetFundPositionsAsync`
+   reads `db.Funds.Include(f => f.NavHistory)` for NAV + display name,
+   `TradingService.SettleBuyOrderAsync` reads `db.Funds` to get
+   `Isin`/`Name` for the holdings-account creation, `BankCsvImporter`
+   creates `Fund` records on first seed, and `SettlementEngine` reads
+   `db.Funds.Include(f => f.NavHistory)` per pending order. Closing
+   this out needs a Funds repo (with NAV history attached or split)
+   so those four consumers don't hold the EF context — see open
+   question in §10.
 6. **Add the Azure Tables implementation behind each repository
-   interface.** DI swap by config. SQLite stays as the local-dev
-   path.
+   interface.** **Not started.** Five `AzureTables*Repository` classes
+   that target Azurite locally / Azure Tables in prod. DI swap by
+   config (`AppSettings.Database.Provider = "AzureTables"` — already
+   accepted as a value, currently throws `NotImplementedException`
+   in
+   [InfrastructureModule](../FikaFinans.Infrastructure/DependencyInjection/InfrastructureModule.cs)).
+   SQLite stays as the local-dev default.
 7. **Per-ISIN progress row + step JSON columns** land in the same
-   table-fronted contract as the rest of the data. This is when
+   table-fronted contract as the rest of the data. **Not started —**
+   gated on Phase 4. This is when
    [backend-nav-sync-plan.md](./backend-nav-sync-plan.md)'s storage
    section becomes real.
 
@@ -407,24 +461,48 @@ constraint: Phase 4 needs Phase 3.
 
 ## Open questions
 
-- **Manual SendToBank trigger in WPF** — kept or removed?
-- **`TradingOrder` `RowKey` exact form.** Working assumption:
-  composite `(isin, side)` per §3.2. Edge case: two trades for the
-  same ISIN+side in the same day (rare; PartialSell scenarios) — does
-  the second overwrite the first, or do we add a sequence suffix?
+- **Manual SendToBank trigger in WPF** — kept or removed? Currently
+  kept; the WPF Bank tab still has its create-buy/sell/settle buttons
+  against the local bank-sim. Phase 4 decides whether they stay
+  alongside the daily Function or get removed in favour of a
+  read-only WPF view.
+- **`TradingOrder` `RowKey` exact form.** ✅ **Resolved 2026-05-10.**
+  Composite `"{isin}/{side}"` per §3.2; second submission on the same
+  ISIN+side+day overwrites the first (last-write-wins). PartialSell
+  scenarios that need two same-day same-side trades will need a
+  sequence suffix when they materialise — not a problem today.
 - **Reconciliation trigger** — synchronous after ack vs event
-  callback from the bank stub.
-- **Cash row representation** — `RowKey = "CASH"` vs sentinel ISIN
-  vs separate row outside the partition. Lean toward the first.
+  callback from the bank stub. Still open. The current bank-sim
+  settlement reconciliation runs on the night-tick from `BankSimulator`
+  per [SettlementEngine.cs](../FikaFinans.Infrastructure/Bank/SettlementEngine.cs);
+  Phase 4 picks the production shape.
+- **Cash row representation** — ✅ **Resolved 2026-05-10.**
+  `RowKey = "CASH"` chosen; same partition as the per-ISIN rows.
+  Mirrored across the SQLite-backed `Positions` table and the
+  test-side `InMemoryPositionsRepository`.
+- **Position schema beyond the CSV shape** — ✅ **Resolved 2026-05-10.**
+  Added `Units` + `AvgCostPerUnit` (precision `decimal(18, 6)`) so
+  the bank-sim's unit-based sell flow keeps its "sell N units; cost
+  basis = N × AvgCostPerUnit" semantics without round-tripping
+  through NAV. The CSV stays value-only; the extra columns ride on
+  the row but aren't surfaced through the diagnostic export.
 - **SQLite schema-evolution strategy** — `EnsureCreated` initially;
-  proper EF migrations later. When?
+  proper EF migrations later. Still open. Today's seam: deleting
+  the `.db` file and letting `EnsureCreated` rebuild it. Acceptable
+  while there's no production data.
 - **Storage-account split.** Whether `Account` /
   `Transaction` / `JournalEntry` (the bank-sim ledger) belong in the
   same storage account as the pipeline state, or in a separate one
-  for blast-radius reasons.
+  for blast-radius reasons. Still open. Decided at Phase 6.
 - **`PortfolioTrades` PK/RK shape.** Single daily row vs per-ISIN
   column — already tracked in
   [backend-nav-sync-plan.md §"Step 10 — Daily Portfolio Trades"](./backend-nav-sync-plan.md#step-10--daily-portfolio-trades).
+  Decided at Phase 4.
+- **Funds repo shape** — new question, surfaced by Phase 5 leftovers.
+  Whether `Fund` + its `NavHistory` collection split into two repos
+  (funds + nav snapshots) or stay as a single aggregate. Today's
+  consumers all want them together (NAV-by-ISIN reads), so a single
+  repo is the lean answer.
 
 ## Out of scope
 
