@@ -173,10 +173,9 @@ public sealed class InfrastructureModule : Autofac.Module
     /// <summary>
     /// Tables-shaped SQLite repositories. Each repo owns its
     /// <see cref="IDbContextFactory{BankDbContext}"/>; they're stateless and
-    /// safe as singletons. Chunk 4 wired <c>LedgerService</c> + <c>TradingService</c>
-    /// onto the trading-orders / transactions / journal-entries repos;
-    /// <c>BankCsvImporter</c> still touches <c>FundHolding</c>/<c>Fund</c>
-    /// via direct EF until chunks 5 / Phase 5 retire those.
+    /// safe as singletons. Phase 5 retired the last EF-direct surfaces in
+    /// the bank-sim — every consumer now reaches <c>Fund</c>/<c>NavSnapshot</c>
+    /// through <see cref="IFundsRepository"/>.
     /// </summary>
     private static void RegisterStorageRepositories(ContainerBuilder builder)
     {
@@ -198,6 +197,10 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.RegisterType<SqlitePositionsRepository>()
             .As<IPositionsRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqliteFundsRepository>()
+            .As<IFundsRepository>()
             .SingleInstance();
     }
 

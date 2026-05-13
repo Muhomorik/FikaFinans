@@ -1,11 +1,9 @@
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
-using FikaFinans.Domain.Bank.Funds;
 using FikaFinans.Domain.Funds;
-using FikaFinans.Infrastructure.Bank.Persistence;
+using FikaFinans.Domain.Identifiers;
 using FikaFinans.Infrastructure.Pipeline.Csv;
-using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank;
@@ -18,9 +16,8 @@ namespace FikaFinans.Infrastructure.Bank;
 /// re-seeds.
 /// </summary>
 /// <remarks>
-/// <c>FundHolding</c> retired in chunk 5 — this importer no longer touches
-/// it. <c>Fund</c> records still get created via direct EF because
-/// <c>Fund</c> isn't on a repo yet (Phase 5 cleanup); the seeded NAV
+/// Phase 5 migration: <see cref="Domain.Bank.Funds.Fund"/> records now
+/// flow through <see cref="IFundsRepository"/>. The seeded NAV
 /// (<c>ImportNavPerUnit</c>) is the bootstrap unit price used to derive
 /// <c>Units</c> and <c>AvgCostPerUnit</c> from the value-only CSV.
 /// </remarks>
@@ -31,19 +28,19 @@ public sealed class BankCsvImporter : IBankCsvImporter
     private const string CashRowKey = "CASH";
 
     private readonly ILogger _logger;
-    private readonly IDbContextFactory<BankDbContext> _dbFactory;
     private readonly IPositionsRepository _positions;
+    private readonly IFundsRepository _funds;
     private readonly BankSimulator _clock;
 
     public BankCsvImporter(
         ILogger logger,
-        IDbContextFactory<BankDbContext> dbFactory,
         IPositionsRepository positions,
+        IFundsRepository funds,
         BankSimulator clock)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
         _positions = positions ?? throw new ArgumentNullException(nameof(positions));
+        _funds = funds ?? throw new ArgumentNullException(nameof(funds));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
@@ -81,23 +78,35 @@ public sealed class BankCsvImporter : IBankCsvImporter
         var now = _clock.Now;
         var rows = new List<PositionEntity>(result.Holdings.Count + 1);
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         foreach (var position in result.Holdings)
         {
-            var isinStr = position.Isin.Value;
-
-            var allFunds = await db.Funds.Include(f => f.NavHistory).ToListAsync(ct);
-            var fund = allFunds.FirstOrDefault(f => f.Isin.Value == isinStr);
-
+            var isin = position.Isin;
+            var fund = await _funds.GetByIsinAsync(isin, ct);
             if (fund is null)
             {
-                fund = Fund.Create(position.Name ?? isinStr, isinStr);
-                fund.RecordNav(now, ImportNavPerUnit);
-                db.Funds.Add(fund);
-                await db.SaveChangesAsync(ct);
+                var newFund = new FundEntity
+                {
+                    PartitionKey = "funds",
+                    RowKey = isin.Value,
+                    FundId = Guid.NewGuid(),
+                    Name = position.Name ?? isin.Value,
+                    Isin = isin.Value,
+                    Currency = "SEK"
+                };
+                await _funds.UpsertAsync(newFund, ct);
+                await _funds.UpsertNavAsync(new NavSnapshotEntity
+                {
+                    PartitionKey = "nav/" + isin.Value,
+                    RowKey = now.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
+                    NavSnapshotId = Guid.NewGuid(),
+                    FundId = newFund.FundId,
+                    Isin = isin.Value,
+                    Date = now,
+                    NavPerUnit = ImportNavPerUnit
+                }, ct);
             }
 
-            var nav = fund.GetLatestNav();
+            var nav = await _funds.GetLatestNavAsync(isin, ct) ?? ImportNavPerUnit;
             if (nav <= 0) nav = ImportNavPerUnit;
 
             var units = position.CurrentValueKr / nav;
@@ -106,8 +115,8 @@ public sealed class BankCsvImporter : IBankCsvImporter
             rows.Add(new PositionEntity
             {
                 PartitionKey = PositionsPartition,
-                RowKey = isinStr,
-                Isin = isinStr,
+                RowKey = isin.Value,
+                Isin = isin.Value,
                 Name = position.Name,
                 CurrentValueKr = position.CurrentValueKr,
                 CostBasisKr = position.CostBasisKr,

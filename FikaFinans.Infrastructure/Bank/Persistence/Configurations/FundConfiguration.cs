@@ -17,11 +17,10 @@ public class FundConfiguration : IEntityTypeConfiguration<Fund>
         builder.Property(f => f.Isin).IsRequired().HasMaxLength(12);
         builder.Property(f => f.Currency).IsRequired().HasMaxLength(3);
 
-        builder.HasMany(f => f.NavHistory)
-            .WithOne()
-            .HasForeignKey(n => n.FundId)
-            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(f => f.Isin);
 
-        builder.Navigation(f => f.NavHistory).UsePropertyAccessMode(PropertyAccessMode.Field);
+        // NavHistory is no longer EF-managed. The Funds repo populates the
+        // backing field manually via Fund.Rehydrate(...) when needed.
+        builder.Ignore(f => f.NavHistory);
     }
 }

@@ -1,5 +1,7 @@
+using System.Globalization;
+using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Bank.Accounts;
-using FikaFinans.Domain.Bank.Funds;
 using FikaFinans.Domain.Bank.Ledger;
 using Microsoft.EntityFrameworkCore;
 using NLog;
@@ -10,12 +12,14 @@ public class DataSeeder
 {
     private readonly ILogger _logger;
     private readonly IDbContextFactory<BankDbContext> _dbFactory;
+    private readonly IFundsRepository _funds;
     private readonly BankSimulator _clock;
 
-    public DataSeeder(ILogger logger, IDbContextFactory<BankDbContext> dbFactory, BankSimulator clock)
+    public DataSeeder(ILogger logger, IDbContextFactory<BankDbContext> dbFactory, IFundsRepository funds, BankSimulator clock)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
+        _funds = funds ?? throw new ArgumentNullException(nameof(funds));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
@@ -34,8 +38,8 @@ public class DataSeeder
 
         _logger.Info("Seeding database...");
         SeedChartOfAccounts(db);
-        SeedFunds(db);
         await db.SaveChangesAsync();
+        await SeedFundsAsync();
         await SeedInitialDepositAsync(db);
         _logger.Info("Database seeding complete");
     }
@@ -55,33 +59,49 @@ public class DataSeeder
         _logger.Info("Seeded {0} chart of accounts entries", accounts.Length);
     }
 
-    private void SeedFunds(BankDbContext db)
+    private async Task SeedFundsAsync()
     {
         var baseDate = _clock.Now.AddDays(-30);
 
-        var globalIndex = Fund.Create("Avanza Global Index Fund", "SE0012345678");
-        globalIndex.RecordNav(baseDate, 185.50m);
-        globalIndex.RecordNav(baseDate.AddDays(7), 187.20m);
-        globalIndex.RecordNav(baseDate.AddDays(14), 184.90m);
-        globalIndex.RecordNav(baseDate.AddDays(21), 189.75m);
-        globalIndex.RecordNav(baseDate.AddDays(28), 100.00m);
+        await SeedFundWithNavsAsync("Avanza Global Index Fund", "SE0012345678", baseDate,
+            new[] { 185.50m, 187.20m, 184.90m, 189.75m, 100.00m });
 
-        var techFund = Fund.Create("Handelsbanken Tech Theme", "SE0098765432");
-        techFund.RecordNav(baseDate, 342.10m);
-        techFund.RecordNav(baseDate.AddDays(7), 348.50m);
-        techFund.RecordNav(baseDate.AddDays(14), 339.80m);
-        techFund.RecordNav(baseDate.AddDays(21), 355.25m);
-        techFund.RecordNav(baseDate.AddDays(28), 360.00m);
+        await SeedFundWithNavsAsync("Handelsbanken Tech Theme", "SE0098765432", baseDate,
+            new[] { 342.10m, 348.50m, 339.80m, 355.25m, 360.00m });
 
-        var bondFund = Fund.Create("SPP Obligationsfond", "SE0011223344");
-        bondFund.RecordNav(baseDate, 108.20m);
-        bondFund.RecordNav(baseDate.AddDays(7), 108.45m);
-        bondFund.RecordNav(baseDate.AddDays(14), 108.30m);
-        bondFund.RecordNav(baseDate.AddDays(21), 108.60m);
-        bondFund.RecordNav(baseDate.AddDays(28), 108.75m);
+        await SeedFundWithNavsAsync("SPP Obligationsfond", "SE0011223344", baseDate,
+            new[] { 108.20m, 108.45m, 108.30m, 108.60m, 108.75m });
 
-        db.Funds.AddRange(globalIndex, techFund, bondFund);
         _logger.Info("Seeded 3 funds with NAV history");
+    }
+
+    private async Task SeedFundWithNavsAsync(string name, string isin, DateTimeOffset baseDate, decimal[] navs)
+    {
+        var fundId = Guid.NewGuid();
+        await _funds.UpsertAsync(new FundEntity
+        {
+            PartitionKey = "funds",
+            RowKey = isin,
+            FundId = fundId,
+            Name = name,
+            Isin = isin,
+            Currency = "SEK"
+        });
+
+        for (var i = 0; i < navs.Length; i++)
+        {
+            var date = baseDate.AddDays(i * 7);
+            await _funds.UpsertNavAsync(new NavSnapshotEntity
+            {
+                PartitionKey = "nav/" + isin,
+                RowKey = date.ToString("o", CultureInfo.InvariantCulture),
+                NavSnapshotId = Guid.NewGuid(),
+                FundId = fundId,
+                Isin = isin,
+                Date = date,
+                NavPerUnit = navs[i]
+            });
+        }
     }
 
     private async Task SeedInitialDepositAsync(BankDbContext db)

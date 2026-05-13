@@ -23,4 +23,19 @@ public class NavSnapshot
             NavPerUnit = navPerUnit
         };
     }
+
+    /// <summary>
+    /// Reconstruct a NavSnapshot from persisted storage. Skips validation;
+    /// callers must guarantee the input is already valid.
+    /// </summary>
+    public static NavSnapshot Rehydrate(NavSnapshotId id, FundId fundId, DateTimeOffset date, decimal navPerUnit)
+    {
+        return new NavSnapshot
+        {
+            Id = id,
+            FundId = fundId,
+            Date = date,
+            NavPerUnit = navPerUnit
+        };
+    }
 }

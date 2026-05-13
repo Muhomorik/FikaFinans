@@ -3,9 +3,8 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Bank.Events;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Bank.Trading;
-using FikaFinans.Infrastructure.Bank.Persistence;
-using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank;
@@ -15,7 +14,7 @@ public class SettlementEngine : ISettlementEngine
     private readonly ILogger _logger;
     private readonly BankSimulator _clock;
     private readonly ITradingService _tradingService;
-    private readonly IDbContextFactory<BankDbContext> _dbFactory;
+    private readonly IFundsRepository _funds;
     private readonly Subject<OrderSettledEvent> _orderSettled = new();
     private readonly Subject<SettlementRunCompleteEvent> _settlementRunComplete = new();
     private readonly CompositeDisposable _disposables = new();
@@ -27,12 +26,12 @@ public class SettlementEngine : ISettlementEngine
         ILogger logger,
         BankSimulator clock,
         ITradingService tradingService,
-        IDbContextFactory<BankDbContext> dbFactory)
+        IFundsRepository funds)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _tradingService = tradingService ?? throw new ArgumentNullException(nameof(tradingService));
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
+        _funds = funds ?? throw new ArgumentNullException(nameof(funds));
     }
 
     public void Start()
@@ -54,20 +53,16 @@ public class SettlementEngine : ISettlementEngine
 
         _logger.Info("Settlement run starting: {0} pending orders at {1}", pendingOrders.Count, settlementTime);
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
         foreach (var order in pendingOrders)
         {
-            var fund = await db.Funds
-                .Include(f => f.NavHistory)
-                .FirstOrDefaultAsync(f => f.Id == order.FundId);
-
-            if (fund == null)
+            var fund = await _funds.GetByIdAsync(order.FundId);
+            if (fund is null)
             {
                 _logger.Warn("Fund {0} not found for order {1}, skipping", order.FundId, order.Id);
                 continue;
             }
 
-            var nav = fund.GetLatestNav();
+            var nav = await _funds.GetLatestNavByFundIdAsync(order.FundId) ?? 0m;
             if (nav <= 0)
             {
                 _logger.Warn("No valid NAV for fund {0}, skipping order {1}", fund.Name, order.Id);

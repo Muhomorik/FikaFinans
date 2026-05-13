@@ -49,4 +49,23 @@ public class Fund
         var snapshot = _navHistory.Where(n => n.Date <= date).MaxBy(n => n.Date);
         return snapshot?.NavPerUnit ?? 0;
     }
+
+    /// <summary>
+    /// Reconstruct a Fund from persisted storage. Skips the invariants
+    /// enforced by <see cref="Create"/> and <see cref="RecordNav"/> —
+    /// callers must guarantee the input is already valid.
+    /// </summary>
+    public static Fund Rehydrate(FundId id, string name, Isin isin, string currency, IEnumerable<NavSnapshot> navHistory)
+    {
+        var fund = new Fund
+        {
+            Id = id,
+            Name = name,
+            Isin = isin,
+            Currency = currency
+        };
+        foreach (var nav in navHistory.OrderBy(n => n.Date))
+            fund._navHistory.Add(nav);
+        return fund;
+    }
 }

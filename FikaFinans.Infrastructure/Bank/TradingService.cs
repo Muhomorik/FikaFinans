@@ -5,43 +5,41 @@ using FikaFinans.Domain.Bank.Common;
 using FluentResults;
 using FikaFinans.Domain.Bank.Identifiers;
 using FikaFinans.Domain.Bank.Trading;
-using FikaFinans.Infrastructure.Bank.Persistence;
-using Microsoft.EntityFrameworkCore;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank;
 
 /// <summary>
-/// Trading service. Accounts, trading orders, and held positions all flow
-/// through repos. <see cref="Domain.Bank.Funds.Fund"/> (NAV history, ISIN,
-/// name) stays on direct EF until Phase 5 retires it.
+/// Trading service. Every read and write goes through a Tables-shaped
+/// repo — accounts, trading orders, held positions, and (since Phase 5)
+/// fund metadata. No direct EF.
 /// </summary>
 public class TradingService : ITradingService
 {
     private const string PositionsPartition = "positions";
 
     private readonly ILogger _logger;
-    private readonly IDbContextFactory<BankDbContext> _dbFactory;
     private readonly IAccountsRepository _accounts;
     private readonly ITradingOrdersRepository _tradingOrders;
     private readonly IPositionsRepository _positions;
+    private readonly IFundsRepository _funds;
     private readonly ILedgerService _ledgerService;
     private readonly BankSimulator _clock;
 
     public TradingService(
         ILogger logger,
-        IDbContextFactory<BankDbContext> dbFactory,
         IAccountsRepository accounts,
         ITradingOrdersRepository tradingOrders,
         IPositionsRepository positions,
+        IFundsRepository funds,
         ILedgerService ledgerService,
         BankSimulator clock)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _tradingOrders = tradingOrders ?? throw new ArgumentNullException(nameof(tradingOrders));
         _positions = positions ?? throw new ArgumentNullException(nameof(positions));
+        _funds = funds ?? throw new ArgumentNullException(nameof(funds));
         _ledgerService = ledgerService ?? throw new ArgumentNullException(nameof(ledgerService));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
@@ -154,12 +152,11 @@ public class TradingService : ITradingService
         if (pendingBuyAccount is null)
             return Result.Fail("Required accounts not found.");
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var fund = await db.Funds.FirstOrDefaultAsync(f => f.Id == order.FundId, ct);
+        var fund = await _funds.GetByIdAsync(order.FundId, ct);
         if (fund is null)
             return Result.Fail("Fund not found.");
 
-        var fundHoldingsAccount = await GetOrCreateFundHoldingsAccountAsync(fund.Id, fund.Name, order.Currency, ct);
+        var fundHoldingsAccount = await GetOrCreateFundHoldingsAccountAsync(new FundId(fund.FundId), fund.Name, order.Currency, ct);
 
         var pendingBuyAccountId = new AccountId(pendingBuyAccount.AccountId);
         var fundHoldingsAccountId = new AccountId(fundHoldingsAccount.AccountId);
@@ -174,7 +171,7 @@ public class TradingService : ITradingService
             return Result.Fail(postResult.Errors);
 
         var settledUnits = order.SettledUnits!.Value;
-        var existing = await _positions.GetAsync(PositionsPartition, fund.Isin.Value, ct);
+        var existing = await _positions.GetAsync(PositionsPartition, fund.Isin, ct);
 
         var oldUnits = existing?.Units ?? 0m;
         var oldCostBasis = existing?.CostBasisKr ?? 0m;
@@ -186,8 +183,8 @@ public class TradingService : ITradingService
         await _positions.UpsertAsync(new PositionEntity
         {
             PartitionKey = PositionsPartition,
-            RowKey = fund.Isin.Value,
-            Isin = fund.Isin.Value,
+            RowKey = fund.Isin,
+            Isin = fund.Isin,
             Name = existing?.Name ?? fund.Name,
             CurrentValueKr = newCurrentValue,
             CostBasisKr = newCostBasis,
@@ -345,9 +342,8 @@ public class TradingService : ITradingService
 
     private async Task<string> ResolveIsinAsync(FundId fundId, CancellationToken ct)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var fund = await db.Funds.AsNoTracking().FirstOrDefaultAsync(f => f.Id == fundId, ct);
-        return fund?.Isin.Value ?? string.Empty;
+        var fund = await _funds.GetByIdAsync(fundId, ct);
+        return fund?.Isin ?? string.Empty;
     }
 
     private static PositionEntity WithUpdates(

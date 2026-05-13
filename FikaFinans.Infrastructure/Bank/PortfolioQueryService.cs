@@ -3,16 +3,15 @@ using FikaFinans.Application.Bank.Events;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Bank.Common;
 using FikaFinans.Domain.Bank.Identifiers;
-using FikaFinans.Infrastructure.Bank.Persistence;
-using Microsoft.EntityFrameworkCore;
+using FikaFinans.Domain.Identifiers;
 using NLog;
 
 namespace FikaFinans.Infrastructure.Bank;
 
 /// <summary>
-/// Read-only portfolio queries. Holdings come from the Positions repo
-/// (chunk 5); <see cref="Domain.Bank.Funds.Fund"/> NAV history still
-/// goes via direct EF until Phase 5 retires it.
+/// Read-only portfolio queries. All reads flow through Tables-shaped
+/// repos — holdings via <see cref="IPositionsRepository"/>, fund metadata
+/// and NAV history via <see cref="IFundsRepository"/>. No direct EF.
 /// </summary>
 public class PortfolioQueryService : IPortfolioQueryService
 {
@@ -20,22 +19,22 @@ public class PortfolioQueryService : IPortfolioQueryService
     private const string CashRowKey = "CASH";
 
     private readonly ILogger _logger;
-    private readonly IDbContextFactory<BankDbContext> _dbFactory;
     private readonly IAccountsRepository _accounts;
     private readonly IPositionsRepository _positions;
+    private readonly IFundsRepository _funds;
     private readonly ILedgerService _ledgerService;
 
     public PortfolioQueryService(
         ILogger logger,
-        IDbContextFactory<BankDbContext> dbFactory,
         IAccountsRepository accounts,
         IPositionsRepository positions,
+        IFundsRepository funds,
         ILedgerService ledgerService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _positions = positions ?? throw new ArgumentNullException(nameof(positions));
+        _funds = funds ?? throw new ArgumentNullException(nameof(funds));
         _ledgerService = ledgerService ?? throw new ArgumentNullException(nameof(ledgerService));
     }
 
@@ -53,9 +52,8 @@ public class PortfolioQueryService : IPortfolioQueryService
         var holdings = rows.Where(r => r.RowKey != CashRowKey && r.Units > 0).ToList();
         if (holdings.Count == 0) return Array.Empty<FundPositionDto>();
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var allFunds = await db.Funds.AsNoTracking().Include(f => f.NavHistory).ToListAsync(ct);
-        var fundsByIsin = allFunds.ToDictionary(f => f.Isin.Value, f => f);
+        var allFunds = await _funds.QueryPartitionAsync("funds", ct);
+        var fundsByIsin = allFunds.ToDictionary(f => f.Isin, StringComparer.Ordinal);
 
         var positions = new List<FundPositionDto>(holdings.Count);
         foreach (var h in holdings)
@@ -63,7 +61,7 @@ public class PortfolioQueryService : IPortfolioQueryService
             if (!fundsByIsin.TryGetValue(h.Isin, out var fund))
                 continue;
 
-            var currentNav = fund.GetLatestNav();
+            var currentNav = await _funds.GetLatestNavByFundIdAsync(new FundId(fund.FundId), ct) ?? 0m;
             var currency = "SEK";
             var currentValue = new Money(h.Units * currentNav, currency);
             var costBasis = new Money(h.CostBasisKr, currency);
@@ -73,7 +71,7 @@ public class PortfolioQueryService : IPortfolioQueryService
                 : 0;
 
             positions.Add(new FundPositionDto(
-                fund.Id, fund.Name, fund.Isin, h.Units,
+                new FundId(fund.FundId), fund.Name, new Isin(fund.Isin), h.Units,
                 currentValue, costBasis, unrealizedGainLoss, gainLossPercent));
         }
 
