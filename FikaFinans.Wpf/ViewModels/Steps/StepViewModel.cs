@@ -175,6 +175,16 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
     protected abstract Task RunStepCoreAsync();
 
     /// <summary>
+    /// Refresh <see cref="OutputJson"/> and <see cref="OutputSummaryText"/> from
+    /// the step's persisted output file. Called by
+    /// <see cref="FikaFinans.Wpf.ViewModels.MainWindowViewModel"/> after the
+    /// orchestrator reports the step finished — the agent has already written
+    /// its file, the VM just re-reads it for display. Base implementation is a
+    /// no-op; each step VM overrides with its own deserialize + summary logic.
+    /// </summary>
+    public virtual Task LoadOutputAsync() => Task.CompletedTask;
+
+    /// <summary>
     /// Called by <see cref="FikaFinans.Wpf.ViewModels.MainWindowViewModel"/> to await
     /// each step during a "Run all" chain without going through the ICommand layer.
     /// </summary>
