@@ -87,11 +87,30 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
             return;
         }
 
-        var output = await _agent.RunAsync(IsoWeek, RunId);
+        await _agent.RunAsync(IsoWeek, RunId);
+        await LoadOutputAsync();
+    }
+
+    public override async Task LoadOutputAsync()
+    {
+        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.UniverseEnricherOutput(IsoWeek, RunId);
-        if (File.Exists(outPath))
-            OutputJson = await File.ReadAllTextAsync(outPath);
+        if (!File.Exists(outPath))
+        {
+            OutputSummaryText = "Output file not found";
+            return;
+        }
+
+        var json = await File.ReadAllTextAsync(outPath);
+        OutputJson = json;
+
+        var output = JsonSerializer.Deserialize<DataLoaderOutput>(json, JsonOptions.Default);
+        if (output is null)
+        {
+            OutputSummaryText = "Output file present but unreadable";
+            return;
+        }
 
         BuildSignalsChart(output);
         OutputSummaryText = $"{output.Funds.Count} funds — universe enriched";

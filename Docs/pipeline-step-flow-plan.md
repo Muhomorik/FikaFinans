@@ -11,45 +11,47 @@
   happy path, error path, cancellation, single-step run, and
   `StepId` validation.
 
-  WPF VM MIGRATION — IN PROGRESS (paused mid-refactor 2026-05-24).
-  This is the sub-step that swaps the WPF "Run All" loop from
-  iterating `StepViewModel`s to calling `IPipelineRunner.RunAllAsync`
-  plus an `Events` subscription that drives the step-tab status pips
-  live. Shape: each step VM exposes a new `LoadOutputAsync()` that
-  re-reads its output file and refreshes display state (split out
-  from `RunStepCoreAsync`, which now calls the agent + delegates to
-  `LoadOutputAsync`). `MainWindowViewModel` subscribes to the
-  runner's events on `_uiScheduler` and routes each event to the
-  corresponding VM:
-  - `Started`  → `Status = Running`, `IsRunning = true`
-  - `Succeeded` → `Status = Ok`, `LastRunText`/`DurationText` set,
-    `await vm.LoadOutputAsync()`
-  - `Failed`   → `Status = Error`, `ErrorText = Message`,
-    `IsRunning = false`
+  WPF VM MIGRATION — SHIPPED 2026-05-24. The WPF "Run All" loop no
+  longer iterates `StepViewModel`s; `MainWindowViewModel.OnRunAllAsync`
+  now calls `IPipelineRunner.RunAllAsync` and the step-tab pips light
+  up live via an `IPipelineRunner.Events` subscription on
+  `_uiScheduler`. Shape that landed:
+  - **`StepViewModel.LoadOutputAsync()`** — virtual no-op on the base.
+    Each step VM overrides with deserialise + summary refresh from
+    its persisted output file.
+  - **All 10 step VMs** refactored so `RunStepCoreAsync` (used by the
+    per-tab "Run this step" button) does `agent.Run(...)` then
+    `await LoadOutputAsync()`. The per-tab button path stays intact
+    end-to-end; the runner path skips the agent call inside the VM
+    because the orchestrator already did it.
+    - `Step9UniverseEnricherViewModel` rebuilds the signals chart
+      inside `LoadOutputAsync` from the deserialised
+      `DataLoaderOutput`.
+    - `Step10PortfolioConstructorViewModel` re-hydrates the
+      `_lastOutput` field that the SendToBank button depends on
+      inside `LoadOutputAsync` (deserialised `TradesOutput`).
+  - **`MainWindowViewModel`** resolves `IPipelineRunner` from the
+    Autofac scope in `OnLoaded`, builds a `step-number → VM`
+    dictionary, and subscribes to `_runner.Events.ObserveOn(_uiScheduler)`.
+    The single `OnStepEvent(StepEvent)` handler routes:
+    - `Started`  → `Status = Running`, `IsRunning = true`,
+      `SelectedTabIndex` follows the running step,
+      `RunStatusText = "Step N/10…"`.
+    - `Succeeded` → `Status = Ok`, `LastRunText`/`DurationText`
+      stamped, fire-and-forget `LoadOutputAsync` (failures logged).
+    - `Failed`   → `Status = Error`, `HasError = true`,
+      `ErrorText = Message`.
+  - `OnRunAllAsync` itself shrank to: cancel previous, set context
+    on all VMs, `await _runner.RunAllAsync(...)`, then read
+    aggregated status from the VMs to set the closing
+    `RunStatusText`/`StatusBarText`.
 
-  Done so far:
-  - `StepViewModel.LoadOutputAsync()` — virtual no-op on the base.
-  - `Step1DataLoaderViewModel` — refactored to the new shape;
-    `LoadOutputAsync` deserialises `DataLoaderOutput` from disk and
-    rebuilds the "N funds loaded" summary.
-
-  Still to do (9 step VMs + the WPF VM swap):
-  - `Step2MetricsCalculatorViewModel`, `Step3MacroAnalystViewModel`,
-    `Step4SignalScorerViewModel`, `Step5MacroAlignerViewModel`,
-    `Step6CatalystTaggerViewModel`, `Step7ThesisValidatorViewModel`,
-    `Step8RecommenderViewModel`, `Step9UniverseEnricherViewModel`
-    (also rebuild the signals chart from the deserialised output),
-    `Step10PortfolioConstructorViewModel` (also re-hydrate the
-    `_lastOutput` field that the SendToBank button depends on).
-  - `MainWindowViewModel`: inject `IPipelineRunner`, subscribe to
-    `Events` in `OnLoaded` via `_uiScheduler`, route per-step events
-    to the right `StepViewModel`, replace the `OnRunAllAsync`
-    `foreach` with `await _runner.RunAllAsync(...)`.
+  Build is green end-to-end (full solution, 0 errors). All 11 NUnit
+  tests in `FikaFinans.Application.Tests` still pass.
 
   Per-ISIN streaming (refactor agent interfaces + add per-fund
-  tick) is the slice after the WPF migration finishes. Phase
-  numbering in this doc mirrors the Phase 1 / Phase 2 split that
-  previously lived in
+  tick) is the next slice. Phase numbering in this doc mirrors the
+  Phase 1 / Phase 2 split that previously lived in
   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md).
 
   AGREED SEQUENCE (2026-05-24): local-first. Phase 1 (Rx in-process

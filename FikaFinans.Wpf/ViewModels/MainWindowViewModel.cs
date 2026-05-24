@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Windows.Input;
 using Autofac;
 using DevExpress.Mvvm;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.ViewModels.Steps;
 using FikaFinans.Wpf.Views;
@@ -17,6 +19,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IScheduler? _uiScheduler;
     private readonly ILifetimeScope? _scope;
     private readonly CompositeDisposable _disposables = new();
+    private IPipelineRunner? _runner;
+    private IReadOnlyDictionary<int, StepViewModel>? _stepsByNumber;
 
     private string _title = string.Empty;
     private string _selectedWeek = string.Empty;
@@ -177,6 +181,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Ensure step VMs have current week/family from the moment they're resolved.
         PushContextToAllSteps();
+
+        // Cache the step-number → VM lookup once VMs are resolved, then subscribe
+        // to the orchestrator's event stream. UI scheduler ensures property
+        // changes raise on the dispatcher thread.
+        _stepsByNumber = new Dictionary<int, StepViewModel>
+        {
+            [1] = Step1Tab!, [2] = Step2Tab!, [3] = Step3Tab!,  [4] = Step4Tab!,  [5] = Step5Tab!,
+            [6] = Step6Tab!, [7] = Step7Tab!, [8] = Step8Tab!,  [9] = Step9Tab!,  [10] = Step10Tab!,
+        };
+        _runner = _scope.Resolve<IPipelineRunner>();
+        var sub = _runner.Events.ObserveOn(_uiScheduler!).Subscribe(OnStepEvent);
+        _disposables.Add(sub);
     }
 
     private void PushContextToAllSteps()
@@ -192,6 +208,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task OnRunAllAsync()
     {
+        if (_runner is null)
+        {
+            _logger?.Warn("Run all invoked before pipeline runner was resolved");
+            return;
+        }
+
         // Cancel any previously running chain and issue a fresh token.
         _runCts.Cancel();
         _runCts = new CancellationTokenSource();
@@ -209,21 +231,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Step6Tab, Step7Tab, Step8Tab, Step9Tab, Step10Tab
         };
 
-        // Push week / family / runId to every step VM before the first runs.
-        foreach (var vm in steps.OfType<StepViewModel>())
-            vm.SetContext(SelectedFamily, SelectedWeek, RunId);
-
-        // Run steps 1-10 in sequence; halt on first error or cancellation.
+        // Push week / family / runId so each VM can resolve its output path
+        // when LoadOutputAsync is called from the event handler.
         foreach (var vm in steps.OfType<StepViewModel>())
         {
-            if (ct.IsCancellationRequested) break;
+            vm.SetContext(SelectedFamily, SelectedWeek, RunId);
+            vm.Status = StepStatus.Pending;
+            vm.HasError = false;
+            vm.ErrorText = string.Empty;
+        }
 
-            SelectedTabIndex = vm.StepNumber; // navigate to the running tab
-            RunStatusText = $"Step {vm.StepNumber}/10…";
-
-            await vm.RunStepAsync();
-
-            if (vm.Status == StepStatus.Error) break;
+        bool allOk;
+        try
+        {
+            allOk = await _runner.RunAllAsync(SelectedFamily, SelectedWeek, RunId, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            allOk = false;
         }
 
         IsRunning = false;
@@ -241,13 +266,59 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RunStatusText = $"Error at step {errorStep.StepNumber}";
             StatusBarText = $"Run {RunId} failed at step {errorStep.StepNumber}";
         }
-        else
+        else if (allOk)
         {
             RunStatusText = $"Done — {completedSteps}/10 steps ok";
             StatusBarText = $"Run {RunId} completed";
         }
 
         _logger?.Info("Run all finished: RunId={RunId} Steps={Steps}", RunId, completedSteps);
+    }
+
+    /// <summary>
+    /// Routes a <see cref="StepEvent"/> from <see cref="IPipelineRunner"/> to
+    /// the corresponding <see cref="StepViewModel"/>. Runs on the UI scheduler
+    /// per the <c>ObserveOn</c> in <see cref="OnLoaded"/>, so direct property
+    /// writes here are safe.
+    /// </summary>
+    private void OnStepEvent(StepEvent evt)
+    {
+        if (_stepsByNumber is null) return;
+        if (!_stepsByNumber.TryGetValue(evt.Step.Value, out var vm)) return;
+
+        switch (evt.Kind)
+        {
+            case StepEventKind.Started:
+                vm.Status = StepStatus.Running;
+                vm.IsRunning = true;
+                vm.HasError = false;
+                vm.ErrorText = string.Empty;
+                SelectedTabIndex = vm.StepNumber;
+                RunStatusText = $"Step {vm.StepNumber}/10…";
+                break;
+
+            case StepEventKind.Succeeded:
+                vm.Status = StepStatus.Ok;
+                vm.IsRunning = false;
+                vm.LastRunText = DateTime.Now.ToString("HH:mm:ss");
+                if (evt.Duration is { } dur)
+                    vm.DurationText = $"{dur.TotalSeconds:N1} s";
+                // Fire-and-forget the output refresh; failures are logged but
+                // don't block the next step's event from being processed.
+                _ = vm.LoadOutputAsync().ContinueWith(
+                    t => _logger?.Error(t.Exception, "LoadOutputAsync failed for {Step}", evt.Step),
+                    TaskContinuationOptions.OnlyOnFaulted);
+                break;
+
+            case StepEventKind.Failed:
+                vm.Status = StepStatus.Error;
+                vm.IsRunning = false;
+                vm.HasError = true;
+                vm.ErrorText = evt.Message ?? "unknown error";
+                if (evt.Duration is { } failDur)
+                    vm.DurationText = $"{failDur.TotalSeconds:N1} s";
+                break;
+        }
     }
 
     private void OnStop()

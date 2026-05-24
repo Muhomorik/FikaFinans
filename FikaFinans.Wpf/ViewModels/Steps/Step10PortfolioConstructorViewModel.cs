@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reactive.Concurrency;
+using System.Text.Json;
 using System.Windows.Input;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Bank;
@@ -7,6 +8,7 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Domain.Bank.Common;
 using FikaFinans.Domain.Portfolio;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using FluentResults;
 using FikaFinans.Wpf.Services;
 using NLog;
@@ -63,14 +65,33 @@ public sealed class Step10PortfolioConstructorViewModel : StepViewModel
             return;
         }
 
-        var output = await Task.Run(() => _agent.Run(IsoWeek, RunId));
-        _lastOutput = output;
-        _sendToBankCommand.RaiseCanExecuteChanged();
+        await Task.Run(() => _agent.Run(IsoWeek, RunId));
+        await LoadOutputAsync();
+    }
+
+    public override async Task LoadOutputAsync()
+    {
+        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.PortfolioConstructorOutput(IsoWeek, RunId);
-        if (File.Exists(outPath))
-            OutputJson = await File.ReadAllTextAsync(outPath);
+        if (!File.Exists(outPath))
+        {
+            OutputSummaryText = "Output file not found";
+            return;
+        }
 
+        var json = await File.ReadAllTextAsync(outPath);
+        OutputJson = json;
+
+        var output = JsonSerializer.Deserialize<TradesOutput>(json, JsonOptions.Default);
+        if (output is null)
+        {
+            OutputSummaryText = "Output file present but unreadable";
+            return;
+        }
+
+        _lastOutput = output;
+        _sendToBankCommand.RaiseCanExecuteChanged();
         OutputSummaryText = $"{output.Trades.Count} trades · {output.ConstraintViolations.Count} violations";
     }
 

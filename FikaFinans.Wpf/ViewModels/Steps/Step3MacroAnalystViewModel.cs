@@ -39,11 +39,21 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
         }
 
         await _agent.RunAsync(IsoWeek, RunId);
+        await LoadOutputAsync();
+    }
+
+    public override async Task LoadOutputAsync()
+    {
+        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.MacroAnalystOutput(IsoWeek, RunId);
-        if (File.Exists(outPath))
-            OutputJson = await File.ReadAllTextAsync(outPath);
+        if (!File.Exists(outPath))
+        {
+            OutputSummaryText = "Output file not found";
+            return;
+        }
 
+        OutputJson = await File.ReadAllTextAsync(outPath);
         OutputSummaryText = "Macro analysis complete";
     }
 }

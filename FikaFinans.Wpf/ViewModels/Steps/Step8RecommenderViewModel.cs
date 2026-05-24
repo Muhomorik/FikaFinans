@@ -1,7 +1,10 @@
 using System.IO;
 using System.Reactive.Concurrency;
+using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
@@ -38,12 +41,27 @@ public sealed class Step8RecommenderViewModel : StepViewModel
             return;
         }
 
-        var output = await Task.Run(() => _agent.Run(IsoWeek, RunId));
+        await Task.Run(() => _agent.Run(IsoWeek, RunId));
+        await LoadOutputAsync();
+    }
+
+    public override async Task LoadOutputAsync()
+    {
+        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.RecommenderOutput(IsoWeek, RunId);
-        if (File.Exists(outPath))
-            OutputJson = await File.ReadAllTextAsync(outPath);
+        if (!File.Exists(outPath))
+        {
+            OutputSummaryText = "Output file not found";
+            return;
+        }
 
-        OutputSummaryText = $"{output.Funds.Count} funds — recommendations generated";
+        var json = await File.ReadAllTextAsync(outPath);
+        OutputJson = json;
+
+        var output = JsonSerializer.Deserialize<DataLoaderOutput>(json, JsonOptions.Default);
+        OutputSummaryText = output is null
+            ? "Output file present but unreadable"
+            : $"{output.Funds.Count} funds — recommendations generated";
     }
 }
