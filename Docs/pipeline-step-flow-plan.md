@@ -9,10 +9,45 @@
   `StepId.MacroAnalyst`, …) and an `AgentName` property — one source
   of truth. 11 NUnit tests in `FikaFinans.Application.Tests` cover
   happy path, error path, cancellation, single-step run, and
-  `StepId` validation. The WPF VM still drives orchestration via its
-  manual loop; migrating it to subscribe to `IPipelineRunner.Events`
-  is the next sub-step. Per-ISIN streaming (refactor agent
-  interfaces + add per-fund tick) is the slice after that. Phase
+  `StepId` validation.
+
+  WPF VM MIGRATION — IN PROGRESS (paused mid-refactor 2026-05-24).
+  This is the sub-step that swaps the WPF "Run All" loop from
+  iterating `StepViewModel`s to calling `IPipelineRunner.RunAllAsync`
+  plus an `Events` subscription that drives the step-tab status pips
+  live. Shape: each step VM exposes a new `LoadOutputAsync()` that
+  re-reads its output file and refreshes display state (split out
+  from `RunStepCoreAsync`, which now calls the agent + delegates to
+  `LoadOutputAsync`). `MainWindowViewModel` subscribes to the
+  runner's events on `_uiScheduler` and routes each event to the
+  corresponding VM:
+  - `Started`  → `Status = Running`, `IsRunning = true`
+  - `Succeeded` → `Status = Ok`, `LastRunText`/`DurationText` set,
+    `await vm.LoadOutputAsync()`
+  - `Failed`   → `Status = Error`, `ErrorText = Message`,
+    `IsRunning = false`
+
+  Done so far:
+  - `StepViewModel.LoadOutputAsync()` — virtual no-op on the base.
+  - `Step1DataLoaderViewModel` — refactored to the new shape;
+    `LoadOutputAsync` deserialises `DataLoaderOutput` from disk and
+    rebuilds the "N funds loaded" summary.
+
+  Still to do (9 step VMs + the WPF VM swap):
+  - `Step2MetricsCalculatorViewModel`, `Step3MacroAnalystViewModel`,
+    `Step4SignalScorerViewModel`, `Step5MacroAlignerViewModel`,
+    `Step6CatalystTaggerViewModel`, `Step7ThesisValidatorViewModel`,
+    `Step8RecommenderViewModel`, `Step9UniverseEnricherViewModel`
+    (also rebuild the signals chart from the deserialised output),
+    `Step10PortfolioConstructorViewModel` (also re-hydrate the
+    `_lastOutput` field that the SendToBank button depends on).
+  - `MainWindowViewModel`: inject `IPipelineRunner`, subscribe to
+    `Events` in `OnLoaded` via `_uiScheduler`, route per-step events
+    to the right `StepViewModel`, replace the `OnRunAllAsync`
+    `foreach` with `await _runner.RunAllAsync(...)`.
+
+  Per-ISIN streaming (refactor agent interfaces + add per-fund
+  tick) is the slice after the WPF migration finishes. Phase
   numbering in this doc mirrors the Phase 1 / Phase 2 split that
   previously lived in
   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md).
