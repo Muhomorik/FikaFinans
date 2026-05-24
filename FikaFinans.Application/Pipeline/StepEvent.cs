@@ -1,8 +1,7 @@
 namespace FikaFinans.Application.Pipeline;
 
 public sealed record StepEvent(
-    int StepNumber,
-    string AgentName,
+    StepId Step,
     StepEventKind Kind,
     string? Message = null,
     TimeSpan? Duration = null);

@@ -4,6 +4,7 @@ using Azure.Identity;
 using FikaFinans.Application.Agents;
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Application.Settings;
@@ -357,6 +358,24 @@ public sealed class InfrastructureModule : Autofac.Module
         // uses the (IPathsService) one that defaults to PortfolioConstructorConfig.Default.
         builder.Register(ctx => new PortfolioConstructorAgent(ctx.Resolve<IPathsService>()))
             .As<IPortfolioConstructorAgent>()
+            .SingleInstance();
+
+        // The pipeline orchestrator. Sequential per-step today (Phase 1 starter
+        // slice); per-ISIN streaming and the WPF VM migration are follow-ups
+        // per Docs/pipeline-step-flow-plan.md.
+        builder.Register(ctx => new PipelineRunner(
+                logger: LogManager.GetLogger(nameof(PipelineRunner)),
+                dataLoader: ctx.Resolve<IDataLoaderAgent>(),
+                metrics: ctx.Resolve<IMetricsCalculatorAgent>(),
+                macroAnalyst: ctx.Resolve<IMacroAnalystAgent>(),
+                signal: ctx.Resolve<ISignalScorerAgent>(),
+                macroAligner: ctx.Resolve<IMacroAlignerAgent>(),
+                catalyst: ctx.Resolve<ICatalystTaggerAgent>(),
+                thesis: ctx.Resolve<IThesisValidatorAgent>(),
+                recommender: ctx.Resolve<IRecommenderAgent>(),
+                enricher: ctx.Resolve<IUniverseEnricherAgent>(),
+                portfolio: ctx.Resolve<IPortfolioConstructorAgent>()))
+            .As<IPipelineRunner>()
             .SingleInstance();
     }
 

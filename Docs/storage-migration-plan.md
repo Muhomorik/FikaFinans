@@ -1,6 +1,13 @@
 <!--
-  STATUS: PHASES 1+2+3 SHIPPED 2026-05-10..2026-05-12; Phases 4-7 still
-  open. Per-phase status is annotated inline in §8 (Migration phases).
+  STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 4 (Step 10
+  Function) and Phase 6 (Azure Tables) still open; Phase 7 gated on
+  Phase 4. Per-phase status is annotated inline in §8 (Migration phases).
+
+  AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
+  step before the cloud deploy. The intent is to land Pipeline-flow Phase 1
+  (Rx), Storage Phase 7 (IsinProgress + step JSON columns in SQLite), and
+  Storage Phase 4 (SendToBank out of WPF) end-to-end on SQLite before
+  swapping the binding to Azure Tables. See §8 "Recommended sequence."
 
   Authoring rules for AI assistants and humans editing this file:
   - DO NOT write code (no C#, no XAML, no JSON config snippets, no shell).
@@ -175,8 +182,8 @@ abstraction exists to prevent.
 | Today (EF, SQLite-backed) | Target | Notes |
 | --- | --- | --- |
 | `Account` | `Account` (kept, repo-fronted) ✅ | Bank-sim ledger root. Reshaped per §3.2. |
-| `Fund` | dropped — Phase 5 leftover | Still live in EF: read by `PortfolioQueryService`, `TradingService` settle, `BankCsvImporter` seed, `SettlementEngine`. Pipeline reads fund metadata from YR endpoint per [backend-nav-sync-plan.md §Data Fetch](./backend-nav-sync-plan.md#data-fetch--yr-fund-endpoint). |
-| `NavSnapshot` | dropped — Phase 5 leftover | Still live in EF as `Fund.NavHistory`. NAV history will flow through pipeline state, not a long-lived table. |
+| `Fund` | `Fund` (kept, repo-fronted) ✅ | Done 2026-05-13. Phase 5 introduced `IFundsRepository` + typed lookups (`GetByIsinAsync(Isin)`, `GetByIdAsync(FundId)`, `GetLatestNavByFundIdAsync`). Domain `Fund` survives as the rehydrated aggregate; EF mapping remains but `_dbFactory` is gone from all four bank-sim consumers. Pipeline still reads fund metadata from YR endpoint per [backend-nav-sync-plan.md §Data Fetch](./backend-nav-sync-plan.md#data-fetch--yr-fund-endpoint). |
+| `NavSnapshot` | `NavSnapshot` (kept, repo-fronted) ✅ | Done 2026-05-13. Cascade FK from `Fund` → `NavHistory` dropped; `NavSnapshot` is now a top-level `DbSet` indexed on `FundId`. `Fund.NavHistory` is `Ignore`d in EF — the repo populates the backing field manually via `Fund.Rehydrate(...)` when needed. NAV history lives at partition `"nav/{isin}"`. |
 | `FundHolding` | replaced by `Positions` ✅ | Done 2026-05-10. EF `DbSet`, configuration, and domain type all deleted. |
 | `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Backend pluggable (Phase 6). |
 | `Transaction`, `JournalEntry` | kept (bank-sim only) ✅ | Repo-fronted; cascade-FK nav prop replaced by two-reads + in-memory join in `LedgerService`. |
@@ -358,8 +365,32 @@ path is in.
 
 ## Migration phases
 
-Each phase is independently mergeable and testable. Only ordering
-constraint: Phase 4 needs Phase 3.
+Each phase is independently mergeable and testable. The hard ordering
+constraint is that Phase 4 needs Phase 3.
+
+### Recommended sequence — local-first, Tables last
+
+Agreed 2026-05-24. The remaining phases land on SQLite end-to-end
+first; Azure Tables is the **last** step before the cloud deploy.
+The bet: if everything works under SQLite + Rx + WPF, the Tables
+swap is mechanical — same repo contract, same POCOs, just a different
+binding. Doing Tables earlier would mean debugging Azurite quirks
+while the application logic is still in flux.
+
+```mermaid
+flowchart LR
+  done["✅ Done<br/>Phases 1, 2, 3, 5<br/>(SQLite + repos<br/>+ Positions + Funds)"] --> rx["⏳ Pipeline-flow Phase 1<br/>Rx in-process stream"]
+  rx --> p7["⏳ Phase 7<br/>IsinProgress row<br/>+ Step01Json..Step09Json<br/>(in SQLite)"]
+  p7 --> p4["⏳ Phase 4<br/>SendToBank logic<br/>out of WPF"]
+  p4 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
+  p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions"]
+```
+
+Pipeline-flow phases live in
+[pipeline-step-flow-plan.md](./pipeline-step-flow-plan.md); they
+interleave with the storage phases because Phase 7's step JSON
+columns only earn their keep once a per-ISIN stream is writing to
+them.
 
 1. **Stand up real SQLite locally.** ✅ **Done — 2026-05-10.**
    Replaced `UseInMemoryDatabase` with `UseSqlite` against
@@ -386,9 +417,9 @@ constraint: Phase 4 needs Phase 3.
    [BankCsvImporter](../FikaFinans.Infrastructure/Bank/BankCsvImporter.cs))
    read/write through the interfaces. `Transaction.Entries` cascade-FK
    nav prop dropped in favour of a two-reads + in-memory join in
-   `LedgerService`. **Consumers that touch `Fund`/`NavSnapshot` still
-   hold an `IDbContextFactory<BankDbContext>`** — closing that gap is
-   tracked under Phase 5 below.
+   `LedgerService`. Consumers that touch `Fund`/`NavSnapshot` closed
+   their `IDbContextFactory<BankDbContext>` dependency under Phase 5 —
+   see below.
 3. **Add the Positions table; switch Step 1 onto it.** ✅ **Done — 2026-05-10.**
    New
    [PositionRow](../FikaFinans.Infrastructure/Storage/Sqlite/Entities/PositionRow.cs)
@@ -415,19 +446,27 @@ constraint: Phase 4 needs Phase 3.
    [backend-nav-sync-plan.md](./backend-nav-sync-plan.md) existing.
    Function reads Positions, writes `TradingOrder`. WPF becomes the
    read-only view (or keeps a manual trigger — open question in §10).
-5. **Drop `Fund`, `NavSnapshot`, `FundHolding`** once nothing reads
-   them. 🟡 **Partial — `FundHolding` retired 2026-05-10.** The EF
-   `DbSet<FundHolding>`, its configuration, the `FundHolding` domain
-   type, and `FundHoldingId` are all gone. `Fund` + `NavSnapshot`
-   still alive in EF: `PortfolioQueryService.GetFundPositionsAsync`
-   reads `db.Funds.Include(f => f.NavHistory)` for NAV + display name,
-   `TradingService.SettleBuyOrderAsync` reads `db.Funds` to get
-   `Isin`/`Name` for the holdings-account creation, `BankCsvImporter`
-   creates `Fund` records on first seed, and `SettlementEngine` reads
-   `db.Funds.Include(f => f.NavHistory)` per pending order. Closing
-   this out needs a Funds repo (with NAV history attached or split)
-   so those four consumers don't hold the EF context — see open
-   question in §10.
+5. **Retire direct EF reads of `Fund`, `NavSnapshot`, `FundHolding`.**
+   ✅ **Done — 2026-05-10 (`FundHolding`) + 2026-05-13 (`Fund` /
+   `NavSnapshot`).** `FundHolding` is fully deleted (EF `DbSet`,
+   configuration, domain type, `FundHoldingId`). `Fund` and
+   `NavSnapshot` survive as domain aggregates but are no longer
+   reached via direct EF: a single
+   [IFundsRepository](../FikaFinans.Application/Storage/Bank/IFundsRepository.cs)
+   with typed lookups (`GetByIsinAsync(Isin)`, `GetByIdAsync(FundId)`,
+   `GetLatestNavByFundIdAsync(FundId)`, `QueryNavHistoryAsync(Isin)`,
+   `UpsertNavAsync`) covers every prior consumer. Implementation in
+   [SqliteFundsRepository](../FikaFinans.Infrastructure/Storage/Sqlite/SqliteFundsRepository.cs);
+   inserts go through new non-validating
+   `Fund.Rehydrate(...)` / `NavSnapshot.Rehydrate(...)` factories.
+   `Fund → NavHistory` cascade FK dropped; `NavSnapshot.FundId` is now
+   a regular indexed column. All four bank-sim consumers
+   (`PortfolioQueryService`, `TradingService` settle, `BankCsvImporter`
+   seed, `SettlementEngine`) dropped their
+   `IDbContextFactory<BankDbContext>` dependency; `DataSeeder` swapped
+   its fund-seeding loop onto the repo (cascade fallout — chart of
+   accounts + initial deposit stay on direct EF, fine for a bootstrap).
+   Last EF-direct surface in the bank-sim is gone.
 6. **Add the Azure Tables implementation behind each repository
    interface.** **Not started.** Five `AzureTables*Repository` classes
    that target Azurite locally / Azure Tables in prod. DI swap by
@@ -498,11 +537,14 @@ constraint: Phase 4 needs Phase 3.
   column — already tracked in
   [backend-nav-sync-plan.md §"Step 10 — Daily Portfolio Trades"](./backend-nav-sync-plan.md#step-10--daily-portfolio-trades).
   Decided at Phase 4.
-- **Funds repo shape** — new question, surfaced by Phase 5 leftovers.
-  Whether `Fund` + its `NavHistory` collection split into two repos
-  (funds + nav snapshots) or stay as a single aggregate. Today's
-  consumers all want them together (NAV-by-ISIN reads), so a single
-  repo is the lean answer.
+- **Funds repo shape** — ✅ **Resolved 2026-05-13.** Single
+  `IFundsRepository` owns both `FundEntity` and `NavSnapshotEntity`
+  rows. Funds live in partition `"funds"` keyed by ISIN; each fund's
+  NAV history lives in `"nav/{isin}"` keyed by ISO 8601 timestamp.
+  Typed lookups (`GetLatestNavAsync(Isin)`,
+  `GetLatestNavByFundIdAsync(FundId)`) keep the contract value-object-
+  typed at the API surface; the entity columns stay `string` for the
+  Tables wire format.
 
 ## Out of scope
 

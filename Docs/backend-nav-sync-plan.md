@@ -2,9 +2,12 @@
   STATUS: BACKEND PIPELINE IS STILL PLANNING-ONLY (no Functions, no
   Queue Storage, no Azure Tables binding, no IsinProgress table).
   The local storage foundation this plan rests on (Tables-shaped repo
-  contract over SQLite) shipped 2026-05-10..2026-05-12 — see the inline
-  note in §"Storage — Azure Tables + Local SQLite Mirror" and the full
-  status in [storage-migration-plan.md §8](./storage-migration-plan.md#migration-phases).
+  contract over SQLite) shipped 2026-05-10..2026-05-13 — Phases 1+2+3+5
+  per [storage-migration-plan.md §8](./storage-migration-plan.md#migration-phases).
+  All bank-sim ledger types (`Account`, `Fund`, `NavSnapshot`,
+  `TradingOrder`, `Transaction`, `JournalEntry`) plus `Positions` are
+  repo-fronted; the only `IDbContextFactory<BankDbContext>` consumers
+  left are the seeder and `BankCsvImporter` bootstrap paths.
 
   Authoring rules for AI assistants and humans editing this file:
   - DO NOT write code (no C#, no XAML, no JSON config snippets, no shell).
@@ -40,6 +43,10 @@
 >   `docs/inputs/` and start coming from the KanelBrief API (live or
 >   cached) is planned in
 >   [analytics-json-migration-plan.md](./analytics-json-migration-plan.md).
+> - The local-Rx → cloud-queue migration for step-to-step orchestration
+>   (Phase 1 in-process Rx.NET stream, Phase 2 queue-triggered Functions)
+>   is planned in
+>   [pipeline-step-flow-plan.md](./pipeline-step-flow-plan.md).
 
 FikaFinans's new backend will run on **Azure Functions (Consumption
 plan)**. The workload — small per-fund jobs arriving in a slow drip,
@@ -186,22 +193,12 @@ flowchart LR
 
 ## Phases
 
-Phase 1: Develop Locally
-
-Use Rx.NET
-├─ Load 1,000 rows
-├─ Create observable stream
-├─ Process with maxConcurrency: 5
-└─ Test locally (no cloud cost)
-
-Phase 2: Deploy to Cloud (Optional)
-Replace observable with Azure Queue
-├─ Timer Trigger loads rows into queue
-├─ Queue-triggered function reads messages
-├─ Semaphore ensures max 5 concurrent
-└─ Same business logic, cloud durability
-
-Your Rx code doesn't change, only the data source/sink.
+The local-first → cloud migration has two phases. Phase 1 (in-process
+Rx.NET stream) and Phase 2 (queue-triggered Functions) are planned in
+their own doc: [pipeline-step-flow-plan.md](./pipeline-step-flow-plan.md).
+The headline contract — *the agents don't change, only the source/sink
+does* — is what makes the queue design below drop-in. The rest of this
+plan covers Phase 2's cloud-side details.
 
 ## The Decision — Queue Storage vs Service Bus
 

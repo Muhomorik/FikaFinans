@@ -6,5 +6,5 @@ public interface IPipelineRunner
 
     Task<bool> RunAllAsync(string family, string isoWeek, string runId, CancellationToken ct = default);
 
-    Task<bool> RunStepAsync(int stepNumber, string family, string isoWeek, string runId, CancellationToken ct = default);
+    Task<bool> RunStepAsync(StepId step, string family, string isoWeek, string runId, CancellationToken ct = default);
 }
