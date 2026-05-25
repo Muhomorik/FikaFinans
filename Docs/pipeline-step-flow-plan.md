@@ -16,12 +16,12 @@
   now calls `IPipelineRunner.RunAllAsync` and the step-tab pips light
   up live via an `IPipelineRunner.Events` subscription on
   `_uiScheduler`. Shape that landed:
-  - **`StepViewModel.LoadOutputAsync()`** — virtual no-op on the base.
+  - `StepViewModel.LoadOutputAsync()` — virtual no-op on the base.
     Each step VM overrides with deserialise + summary refresh from
     its persisted output file.
-  - **All 10 step VMs** refactored so `RunStepCoreAsync` (used by the
+  - All 10 step VMs refactored so `RunStepCoreAsync` (used by the
     per-tab "Run this step" button) does `agent.Run(...)` then
-    `await LoadOutputAsync()`. The per-tab button path stays intact
+    `await LoadOutputAsync()`. Per-tab button path stays intact
     end-to-end; the runner path skips the agent call inside the VM
     because the orchestrator already did it.
     - `Step9UniverseEnricherViewModel` rebuilds the signals chart
@@ -30,28 +30,68 @@
     - `Step10PortfolioConstructorViewModel` re-hydrates the
       `_lastOutput` field that the SendToBank button depends on
       inside `LoadOutputAsync` (deserialised `TradesOutput`).
-  - **`MainWindowViewModel`** resolves `IPipelineRunner` from the
+  - `MainWindowViewModel` resolves `IPipelineRunner` from the
     Autofac scope in `OnLoaded`, builds a `step-number → VM`
-    dictionary, and subscribes to `_runner.Events.ObserveOn(_uiScheduler)`.
-    The single `OnStepEvent(StepEvent)` handler routes:
-    - `Started`  → `Status = Running`, `IsRunning = true`,
+    dictionary, and subscribes to
+    `_runner.Events.ObserveOn(_uiScheduler)`. The single
+    `OnStepEvent(StepEvent)` handler routes:
+    - `Started` → `Status = Running`, `IsRunning = true`,
       `SelectedTabIndex` follows the running step,
       `RunStatusText = "Step N/10…"`.
     - `Succeeded` → `Status = Ok`, `LastRunText`/`DurationText`
       stamped, fire-and-forget `LoadOutputAsync` (failures logged).
-    - `Failed`   → `Status = Error`, `HasError = true`,
+    - `Failed` → `Status = Error`, `HasError = true`,
       `ErrorText = Message`.
   - `OnRunAllAsync` itself shrank to: cancel previous, set context
     on all VMs, `await _runner.RunAllAsync(...)`, then read
     aggregated status from the VMs to set the closing
     `RunStatusText`/`StatusBarText`.
 
-  Build is green end-to-end (full solution, 0 errors). All 11 NUnit
-  tests in `FikaFinans.Application.Tests` still pass.
+  PER-ISIN STREAMING — STARTED 2026-05-24 (small slice 1/N).
+  - `StepEvent` gained an optional `Isin? Isin` field for per-fund
+    ticks. Universe-wide stages (1, 3, 9, 10) emit null; per-fund
+    stages (2, 4, 5, 6, 7, 8) will populate it once the runner
+    routes per-ISIN. Current runner emits null for every event
+    because no agent is wired to the per-fund path yet — the field
+    exists so the contract stops churning.
+  - `IMetricsCalculatorAgent` now exposes
+    `ProcessFund(FundRecord, MetricsCalculatorConfig) → FundRecord`
+    alongside the existing universe-wide `Run`. **Step 2 is the
+    template** for the per-ISIN agent shape — the pattern to
+    mass-replicate across Steps 4, 5, 6, 7, 8.
+  - `MetricsCalculatorAgent` implementation: `EnrichWithMetrics`
+    (private static) renamed to `ProcessFund` (public, instance),
+    `ArgumentNullException` guards added, and the universe-wide
+    `RunInMemory` now calls `ProcessFund` per fund so both paths
+    share the same per-fund logic. No behavioural change for the
+    universe-wide path.
+  - 5 new tests in
+    `FikaFinans.InfrastructureV2.Tests/Agents/02-metricscalculator/`
+    cover ProcessFund: standard fund populates metrics, append-only
+    preservation, null-arg guards (fund + config), repeat-call
+    equivalence (purity).
+  - 2 new tests in `FikaFinans.Application.Tests` for `StepEvent`:
+    default `Isin` is null; explicit `Isin` survives the record.
 
-  Per-ISIN streaming (refactor agent interfaces + add per-fund
-  tick) is the next slice. Phase numbering in this doc mirrors the
-  Phase 1 / Phase 2 split that previously lived in
+  Build is green end-to-end (full solution, 0 errors). 14/14 tests
+  pass in `FikaFinans.Application.Tests`; 15/15 in the Metrics test
+  class (10 existing + 5 ProcessFund).
+
+  Still to do for per-ISIN streaming:
+  - Apply the same `ProcessFund` shape to Steps 4 (sync), 5/6/7
+    (async, LLM-dependent), 8 (sync). Each follows the Step 2
+    template — extract the existing per-fund method, expose it on
+    the interface, route the universe-wide method through it.
+  - Add `Merge(maxConcurrent: N)` orchestration to `PipelineRunner`
+    for the per-ISIN block (Steps 2, 4, 5, 6, 7, 8) bounded by
+    Steps 3 and 9 as universe-wide barriers.
+  - Wire per-fund `StepEvent`s from the per-ISIN block (populate
+    `Isin` on `Started` / `Succeeded` / `Failed`).
+  - WPF VMs surface per-fund progress (e.g. "Step 4 — 137 / 1500"
+    instead of just a `Running` pip).
+
+  Phase numbering in this doc mirrors the Phase 1 / Phase 2 split
+  that previously lived in
   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md).
 
   AGREED SEQUENCE (2026-05-24): local-first. Phase 1 (Rx in-process

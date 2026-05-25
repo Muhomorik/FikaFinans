@@ -212,4 +212,37 @@ public sealed class PipelineRunnerTests
             Assert.That(StepId.PortfolioConstructor.AgentName, Is.EqualTo("PortfolioConstructor"));
         });
     }
+
+    [Test]
+    public async Task RunAllAsync_AllStepsSucceed_AllStepEventsHaveNullIsin()
+    {
+        // Current runner is whole-universe per step — no per-fund ticks yet.
+        // When per-ISIN streaming lands, Steps 2/4/5/6/7/8 will emit events
+        // with Isin populated.
+        var observed = new List<StepEvent>();
+        using var sub = _sut.Events.Subscribe(observed.Add);
+
+        await _sut.RunAllAsync("OPM", "2026-W21", "isin-check");
+
+        Assert.That(observed, Is.Not.Empty);
+        Assert.That(observed.All(e => e.Isin is null), Is.True,
+            "every event from the sequential runner should carry Isin = null");
+    }
+
+    [Test]
+    public void StepEvent_DefaultIsinIsNull()
+    {
+        var evt = new StepEvent(StepId.MetricsCalculator, StepEventKind.Started);
+
+        Assert.That(evt.Isin, Is.Null);
+    }
+
+    [Test]
+    public void StepEvent_CanCarryIsin()
+    {
+        var isin = new FikaFinans.Domain.Identifiers.Isin("LU0001000001");
+        var evt = new StepEvent(StepId.MetricsCalculator, StepEventKind.Succeeded, Isin: isin);
+
+        Assert.That(evt.Isin, Is.EqualTo(isin));
+    }
 }

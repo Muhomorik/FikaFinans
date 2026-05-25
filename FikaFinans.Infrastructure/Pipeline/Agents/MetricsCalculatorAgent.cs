@@ -41,7 +41,7 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
 
     public DataLoaderOutput RunInMemory(DataLoaderOutput input, MetricsCalculatorConfig config)
     {
-        var enrichedFunds = input.Funds.Select(f => EnrichWithMetrics(f, config)).ToList();
+        var enrichedFunds = input.Funds.Select(f => ProcessFund(f, config)).ToList();
 
         return new DataLoaderOutput
         {
@@ -57,8 +57,11 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
         };
     }
 
-    private static FundRecord EnrichWithMetrics(FundRecord fund, MetricsCalculatorConfig config)
+    public FundRecord ProcessFund(FundRecord fund, MetricsCalculatorConfig config)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+        ArgumentNullException.ThrowIfNull(config);
+
         var metrics = ComputeMetrics(fund, config);
         return new FundRecord
         {

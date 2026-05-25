@@ -301,6 +301,87 @@ public class MetricsCalculatorAgentTests
         });
     }
 
+    // ─── ProcessFund (per-ISIN streaming path) ──────────────────────────────────────
+
+    [Test]
+    public void ProcessFund_StandardFund_PopulatesMetrics()
+    {
+        var sut = _fixture.Create<MetricsCalculatorAgent>();
+        var buckets = MakeBuckets(periods: 26, startDate: new DateOnly(2025, 11, 5), return2wPct: 1.5m);
+        var snapshot = MakeSnapshot(buckets[^1].PeriodEnd);
+        var fund = MakeFund("LU1001", buckets, snapshot, totalFee: 2.0m);
+
+        var enriched = sut.ProcessFund(fund, _config);
+
+        Assert.That(enriched.Metrics, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(enriched.Metrics!.WindowsTotal, Is.EqualTo(3));
+            Assert.That(enriched.Metrics.WindowsPositiveCount, Is.EqualTo(3));
+            Assert.That(enriched.Metrics.TotalFeePct, Is.EqualTo(2.0m));
+            Assert.That(enriched.Metrics.AsOfDate, Is.EqualTo(buckets[^1].PeriodEnd));
+        });
+    }
+
+    [Test]
+    public void ProcessFund_PreservesPriorFields_AppendOnly()
+    {
+        var sut = _fixture.Create<MetricsCalculatorAgent>();
+        var buckets = MakeBuckets(periods: 4, startDate: new DateOnly(2026, 2, 4));
+        var snapshot = MakeSnapshot(buckets[^1].PeriodEnd);
+        var fund = MakeFund("LU1002", buckets, snapshot);
+
+        var enriched = sut.ProcessFund(fund, _config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(enriched.Isin,       Is.EqualTo(fund.Isin));
+            Assert.That(enriched.Metadata,   Is.EqualTo(fund.Metadata));
+            Assert.That(enriched.NavBuckets, Is.EqualTo(fund.NavBuckets));
+            Assert.That(enriched.Snapshot,   Is.EqualTo(fund.Snapshot));
+            Assert.That(enriched.Layer,      Is.EqualTo(fund.Layer));
+            Assert.That(enriched.Metrics,    Is.Not.Null);
+        });
+    }
+
+    [Test]
+    public void ProcessFund_NullFund_Throws()
+    {
+        var sut = _fixture.Create<MetricsCalculatorAgent>();
+
+        Assert.Throws<ArgumentNullException>(() => sut.ProcessFund(null!, _config));
+    }
+
+    [Test]
+    public void ProcessFund_NullConfig_Throws()
+    {
+        var sut = _fixture.Create<MetricsCalculatorAgent>();
+        var fund = MakeFund("LU1003",
+            MakeBuckets(periods: 4, startDate: new DateOnly(2026, 2, 4)),
+            MakeSnapshot(new DateOnly(2026, 2, 17)));
+
+        Assert.Throws<ArgumentNullException>(() => sut.ProcessFund(fund, null!));
+    }
+
+    [Test]
+    public void ProcessFund_CalledTwice_ReturnsEquivalentResults()
+    {
+        // Pure function — same input must produce the same output.
+        var sut = _fixture.Create<MetricsCalculatorAgent>();
+        var buckets = MakeBuckets(periods: 4, startDate: new DateOnly(2026, 2, 4));
+        var fund = MakeFund("LU1004", buckets, MakeSnapshot(buckets[^1].PeriodEnd));
+
+        var first  = sut.ProcessFund(fund, _config);
+        var second = sut.ProcessFund(fund, _config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(second.Metrics!.WindowsTotal,         Is.EqualTo(first.Metrics!.WindowsTotal));
+            Assert.That(second.Metrics.WindowsPositiveCount,  Is.EqualTo(first.Metrics.WindowsPositiveCount));
+            Assert.That(second.Metrics.NetReturnAfterFee12wPct, Is.EqualTo(first.Metrics.NetReturnAfterFee12wPct));
+        });
+    }
+
     // ────────────────────────── helpers ──────────────────────────
 
     private static FundRecord MakeFund(
