@@ -1,4 +1,5 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Domain.Funds;
@@ -49,8 +50,9 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
 
         foreach (var fund in signals.Funds)
         {
-            var aligned = await AlignFundAsync(fund, macro.RotationThemes, warnings, ct);
-            alignedFunds.Add(aligned);
+            var result = await ProcessFundAsync(fund, macro.RotationThemes, ct);
+            alignedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
         }
 
         return new DataLoaderOutput
@@ -76,22 +78,29 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
         };
     }
 
-    private async Task<FundRecord> AlignFundAsync(
+    public async Task<FundProcessingResult> ProcessFundAsync(
         FundRecord fund,
         IReadOnlyList<RotationTheme> activeThemes,
-        List<string> warnings,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+        ArgumentNullException.ThrowIfNull(activeThemes);
+
+        var warnings = new List<string>();
         var category = fund.Metadata.Category;
 
         // Empty universe → all funds get None, no LLM calls (per contract failure mode).
         if (activeThemes.Count == 0)
-            return WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null);
+            return new FundProcessingResult(
+                WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null),
+                warnings);
 
         if (string.IsNullOrWhiteSpace(category))
         {
             warnings.Add($"fund {fund.Isin} has null/empty category — macro_alignment=None");
-            return WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null);
+            return new FundProcessingResult(
+                WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null),
+                warnings);
         }
 
         // Step 1: direct category match.
@@ -107,7 +116,7 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
                 Label       = directMatch.Label,
                 MatchMethod = MatchMethod.DirectCategory,
             };
-            return MaybePromote(fund, alignment, matched);
+            return new FundProcessingResult(MaybePromote(fund, alignment, matched), warnings);
         }
 
         // Step 2: LLM adjacency (lazy — only if no direct match).
@@ -124,13 +133,17 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
                     MatchMethod = MatchMethod.LlmAdjacency,
                 };
                 // LLM-adjacency is Partial by definition — never promotes.
-                return WithAlignment(fund, MacroAlignment.Partial, matched, promoted: false, reason: null);
+                return new FundProcessingResult(
+                    WithAlignment(fund, MacroAlignment.Partial, matched, promoted: false, reason: null),
+                    warnings);
             }
 
             warnings.Add($"fund {fund.Isin} LLM returned unknown theme_id '{verdict.ThemeId}' — defaulting to None");
         }
 
-        return WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null);
+        return new FundProcessingResult(
+            WithAlignment(fund, MacroAlignment.None, MatchedTheme.None, promoted: false, reason: null),
+            warnings);
     }
 
     // Pick the theme with highest signal_strength; tie-break by longest

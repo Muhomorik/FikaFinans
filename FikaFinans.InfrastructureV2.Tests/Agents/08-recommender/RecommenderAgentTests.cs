@@ -349,6 +349,73 @@ public sealed class RecommenderAgentTests
 
     #endregion
 
+    #region ProcessFund (per-ISIN streaming path)
+
+    [Test]
+    public void ProcessFund_StrengthValidDirectCatalyst_CatalystEntryNoWarnings()
+    {
+        var fund = MakeFund("LU2001",
+            signal:   SignalLabel.Strength,
+            thesis:   ThesisValidity.Valid,
+            catalyst: MakeCatalyst(ExposureType.Direct),
+            held:     false);
+
+        var result = _sut.ProcessFund(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.Recommendation, Is.EqualTo(Recommendation.CatalystEntry));
+            Assert.That(result.Fund.RecommendationReason, Does.Contain("Direct"));
+            Assert.That(result.Warnings, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void ProcessFund_NullSignal_SkipAndReturnsWarning()
+    {
+        var fund = MakeFund("LU2002",
+            signal:   null,
+            thesis:   null,
+            catalyst: null,
+            held:     false);
+
+        var result = _sut.ProcessFund(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.Recommendation, Is.EqualTo(Recommendation.Skip));
+            Assert.That(result.Fund.RecommendationReason, Is.EqualTo("no_signal_no_action"));
+            Assert.That(result.Warnings, Has.Some.Contains("LU2002"));
+        });
+    }
+
+    [Test]
+    public void ProcessFund_NullFund_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => _sut.ProcessFund(null!));
+    }
+
+    [Test]
+    public void ProcessFund_CalledTwice_ReturnsEquivalentResults()
+    {
+        var fund = MakeFund("LU2003",
+            signal:   SignalLabel.Forming,
+            thesis:   ThesisValidity.Partial,
+            catalyst: null,
+            held:     true);
+
+        var first  = _sut.ProcessFund(fund);
+        var second = _sut.ProcessFund(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(second.Fund.Recommendation, Is.EqualTo(first.Fund.Recommendation));
+            Assert.That(second.Fund.RecommendationReason, Is.EqualTo(first.Fund.RecommendationReason));
+        });
+    }
+
+    #endregion
+
     #region Disk happy path
 
     [Test]

@@ -1,4 +1,5 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Domain.Funds;
@@ -52,8 +53,9 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
         var taggedFunds = new List<FundRecord>(aligned.Funds.Count);
         foreach (var fund in aligned.Funds)
         {
-            var tagged = await TagFundAsync(fund, activeCatalysts, warnings, ct);
-            taggedFunds.Add(tagged);
+            var result = await ProcessFundAsync(fund, activeCatalysts, ct);
+            taggedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
         }
 
         return new DataLoaderOutput
@@ -79,21 +81,25 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
         };
     }
 
-    private async Task<FundRecord> TagFundAsync(
+    public async Task<FundProcessingResult> ProcessFundAsync(
         FundRecord fund,
         IReadOnlyList<Catalyst> activeCatalysts,
-        List<string> warnings,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+        ArgumentNullException.ThrowIfNull(activeCatalysts);
+
+        var warnings = new List<string>();
+
         // Empty catalysts → null, no LLM call (per contract failure mode).
         if (activeCatalysts.Count == 0)
-            return WithCatalyst(fund, null);
+            return new FundProcessingResult(WithCatalyst(fund, null), warnings);
 
         // Null/empty category → null immediately, no LLM call.
         if (string.IsNullOrWhiteSpace(fund.Metadata.Category))
         {
             warnings.Add($"fund {fund.Isin} has null/empty category — catalyst=null");
-            return WithCatalyst(fund, null);
+            return new FundProcessingResult(WithCatalyst(fund, null), warnings);
         }
 
         var classifications = await _llm.ClassifyAsync(
@@ -104,7 +110,7 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
 
         var picked = SelectBest(classifications, activeCatalysts);
         if (picked is null)
-            return WithCatalyst(fund, null);
+            return new FundProcessingResult(WithCatalyst(fund, null), warnings);
 
         var (classification, source) = picked.Value;
         var catalyst = new FundCatalyst
@@ -117,7 +123,7 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
                 : ExposureType.Indirect,
             Rationale    = classification.Rationale ?? string.Empty,
         };
-        return WithCatalyst(fund, catalyst);
+        return new FundProcessingResult(WithCatalyst(fund, catalyst), warnings);
     }
 
     // Pick the strongest classification: Direct beats Indirect; ties broken by

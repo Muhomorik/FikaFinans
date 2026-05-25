@@ -375,6 +375,83 @@ public sealed class CatalystTaggerAgentTests
 
     #endregion
 
+    #region ProcessFundAsync (per-ISIN streaming path)
+
+    [Test]
+    public async Task ProcessFundAsync_DirectMatch_PopulatesCatalystWithExposureDirect()
+    {
+        var hormuz = MakeCatalyst("Hormuz disruption", Intensity.High, weeksActive: 8,
+            ["Branschfond, Energi"]);
+        var fund = MakeFund("LU2001", category: "Branschfond, Energi", name: "Energy");
+        _llmMock
+            .Setup(x => x.ClassifyAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<Catalyst>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Classify("Hormuz disruption", ExposureKind.Direct, "Direct oil benefit.")]);
+
+        var result = await _sut.ProcessFundAsync(fund, [hormuz]);
+
+        Assert.That(result.Fund.Catalyst, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.Catalyst!.ExposureType, Is.EqualTo(ExposureType.Direct));
+            Assert.That(result.Fund.Catalyst.Name, Is.EqualTo("Hormuz disruption"));
+            Assert.That(result.Warnings, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_NoActiveCatalysts_CatalystNullNoLlmCall()
+    {
+        var fund = MakeFund("LU2002", category: "Globalfond", name: "Some Fund");
+
+        var result = await _sut.ProcessFundAsync(fund, Array.Empty<Catalyst>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.Catalyst, Is.Null);
+            Assert.That(result.Warnings, Is.Empty);
+        });
+        _llmMock.Verify(x => x.ClassifyAsync(
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<Catalyst>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_EmptyCategory_CatalystNullAndReturnsWarning()
+    {
+        var hormuz = MakeCatalyst("Hormuz disruption", Intensity.High, weeksActive: 8,
+            ["Branschfond, Energi"]);
+        var fund = MakeFund("LU2003", category: "", name: "Some Fund");
+
+        var result = await _sut.ProcessFundAsync(fund, [hormuz]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.Catalyst, Is.Null);
+            Assert.That(result.Warnings, Has.Some.Contains("LU2003"));
+        });
+    }
+
+    [Test]
+    public void ProcessFundAsync_NullFund_Throws()
+    {
+        Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _sut.ProcessFundAsync(null!, Array.Empty<Catalyst>()));
+    }
+
+    [Test]
+    public void ProcessFundAsync_NullCatalysts_Throws()
+    {
+        var fund = MakeFund("LU2004", category: "Globalfond", name: "X");
+        Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _sut.ProcessFundAsync(fund, null!));
+    }
+
+    #endregion
+
     #region Disk happy path
 
     [Test]

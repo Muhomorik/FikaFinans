@@ -1,4 +1,5 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
@@ -38,7 +39,9 @@ public sealed class RecommenderAgent : IRecommenderAgent
 
         foreach (var fund in thesisValidated.Funds)
         {
-            enrichedFunds.Add(EnrichFund(fund, warnings));
+            var result = ProcessFund(fund);
+            enrichedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
         }
 
         return new DataLoaderOutput
@@ -64,8 +67,12 @@ public sealed class RecommenderAgent : IRecommenderAgent
         };
     }
 
-    private static FundRecord EnrichFund(FundRecord fund, List<string> warnings)
+    public FundProcessingResult ProcessFund(FundRecord fund)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+
+        var warnings = new List<string>();
+
         // signal=null → Skip + warning. The Recommender only acts on the
         // four-tuple (signal, thesis, catalyst.exposure_type, currently_held);
         // a missing signal means upstream (DataLoader / SignalScorer) skipped
@@ -73,11 +80,15 @@ public sealed class RecommenderAgent : IRecommenderAgent
         if (fund.Signal is null)
         {
             warnings.Add($"fund {fund.Isin} has null signal — recommendation=Skip");
-            return WithRecommendation(fund, Recommendation.Skip, "no_signal_no_action");
+            return new FundProcessingResult(
+                WithRecommendation(fund, Recommendation.Skip, "no_signal_no_action"),
+                warnings);
         }
 
         var (recommendation, reason) = Map(fund);
-        return WithRecommendation(fund, recommendation, reason);
+        return new FundProcessingResult(
+            WithRecommendation(fund, recommendation, reason),
+            warnings);
     }
 
     // The deterministic mapping table from 08-recommender.md. Every

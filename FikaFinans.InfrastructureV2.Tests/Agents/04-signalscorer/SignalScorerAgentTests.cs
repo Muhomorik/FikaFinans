@@ -351,6 +351,87 @@ public class SignalScorerAgentTests
 
     #endregion
 
+    #region ProcessFund (per-ISIN streaming path)
+
+    [Test]
+    public void ProcessFund_StandardFund_PopulatesSignal()
+    {
+        var sut = _fixture.Create<SignalScorerAgent>();
+        var metrics = MakeMetrics(windowsPositive: 3, windowsTotal: 3, currentDd: 0m, sharpe12w: 1.5m, sharpe2w: 1.0m);
+        var fund = MakeFund("LU2001", metrics);
+
+        var enriched = sut.ProcessFund(fund, _config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(enriched.Signal, Is.EqualTo(SignalLabel.Strength));
+            Assert.That(enriched.RuleFired, Is.EqualTo(RuleFired.Buy3of3ZeroDd));
+            Assert.That(enriched.CriteriaEvaluation, Is.Not.Null);
+        });
+    }
+
+    [Test]
+    public void ProcessFund_PreservesPriorFields_AppendOnly()
+    {
+        var sut = _fixture.Create<SignalScorerAgent>();
+        var metrics = MakeMetrics(windowsPositive: 2, windowsTotal: 3, currentDd: -1m, sharpe12w: 0.6m, sharpe2w: 0.4m);
+        var fund = MakeFund("LU2002", metrics);
+
+        var enriched = sut.ProcessFund(fund, _config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(enriched.Isin,       Is.EqualTo(fund.Isin));
+            Assert.That(enriched.Metadata,   Is.SameAs(fund.Metadata));
+            Assert.That(enriched.NavBuckets, Is.SameAs(fund.NavBuckets));
+            Assert.That(enriched.Layer,      Is.EqualTo(fund.Layer));
+            Assert.That(enriched.Metrics,    Is.SameAs(metrics));
+        });
+    }
+
+    [Test]
+    public void ProcessFund_NullFund_Throws()
+    {
+        var sut = _fixture.Create<SignalScorerAgent>();
+        Assert.Throws<ArgumentNullException>(() => sut.ProcessFund(null!, _config));
+    }
+
+    [Test]
+    public void ProcessFund_NullConfig_Throws()
+    {
+        var sut = _fixture.Create<SignalScorerAgent>();
+        var fund = MakeFund("LU2003", MakeMetrics(3, 3, 0m, 1.5m, 1.0m));
+        Assert.Throws<ArgumentNullException>(() => sut.ProcessFund(fund, null!));
+    }
+
+    [Test]
+    public void ProcessFund_FundWithoutMetrics_NeutralNoData()
+    {
+        var sut = _fixture.Create<SignalScorerAgent>();
+        var fund = new FundRecord
+        {
+            Isin           = "LU2004",
+            Metadata       = MakeMetadata("LU2004"),
+            NavBuckets     = Array.Empty<NavBucket>(),
+            Snapshot       = null,
+            CurrentlyHeld  = false,
+            CurrentValueKr = null,
+            CostBasisKr    = null,
+            Layer          = FundLayer.Active,
+            Metrics        = null,
+        };
+
+        var enriched = sut.ProcessFund(fund, _config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(enriched.Signal, Is.EqualTo(SignalLabel.Neutral));
+            Assert.That(enriched.RuleFired, Is.EqualTo(RuleFired.NeutralNoData));
+        });
+    }
+
+    #endregion
+
     #region Helpers
 
     private static void EnsureMetricsFixtureExists(string runId)

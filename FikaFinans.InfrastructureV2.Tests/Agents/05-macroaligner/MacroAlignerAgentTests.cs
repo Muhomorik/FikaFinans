@@ -500,6 +500,73 @@ public sealed class MacroAlignerAgentTests
         }
     }
 
+    #region ProcessFundAsync (per-ISIN streaming path)
+
+    [Test]
+    public async Task ProcessFundAsync_DirectMatchStrongTheme_AlignmentStrongNoLlmCall()
+    {
+        var theme = MakeTheme("rot_t", "T", SignalStrength.Strong, ["Branschfond, Energi"]);
+        var fund = MakeFund("LU2001", category: "Branschfond, Energi", signal: SignalLabel.Strength);
+
+        var result = await _sut.ProcessFundAsync(fund, [theme]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.MacroAlignment, Is.EqualTo(MacroAlignment.Strong));
+            Assert.That(result.Fund.MatchedTheme!.MatchMethod, Is.EqualTo(MatchMethod.DirectCategory));
+            Assert.That(result.Warnings, Is.Empty);
+        });
+        _llmMock.Verify(x => x.ClassifyAsync(
+            It.IsAny<string>(), It.IsAny<IReadOnlyList<RotationTheme>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_NoActiveThemes_AlignmentNoneNoWarning()
+    {
+        var fund = MakeFund("LU2002", category: "Globalfond", signal: SignalLabel.Strength);
+
+        var result = await _sut.ProcessFundAsync(fund, Array.Empty<RotationTheme>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.MacroAlignment, Is.EqualTo(MacroAlignment.None));
+            Assert.That(result.Warnings, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_EmptyCategory_AlignmentNoneAndReturnsWarning()
+    {
+        var theme = MakeTheme("rot_t", "T", SignalStrength.Strong, ["Branschfond, Energi"]);
+        var fund = MakeFund("LU2003", category: "", signal: SignalLabel.Strength);
+
+        var result = await _sut.ProcessFundAsync(fund, [theme]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.MacroAlignment, Is.EqualTo(MacroAlignment.None));
+            Assert.That(result.Warnings, Has.Some.Contains("LU2003"));
+        });
+    }
+
+    [Test]
+    public void ProcessFundAsync_NullFund_Throws()
+    {
+        Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _sut.ProcessFundAsync(null!, Array.Empty<RotationTheme>()));
+    }
+
+    [Test]
+    public void ProcessFundAsync_NullThemes_Throws()
+    {
+        var fund = MakeFund("LU2004", category: "Globalfond", signal: SignalLabel.Strength);
+        Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _sut.ProcessFundAsync(fund, null!));
+    }
+
+    #endregion
+
     private static MacroContext MakeSyntheticMacroContext(string isoWeek) => new()
     {
         GeneratedAt      = DateTimeOffset.UtcNow.ToString("o"),

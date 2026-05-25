@@ -447,6 +447,87 @@ public sealed class ThesisValidatorAgentTests
 
     #endregion
 
+    #region ProcessFundAsync (per-ISIN streaming path)
+
+    [Test]
+    public async Task ProcessFundAsync_StrengthPlusCatalystPlusStrong_ValidNoLlmCall()
+    {
+        var fund = MakeFund("LU2001",
+            signal: SignalLabel.Strength,
+            macro: MacroAlignment.Strong,
+            catalyst: MakeCatalyst());
+
+        var result = await _sut.ProcessFundAsync(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.ThesisValidity, Is.EqualTo(ThesisValidity.Valid));
+            Assert.That(result.Fund.ThesisMethod, Is.EqualTo(ThesisMethod.Matrix));
+            Assert.That(result.Warnings, Is.Empty);
+        });
+        _llmMock.Verify(x => x.RefineAsync(
+            It.IsAny<FundRecord>(), It.IsAny<ThesisValidity>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_NullSignal_NotApplicableAndReturnsWarning()
+    {
+        var fund = MakeFund("LU2002",
+            signal: null,
+            macro: MacroAlignment.None,
+            catalyst: null);
+
+        var result = await _sut.ProcessFundAsync(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.ThesisValidity, Is.EqualTo(ThesisValidity.NotApplicable));
+            Assert.That(result.Warnings, Has.Some.Contains("LU2002"));
+        });
+    }
+
+    [Test]
+    public async Task ProcessFundAsync_LlmJumpsTwoSteps_ReturnsMatrixBaselineAndWarning()
+    {
+        // Baseline = Partial (Strength + catalyst + Partial macro → refine=true).
+        // LLM tries to jump Partial → Invalid? That's only 1 step. So instead
+        // make baseline = Invalid (Weakness + catalyst) and LLM jumps to Valid.
+        _llmMock
+            .Setup(x => x.RefineAsync(
+                It.IsAny<FundRecord>(),
+                It.IsAny<ThesisValidity>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThesisRefinementVerdict
+            {
+                Validity = ThesisValidity.Valid,
+                Rationale = "LLM wildly disagreed.",
+            });
+
+        var fund = MakeFund("LU2003",
+            signal: SignalLabel.Weakness,
+            macro: MacroAlignment.None,
+            catalyst: MakeCatalyst());
+
+        var result = await _sut.ProcessFundAsync(fund);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Fund.ThesisValidity, Is.EqualTo(ThesisValidity.Invalid));
+            Assert.That(result.Fund.ThesisMethod, Is.EqualTo(ThesisMethod.Matrix));
+            Assert.That(result.Warnings, Has.Some.Contains("LU2003"));
+        });
+    }
+
+    [Test]
+    public void ProcessFundAsync_NullFund_Throws()
+    {
+        Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _sut.ProcessFundAsync(null!));
+    }
+
+    #endregion
+
     #region Disk happy path
 
     [Test]

@@ -47,44 +47,79 @@
     aggregated status from the VMs to set the closing
     `RunStatusText`/`StatusBarText`.
 
-  PER-ISIN STREAMING — STARTED 2026-05-24 (small slice 1/N).
-  - `StepEvent` gained an optional `Isin? Isin` field for per-fund
-    ticks. Universe-wide stages (1, 3, 9, 10) emit null; per-fund
-    stages (2, 4, 5, 6, 7, 8) will populate it once the runner
-    routes per-ISIN. Current runner emits null for every event
-    because no agent is wired to the per-fund path yet — the field
-    exists so the contract stops churning.
-  - `IMetricsCalculatorAgent` now exposes
-    `ProcessFund(FundRecord, MetricsCalculatorConfig) → FundRecord`
-    alongside the existing universe-wide `Run`. **Step 2 is the
-    template** for the per-ISIN agent shape — the pattern to
-    mass-replicate across Steps 4, 5, 6, 7, 8.
-  - `MetricsCalculatorAgent` implementation: `EnrichWithMetrics`
-    (private static) renamed to `ProcessFund` (public, instance),
-    `ArgumentNullException` guards added, and the universe-wide
-    `RunInMemory` now calls `ProcessFund` per fund so both paths
-    share the same per-fund logic. No behavioural change for the
-    universe-wide path.
-  - 5 new tests in
-    `FikaFinans.InfrastructureV2.Tests/Agents/02-metricscalculator/`
-    cover ProcessFund: standard fund populates metrics, append-only
-    preservation, null-arg guards (fund + config), repeat-call
-    equivalence (purity).
-  - 2 new tests in `FikaFinans.Application.Tests` for `StepEvent`:
-    default `Isin` is null; explicit `Isin` survives the record.
+  PER-ISIN STREAMING — SLICES 1 + 2 SHIPPED 2026-05-25.
 
-  Build is green end-to-end (full solution, 0 errors). 14/14 tests
-  pass in `FikaFinans.Application.Tests`; 15/15 in the Metrics test
-  class (10 existing + 5 ProcessFund).
+  Slice 1 (2026-05-24): `StepEvent` gained an optional `Isin? Isin`
+  field, and Step 2 (`MetricsCalculator`) got the per-fund
+  `ProcessFund` method as the **template** for the rest.
+
+  Slice 2 (2026-05-25): the template now lives on all 6 per-ISIN
+  agents — Steps 2, 4, 5, 6, 7, 8 each expose a per-fund method on
+  their interface. Steps that emit universe-level warnings during
+  per-fund processing (5, 6, 7, 8) return a small
+  `FundProcessingResult(FundRecord Fund, IReadOnlyList<string>
+  Warnings)` record so the orchestrator can fold warnings back into
+  `DataQuality.Warnings` after the merge; Steps 2 and 4 return a
+  bare `FundRecord` because their per-fund warnings live inside the
+  `FundRecord` itself (`Metrics.DataQuality` / `CriteriaEvaluation
+  .DataQualityWarnings`).
+  - Step 2 `IMetricsCalculatorAgent.ProcessFund(FundRecord,
+    MetricsCalculatorConfig) → FundRecord` (shipped slice 1).
+  - Step 4 `ISignalScorerAgent.ProcessFund(FundRecord,
+    SignalScorerConfig) → FundRecord`.
+  - Step 5 `IMacroAlignerAgent.ProcessFundAsync(FundRecord,
+    IReadOnlyList<RotationTheme>, CancellationToken) →
+    FundProcessingResult`.
+  - Step 6 `ICatalystTaggerAgent.ProcessFundAsync(FundRecord,
+    IReadOnlyList<Catalyst>, CancellationToken) →
+    FundProcessingResult`.
+  - Step 7 `IThesisValidatorAgent.ProcessFundAsync(FundRecord,
+    CancellationToken) → FundProcessingResult`.
+  - Step 8 `IRecommenderAgent.ProcessFund(FundRecord) →
+    FundProcessingResult`.
+
+  Each implementation:
+  - The existing private per-fund method (`EnrichWithSignal`,
+    `AlignFundAsync`, `TagFundAsync`, `ValidateFundAsync`,
+    `EnrichFund`) has been promoted to the new public method, with
+    `ArgumentNullException` guards on every reference-type
+    parameter.
+  - The universe-wide `RunInMemory[Async]` now calls `ProcessFund`
+    per fund and folds the returned warnings into the universe
+    `DataQuality.Warnings` exactly as the old private path did. No
+    behavioural change for the universe-wide path.
+  - The shared warning list is no longer threaded through the
+    per-fund call — each `ProcessFund` invocation builds its own
+    warning list and returns it. This is what makes the per-fund
+    path safe under `Merge(maxConcurrent: N)`: no shared mutable
+    state.
+
+  Tests added (4–5 per agent, mirroring the Step 2 ProcessFund
+  block):
+  - `04-signalscorer` — standard fund, append-only, null-fund,
+    null-config, no-metrics neutral path.
+  - `05-macroaligner` — direct match (no LLM call), no themes
+    (none + no warning), empty category (none + warning), null
+    fund, null themes.
+  - `06-catalysttagger` — direct match populates catalyst, no
+    catalysts (null + no LLM), empty category (null + warning),
+    null fund, null catalysts.
+  - `07-thesisvalidator` — matrix-only happy path (no LLM call),
+    null signal → NotApplicable + warning, LLM > 1-step override →
+    matrix baseline + warning, null fund.
+  - `08-recommender` — strength+valid+direct → CatalystEntry, null
+    signal → Skip + warning, null fund, repeat-call equivalence
+    (purity).
+
+  Build is green end-to-end (full solution, 0 errors, 21
+  pre-existing duplicate-using warnings unchanged). All tests pass:
+  Domain 1/1, Application 14/14, InfrastructureV2 207/207.
 
   Still to do for per-ISIN streaming:
-  - Apply the same `ProcessFund` shape to Steps 4 (sync), 5/6/7
-    (async, LLM-dependent), 8 (sync). Each follows the Step 2
-    template — extract the existing per-fund method, expose it on
-    the interface, route the universe-wide method through it.
   - Add `Merge(maxConcurrent: N)` orchestration to `PipelineRunner`
     for the per-ISIN block (Steps 2, 4, 5, 6, 7, 8) bounded by
-    Steps 3 and 9 as universe-wide barriers.
+    Steps 3 and 9 as universe-wide barriers. The new agent surface
+    is the contract that orchestration will consume.
   - Wire per-fund `StepEvent`s from the per-ISIN block (populate
     `Isin` on `Started` / `Succeeded` / `Failed`).
   - WPF VMs surface per-fund progress (e.g. "Step 4 — 137 / 1500"

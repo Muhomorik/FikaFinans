@@ -53,7 +53,7 @@ public sealed class SignalScorerAgent : ISignalScorerAgent
 
     public DataLoaderOutput RunInMemory(DataLoaderOutput input, SignalScorerConfig config)
     {
-        var enrichedFunds = input.Funds.Select(f => EnrichWithSignal(f, config)).ToList();
+        var enrichedFunds = input.Funds.Select(f => ProcessFund(f, config)).ToList();
 
         return new DataLoaderOutput
         {
@@ -69,8 +69,11 @@ public sealed class SignalScorerAgent : ISignalScorerAgent
         };
     }
 
-    private static FundRecord EnrichWithSignal(FundRecord fund, SignalScorerConfig config)
+    public FundRecord ProcessFund(FundRecord fund, SignalScorerConfig config)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+        ArgumentNullException.ThrowIfNull(config);
+
         var (signal, ruleFired, evaluation) = ScoreFund(fund.Metrics, config);
 
         return new FundRecord

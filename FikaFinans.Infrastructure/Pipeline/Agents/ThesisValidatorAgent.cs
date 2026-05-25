@@ -1,4 +1,5 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Domain.Funds;
@@ -43,8 +44,9 @@ public sealed class ThesisValidatorAgent : IThesisValidatorAgent
 
         foreach (var fund in tagged.Funds)
         {
-            var validated = await ValidateFundAsync(fund, warnings, ct);
-            validatedFunds.Add(validated);
+            var result = await ProcessFundAsync(fund, ct);
+            validatedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
         }
 
         return new DataLoaderOutput
@@ -70,17 +72,22 @@ public sealed class ThesisValidatorAgent : IThesisValidatorAgent
         };
     }
 
-    private async Task<FundRecord> ValidateFundAsync(
+    public async Task<FundProcessingResult> ProcessFundAsync(
         FundRecord fund,
-        List<string> warnings,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fund);
+
+        var warnings = new List<string>();
+
         // signal=null (DataLoader/SignalScorer skipped) → NotApplicable, no LLM.
         if (fund.Signal is null)
         {
             warnings.Add($"fund {fund.Isin} has null signal — thesis_validity=NotApplicable");
-            return WithThesis(fund, ThesisValidity.NotApplicable, ThesisMethod.Matrix,
-                "No signal — no thesis to validate.");
+            return new FundProcessingResult(
+                WithThesis(fund, ThesisValidity.NotApplicable, ThesisMethod.Matrix,
+                    "No signal — no thesis to validate."),
+                warnings);
         }
 
         // Catalyst.exposure_type missing means the catalyst object exists but is
@@ -91,7 +98,9 @@ public sealed class ThesisValidatorAgent : IThesisValidatorAgent
 
         if (!refine)
         {
-            return WithThesis(fund, baseline, ThesisMethod.Matrix, MatrixRationale(fund, baseline));
+            return new FundProcessingResult(
+                WithThesis(fund, baseline, ThesisMethod.Matrix, MatrixRationale(fund, baseline)),
+                warnings);
         }
 
         var verdict = await _llm.RefineAsync(fund, baseline, ct);
@@ -99,13 +108,17 @@ public sealed class ThesisValidatorAgent : IThesisValidatorAgent
         {
             warnings.Add(
                 $"fund {fund.Isin} LLM jumped {baseline}→{verdict.Validity} (>1 step) — using matrix baseline");
-            return WithThesis(fund, baseline, ThesisMethod.Matrix, MatrixRationale(fund, baseline));
+            return new FundProcessingResult(
+                WithThesis(fund, baseline, ThesisMethod.Matrix, MatrixRationale(fund, baseline)),
+                warnings);
         }
 
         var rationale = string.IsNullOrWhiteSpace(verdict.Rationale)
             ? MatrixRationale(fund, verdict.Validity)
             : verdict.Rationale;
-        return WithThesis(fund, verdict.Validity, ThesisMethod.LlmRefinement, rationale);
+        return new FundProcessingResult(
+            WithThesis(fund, verdict.Validity, ThesisMethod.LlmRefinement, rationale),
+            warnings);
     }
 
     // Decision matrix from 07-thesisvalidator.md. Returns the baseline label
