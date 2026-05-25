@@ -115,13 +115,48 @@
   pre-existing duplicate-using warnings unchanged). All tests pass:
   Domain 1/1, Application 14/14, InfrastructureV2 207/207.
 
+  Slice 3 (2026-05-25): `Merge(maxConcurrent: N)` orchestration
+  primitive is in. `PipelineRunner.RunPerIsinBlockAsync` takes a
+  loaded Step 1 `DataLoaderOutput`, a loaded Step 3 `MacroContext`,
+  the Step 2 / Step 4 configs, and a `maxConcurrent` fan-out
+  budget; it streams every fund through Steps 2 → 4 → 5 → 6 → 7 → 8
+  with `Merge(maxConcurrent: N)` and returns the enriched universe.
+  - Each per-fund step emits both `Started` and `Succeeded` events
+    with `StepEvent.Isin` populated; if any step throws, a `Failed`
+    event with `Isin` + `Message` is emitted and the exception
+    propagates (the merge halts). The per-fund warning lists
+    returned by Steps 5–8 are aggregated into a thread-safe
+    `ConcurrentBag<string>` and folded back into
+    `DataQuality.Warnings` on the returned universe output.
+  - `Subject<StepEvent>` is not thread-safe under concurrent
+    publishers; emission now goes through a single
+    `lock`-serialised `Emit(...)` helper so the `Merge` fan-out
+    can't interleave half-written events.
+  - The new primitive is a public method on `PipelineRunner`, not
+    yet on `IPipelineRunner` — the interface stays minimal until
+    the wiring slice decides whether the universe-wide entry point
+    (`RunAllAsync`) is replaced by a call into this primitive or
+    whether both coexist.
+  - 6 new tests in `FikaFinans.Application.Tests`: every per-ISIN
+    agent gets called once per fund; `Started` + `Succeeded` events
+    with `Isin` are emitted for all six per-ISIN steps; the
+    enriched universe preserves fund count and identity fields;
+    per-fund warnings are folded into `DataQuality.Warnings`; a
+    failing step emits `Failed` + `Isin` + `Message`; null-arg and
+    `maxConcurrent < 1` guard tests.
+
+  Build is green end-to-end (full solution, 0 errors, 21
+  pre-existing duplicate-using warnings unchanged). All tests pass:
+  Domain 1/1, Application **20/20** (14 + 6 new), InfrastructureV2
+  207/207.
+
   Still to do for per-ISIN streaming:
-  - Add `Merge(maxConcurrent: N)` orchestration to `PipelineRunner`
-    for the per-ISIN block (Steps 2, 4, 5, 6, 7, 8) bounded by
-    Steps 3 and 9 as universe-wide barriers. The new agent surface
-    is the contract that orchestration will consume.
-  - Wire per-fund `StepEvent`s from the per-ISIN block (populate
-    `Isin` on `Started` / `Succeeded` / `Failed`).
+  - Wire `RunPerIsinBlockAsync` into the universe-wide entry point
+    (likely a new `RunAllStreamingAsync` on `IPipelineRunner` that
+    runs Steps 1 + 3 universe-wide, calls `RunPerIsinBlockAsync`
+    for 2–8, then runs Steps 9 + 10 universe-wide; writes the six
+    step JSON files at the boundaries). Needs `IPathsService` +
+    config loading injected into the runner.
   - WPF VMs surface per-fund progress (e.g. "Step 4 — 137 / 1500"
     instead of just a `Running` pip).
 
