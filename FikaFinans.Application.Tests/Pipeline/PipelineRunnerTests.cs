@@ -25,6 +25,7 @@ public sealed class PipelineRunnerTests
     private Mock<IThesisValidatorAgent> _thesis = null!;
     private Mock<IRecommenderAgent> _recommender = null!;
     private Mock<IUniverseEnricherAgent> _enricher = null!;
+    private Mock<IStreamingPipelineGateway> _gateway = null!;
     private PipelineRunner _sut = null!;
 
     [SetUp]
@@ -97,6 +98,17 @@ public sealed class PipelineRunnerTests
         _recommender
             .Setup(x => x.ProcessFund(It.IsAny<FundRecord>()))
             .Returns((FundRecord f) => new FundProcessingResult(f, Array.Empty<string>()));
+
+        // The streaming gateway is mocked here; tests that exercise
+        // RunAllStreamingAsync stub LoadStep1Output / LoadStep3Output to
+        // return real fixtures and verify SaveStepOutput calls.
+        _gateway = _fixture.Freeze<Mock<IStreamingPipelineGateway>>();
+        _gateway
+            .Setup(x => x.LoadMetricsConfig())
+            .Returns(MetricsCalculatorConfig.Default);
+        _gateway
+            .Setup(x => x.LoadSignalConfig())
+            .Returns(SignalScorerConfig.Default);
 
         _sut = _fixture.Create<PipelineRunner>();
     }
@@ -357,7 +369,7 @@ public sealed class PipelineRunnerTests
     }
 
     [Test]
-    public async Task RunPerIsinBlockAsync_ReturnsEnrichedUniverseWithSameFundCount()
+    public async Task RunPerIsinBlockAsync_ReturnsSixBoundaryOutputsPreservingFundCount()
     {
         var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"), MakeFund("LU0003"));
         var macro = MakeMacroContext();
@@ -368,15 +380,38 @@ public sealed class PipelineRunnerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Funds, Has.Count.EqualTo(3));
-            Assert.That(result.IsoWeek, Is.EqualTo(step1.IsoWeek));
-            Assert.That(result.Family, Is.EqualTo(step1.Family));
-            Assert.That(result.RunId, Is.EqualTo(step1.RunId));
+            Assert.That(result.Step2Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step4Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step5Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step6Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step7Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step8Output.Funds, Has.Count.EqualTo(3));
+            Assert.That(result.Step8Output.IsoWeek, Is.EqualTo(step1.IsoWeek));
+            Assert.That(result.Step8Output.Family, Is.EqualTo(step1.Family));
+            Assert.That(result.Step8Output.RunId, Is.EqualTo(step1.RunId));
         });
     }
 
     [Test]
-    public async Task RunPerIsinBlockAsync_FoldsPerFundWarningsIntoDataQuality()
+    public async Task RunPerIsinBlockAsync_PreservesInputFundOrderInEveryBoundaryOutput()
+    {
+        var step1 = MakeStep1Output(MakeFund("LU0003"), MakeFund("LU0001"), MakeFund("LU0002"));
+        var macro = MakeMacroContext();
+
+        var result = await _sut.RunPerIsinBlockAsync(
+            step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default,
+            maxConcurrent: 3);
+
+        var expectedOrder = new[] { "LU0003", "LU0001", "LU0002" };
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Step2Output.Funds.Select(f => f.Isin.Value), Is.EqualTo(expectedOrder));
+            Assert.That(result.Step8Output.Funds.Select(f => f.Isin.Value), Is.EqualTo(expectedOrder));
+        });
+    }
+
+    [Test]
+    public async Task RunPerIsinBlockAsync_FoldsPerFundWarningsIntoEveryBoundaryDataQuality()
     {
         _macroAligner
             .Setup(x => x.ProcessFundAsync(
@@ -393,8 +428,13 @@ public sealed class PipelineRunnerTests
             step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default,
             maxConcurrent: 2);
 
-        Assert.That(result.DataQuality.Warnings, Has.Member("warn-LU0001"));
-        Assert.That(result.DataQuality.Warnings, Has.Member("warn-LU0002"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Step5Output.DataQuality.Warnings, Has.Member("warn-LU0001"));
+            Assert.That(result.Step5Output.DataQuality.Warnings, Has.Member("warn-LU0002"));
+            Assert.That(result.Step8Output.DataQuality.Warnings, Has.Member("warn-LU0001"));
+            Assert.That(result.Step8Output.DataQuality.Warnings, Has.Member("warn-LU0002"));
+        });
     }
 
     [Test]
@@ -443,6 +483,140 @@ public sealed class PipelineRunnerTests
             Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await _sut.RunPerIsinBlockAsync(
                 step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default, 0));
         });
+    }
+
+    // ───────────────────────── RunAllStreamingAsync ─────────────────────────
+
+    [Test]
+    public async Task RunAllStreamingAsync_AllStepsSucceed_ReturnsTrue()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-1");
+
+        Assert.That(result, Is.True);
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_HappyPath_WritesAllSixPerIsinBoundaryFiles()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-2", maxConcurrent: 2);
+
+        Assert.Multiple(() =>
+        {
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.MetricsCalculator, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.SignalScorer, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.MacroAligner, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.CatalystTagger, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.ThesisValidator, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+            _gateway.Verify(x => x.SaveStepOutput(
+                StepId.Recommender, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+        });
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_HappyPath_EmitsUniverseSucceededForAllTenSteps()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        var observed = new List<StepEvent>();
+        using var sub = _sut.Events.Subscribe(observed.Add);
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-3");
+
+        var universeSucceededSteps = observed
+            .Where(e => e.Kind == StepEventKind.Succeeded && e.Isin is null)
+            .Select(e => e.Step.Value)
+            .Distinct()
+            .OrderBy(v => v)
+            .ToList();
+        Assert.That(universeSucceededSteps, Is.EqualTo(Enumerable.Range(1, 10).ToList()));
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_Step1Fails_DoesNotInvokeGatewayOrLaterSteps()
+    {
+        _fixture.Freeze<Mock<IDataLoaderAgent>>()
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Throws(new InvalidOperationException("boom"));
+        // Re-create SUT so the freshly-frozen DataLoader mock takes effect.
+        _sut.Dispose();
+        _sut = _fixture.Create<PipelineRunner>();
+
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-4");
+
+        Assert.That(result, Is.False);
+        _gateway.Verify(
+            x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "gateway should not be touched if Step 1 fails");
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_PerIsinBlockFails_EmitsFailedForAllSixPerIsinSteps()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+        _thesis
+            .Setup(x => x.ProcessFundAsync(It.IsAny<FundRecord>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("LLM exploded"));
+
+        var observed = new List<StepEvent>();
+        using var sub = _sut.Events.Subscribe(observed.Add);
+
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-5");
+
+        var perIsinSteps = new[]
+        {
+            StepId.MetricsCalculator, StepId.SignalScorer, StepId.MacroAligner,
+            StepId.CatalystTagger, StepId.ThesisValidator, StepId.Recommender,
+        };
+        Assert.Multiple(() =>
+        {
+            Assert.That(result, Is.False);
+            foreach (var step in perIsinSteps)
+            {
+                Assert.That(observed.Any(e =>
+                    e.Step == step && e.Kind == StepEventKind.Failed && e.Isin is null),
+                    Is.True, $"missing universe-level Failed event for {step}");
+            }
+        });
+    }
+
+    [Test]
+    public void RunAllStreamingAsync_Cancelled_ThrowsOperationCanceled()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-6", ct: cts.Token));
     }
 
     // ───────────────────────── fixtures ─────────────────────────

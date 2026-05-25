@@ -120,7 +120,9 @@
   loaded Step 1 `DataLoaderOutput`, a loaded Step 3 `MacroContext`,
   the Step 2 / Step 4 configs, and a `maxConcurrent` fan-out
   budget; it streams every fund through Steps 2 → 4 → 5 → 6 → 7 → 8
-  with `Merge(maxConcurrent: N)` and returns the enriched universe.
+  with `Merge(maxConcurrent: N)` and returns a
+  `PerIsinBlockResult` — six universe snapshots, one per per-ISIN
+  step boundary, with input fund order preserved.
   - Each per-fund step emits both `Started` and `Succeeded` events
     with `StepEvent.Isin` populated; if any step throws, a `Failed`
     event with `Isin` + `Message` is emitted and the exception
@@ -145,20 +147,56 @@
     failing step emits `Failed` + `Isin` + `Message`; null-arg and
     `maxConcurrent < 1` guard tests.
 
+  Slice 4 (2026-05-25): `RunAllStreamingAsync` is wired end-to-end.
+  Runs Step 1 + Step 3 universe-wide via the existing agents, fans
+  out the per-ISIN block (Steps 2 → 4 → 5 → 6 → 7 → 8) through
+  `Merge(maxConcurrent: 5)` by default, writes the six boundary
+  JSON files so the per-tab "Run this step" buttons keep working
+  after a streaming run, then runs Step 9 + Step 10 universe-wide.
+  - File-IO concerns live behind a new
+    `IStreamingPipelineGateway` (in `FikaFinans.Application
+    /Pipeline/`), implemented by `StreamingPipelineGateway` in
+    Infrastructure on top of `IPathsService` + `JsonOptions.Default`.
+    The runner stays free of JSON/disk knowledge.
+  - Universe-wide `Started` events for the six per-ISIN steps fire
+    together at the block start; per-fund `Started`/`Succeeded`
+    events with `Isin` populated stream during the merge;
+    universe-wide `Succeeded` events for all six steps fire after
+    the boundary files are written. WPF VMs can route on the
+    `Isin is null` events for tab status and on per-fund events
+    for live progress counters.
+  - If the per-ISIN block throws, universe-wide `Failed` events
+    fire for all six steps (plus the per-fund `Failed` event for
+    the offending ISIN that the block already emitted).
+  - Autofac wires `StreamingPipelineGateway` as a singleton and
+    passes it to the runner constructor.
+  - 6 new tests in `FikaFinans.Application.Tests`:
+    `RunAllStreamingAsync` returns true on the happy path, writes
+    all six per-ISIN boundary files, emits universe-`Succeeded`
+    for every one of the 10 steps, halts without touching the
+    gateway when Step 1 fails, emits universe-`Failed` for all six
+    per-ISIN steps when the block throws, and surfaces
+    `OperationCanceledException` on a pre-cancelled token.
+  - Existing 4 `RunPerIsinBlockAsync` tests updated to the new
+    `PerIsinBlockResult` shape (`result.Step8Output.Funds` etc.);
+    new test asserts input fund order survives the merge across
+    every boundary output.
+
   Build is green end-to-end (full solution, 0 errors, 21
   pre-existing duplicate-using warnings unchanged). All tests pass:
-  Domain 1/1, Application **20/20** (14 + 6 new), InfrastructureV2
-  207/207.
+  Domain 1/1, Application **27/27** (20 + 7 new in slice 4 — 1
+  ordering test for slice 3's primitive plus 6 for the wiring),
+  InfrastructureV2 207/207.
 
   Still to do for per-ISIN streaming:
-  - Wire `RunPerIsinBlockAsync` into the universe-wide entry point
-    (likely a new `RunAllStreamingAsync` on `IPipelineRunner` that
-    runs Steps 1 + 3 universe-wide, calls `RunPerIsinBlockAsync`
-    for 2–8, then runs Steps 9 + 10 universe-wide; writes the six
-    step JSON files at the boundaries). Needs `IPathsService` +
-    config loading injected into the runner.
-  - WPF VMs surface per-fund progress (e.g. "Step 4 — 137 / 1500"
-    instead of just a `Running` pip).
+  - WPF: swap `MainWindowViewModel.OnRunAllAsync` to call
+    `RunAllStreamingAsync` instead of `RunAllAsync`. Add a
+    per-fund progress counter on each per-ISIN step VM (e.g.
+    "Step 4 — 137 / 1500") fed by `StepEvent`s where `Isin` is
+    populated.
+  - Integration test for `StreamingPipelineGateway` against real
+    disk paths via `TestPathsService` (round-trip a write +
+    reload).
 
   Phase numbering in this doc mirrors the Phase 1 / Phase 2 split
   that previously lived in

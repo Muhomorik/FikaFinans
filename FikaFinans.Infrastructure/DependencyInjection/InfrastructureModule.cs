@@ -15,6 +15,7 @@ using FikaFinans.Infrastructure.Bank;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Foundry;
 using FikaFinans.Infrastructure.Paths;
+using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Prompts;
@@ -360,9 +361,19 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<IPortfolioConstructorAgent>()
             .SingleInstance();
 
-        // The pipeline orchestrator. Sequential per-step today (Phase 1 starter
-        // slice); per-ISIN streaming and the WPF VM migration are follow-ups
-        // per Docs/pipeline-step-flow-plan.md.
+        // JSON / disk seam for the streaming pipeline path. The runner reads
+        // boundary outputs (Step 1, Step 3) and writes per-ISIN step outputs
+        // (Steps 2, 4, 5, 6, 7, 8) through this gateway during
+        // RunAllStreamingAsync.
+        builder.RegisterType<StreamingPipelineGateway>()
+            .As<IStreamingPipelineGateway>()
+            .SingleInstance();
+
+        // The pipeline orchestrator. Today RunAllAsync calls each step
+        // universe-wide in sequence; RunAllStreamingAsync runs Steps 1+3
+        // universe-wide, fan-outs the per-ISIN block (Steps 2, 4, 5, 6, 7, 8)
+        // through Merge(maxConcurrent: 5), then runs Steps 9+10 universe-wide.
+        // See Docs/pipeline-step-flow-plan.md for the full design.
         builder.Register(ctx => new PipelineRunner(
                 logger: LogManager.GetLogger(nameof(PipelineRunner)),
                 dataLoader: ctx.Resolve<IDataLoaderAgent>(),
@@ -374,7 +385,8 @@ public sealed class InfrastructureModule : Autofac.Module
                 thesis: ctx.Resolve<IThesisValidatorAgent>(),
                 recommender: ctx.Resolve<IRecommenderAgent>(),
                 enricher: ctx.Resolve<IUniverseEnricherAgent>(),
-                portfolio: ctx.Resolve<IPortfolioConstructorAgent>()))
+                portfolio: ctx.Resolve<IPortfolioConstructorAgent>(),
+                gateway: ctx.Resolve<IStreamingPipelineGateway>()))
             .As<IPipelineRunner>()
             .SingleInstance();
     }

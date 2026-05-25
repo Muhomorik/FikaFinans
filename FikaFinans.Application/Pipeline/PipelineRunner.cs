@@ -36,9 +36,16 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
     private readonly IRecommenderAgent _recommender;
     private readonly IUniverseEnricherAgent _enricher;
     private readonly IPortfolioConstructorAgent _portfolio;
+    private readonly IStreamingPipelineGateway _gateway;
 
     private readonly Subject<StepEvent> _eventsCore = new();
     private readonly object _eventsGate = new();
+
+    private static readonly IReadOnlyList<StepId> PerIsinSteps =
+    [
+        StepId.MetricsCalculator, StepId.SignalScorer, StepId.MacroAligner,
+        StepId.CatalystTagger,    StepId.ThesisValidator, StepId.Recommender,
+    ];
 
     public PipelineRunner(
         ILogger logger,
@@ -51,7 +58,8 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         IThesisValidatorAgent thesis,
         IRecommenderAgent recommender,
         IUniverseEnricherAgent enricher,
-        IPortfolioConstructorAgent portfolio)
+        IPortfolioConstructorAgent portfolio,
+        IStreamingPipelineGateway gateway)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(dataLoader);
@@ -64,6 +72,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         ArgumentNullException.ThrowIfNull(recommender);
         ArgumentNullException.ThrowIfNull(enricher);
         ArgumentNullException.ThrowIfNull(portfolio);
+        ArgumentNullException.ThrowIfNull(gateway);
 
         _logger = logger;
         _dataLoader = dataLoader;
@@ -76,6 +85,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         _recommender = recommender;
         _enricher = enricher;
         _portfolio = portfolio;
+        _gateway = gateway;
     }
 
     public IObservable<StepEvent> Events => _eventsCore;
@@ -96,6 +106,94 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         }
 
         _logger.Info("Pipeline run completed: runId={RunId}", runId);
+        return true;
+    }
+
+    public async Task<bool> RunAllStreamingAsync(
+        string family,
+        string isoWeek,
+        string runId,
+        int maxConcurrent = 5,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        _logger.Info(
+            "Streaming pipeline run started: family={Family} isoWeek={IsoWeek} runId={RunId} maxConcurrent={MaxConcurrent}",
+            family, isoWeek, runId, maxConcurrent);
+
+        // Universe-wide barriers before the per-ISIN block.
+        if (!await RunStepAsync(StepId.DataLoader, family, isoWeek, runId, ct).ConfigureAwait(false))
+        {
+            _logger.Warn("Streaming pipeline halted at {Step}", StepId.DataLoader);
+            return false;
+        }
+
+        if (!await RunStepAsync(StepId.MacroAnalyst, family, isoWeek, runId, ct).ConfigureAwait(false))
+        {
+            _logger.Warn("Streaming pipeline halted at {Step}", StepId.MacroAnalyst);
+            return false;
+        }
+
+        // Per-ISIN block (Steps 2 → 4 → 5 → 6 → 7 → 8). Universe-wide
+        // Started events fire for all six steps at block start; per-fund
+        // Started/Succeeded events with Isin populated stream during
+        // execution; universe-wide Succeeded events for all six steps fire
+        // once the boundary files are written.
+        var blockSw = Stopwatch.StartNew();
+        foreach (var step in PerIsinSteps)
+            Emit(new StepEvent(step, StepEventKind.Started));
+
+        try
+        {
+            var step1Output = _gateway.LoadStep1Output(isoWeek, runId);
+            var macroContext = _gateway.LoadStep3Output(isoWeek, runId);
+            var metricsConfig = _gateway.LoadMetricsConfig();
+            var signalConfig = _gateway.LoadSignalConfig();
+
+            var result = await RunPerIsinBlockAsync(
+                step1Output, macroContext, metricsConfig, signalConfig, maxConcurrent, ct)
+                .ConfigureAwait(false);
+
+            _gateway.SaveStepOutput(StepId.MetricsCalculator, isoWeek, runId, result.Step2Output);
+            _gateway.SaveStepOutput(StepId.SignalScorer,      isoWeek, runId, result.Step4Output);
+            _gateway.SaveStepOutput(StepId.MacroAligner,      isoWeek, runId, result.Step5Output);
+            _gateway.SaveStepOutput(StepId.CatalystTagger,    isoWeek, runId, result.Step6Output);
+            _gateway.SaveStepOutput(StepId.ThesisValidator,   isoWeek, runId, result.Step7Output);
+            _gateway.SaveStepOutput(StepId.Recommender,       isoWeek, runId, result.Step8Output);
+        }
+        catch (OperationCanceledException)
+        {
+            blockSw.Stop();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            blockSw.Stop();
+            _logger.Error(ex, "Streaming per-ISIN block failed");
+            foreach (var step in PerIsinSteps)
+                Emit(new StepEvent(step, StepEventKind.Failed, Message: ex.Message, Duration: blockSw.Elapsed));
+            return false;
+        }
+
+        blockSw.Stop();
+        foreach (var step in PerIsinSteps)
+            Emit(new StepEvent(step, StepEventKind.Succeeded, Duration: blockSw.Elapsed));
+
+        // Universe-wide barriers after the per-ISIN block.
+        if (!await RunStepAsync(StepId.UniverseEnricher, family, isoWeek, runId, ct).ConfigureAwait(false))
+        {
+            _logger.Warn("Streaming pipeline halted at {Step}", StepId.UniverseEnricher);
+            return false;
+        }
+
+        if (!await RunStepAsync(StepId.PortfolioConstructor, family, isoWeek, runId, ct).ConfigureAwait(false))
+        {
+            _logger.Warn("Streaming pipeline halted at {Step}", StepId.PortfolioConstructor);
+            return false;
+        }
+
+        _logger.Info("Streaming pipeline run completed: runId={RunId}", runId);
         return true;
     }
 
@@ -133,11 +231,12 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
     /// before this call, Step 9 after); their outputs are not touched here.
     /// Emits per-fund <see cref="StepEvent"/>s with <see cref="StepEvent.Isin"/>
     /// populated on Started/Succeeded for every step; Failed if a step throws.
-    /// Returns the enriched universe (all 6 step fields populated). Warnings
-    /// from <see cref="FundProcessingResult.Warnings"/> are folded into the
-    /// returned <see cref="DataLoaderOutput.DataQuality"/>.
+    /// Returns six <see cref="DataLoaderOutput"/> snapshots — one per
+    /// per-ISIN step boundary — so callers can persist matching JSON files.
+    /// Each snapshot preserves the input fund order and folds the per-fund
+    /// warnings from Steps 5–8 back into <see cref="DataQuality.Warnings"/>.
     /// </summary>
-    public async Task<DataLoaderOutput> RunPerIsinBlockAsync(
+    public async Task<PerIsinBlockResult> RunPerIsinBlockAsync(
         DataLoaderOutput step1Output,
         MacroContext macroContext,
         MetricsCalculatorConfig metricsConfig,
@@ -158,11 +257,12 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             .ToArray();
 
         var warnings = new ConcurrentBag<string>();
+        var captures = new PerStepCaptures();
 
-        var enrichedFunds = await step1Output.Funds
+        await step1Output.Funds
             .ToObservable()
             .Select(fund => Observable.FromAsync(token => RunFundAsync(
-                fund, metricsConfig, signalConfig, activeThemes, activeCatalysts, warnings, token)))
+                fund, metricsConfig, signalConfig, activeThemes, activeCatalysts, warnings, captures, token)))
             .Merge(maxConcurrent)
             .ToList()
             .ToTask(ct)
@@ -170,27 +270,58 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
 
         var mergedWarnings = step1Output.DataQuality.Warnings.Concat(warnings).ToList();
 
+        return new PerIsinBlockResult(
+            Step2Output: BuildUniverse(step1Output, captures.Step2, mergedWarnings),
+            Step4Output: BuildUniverse(step1Output, captures.Step4, mergedWarnings),
+            Step5Output: BuildUniverse(step1Output, captures.Step5, mergedWarnings),
+            Step6Output: BuildUniverse(step1Output, captures.Step6, mergedWarnings),
+            Step7Output: BuildUniverse(step1Output, captures.Step7, mergedWarnings),
+            Step8Output: BuildUniverse(step1Output, captures.Step8, mergedWarnings));
+    }
+
+    private static DataLoaderOutput BuildUniverse(
+        DataLoaderOutput template,
+        ConcurrentDictionary<string, FundRecord> capture,
+        List<string> warnings)
+    {
+        var ordered = template.Funds
+            .Select(f => capture[f.Isin.Value])
+            .ToList();
+
         return new DataLoaderOutput
         {
             GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
-            IsoWeek         = step1Output.IsoWeek,
-            Family          = step1Output.Family,
-            RunId           = step1Output.RunId,
-            ConfigVersion   = step1Output.ConfigVersion,
-            Funds           = enrichedFunds.ToList(),
-            FrozenPositions = step1Output.FrozenPositions,
-            CashAvailableKr = step1Output.CashAvailableKr,
+            IsoWeek         = template.IsoWeek,
+            Family          = template.Family,
+            RunId           = template.RunId,
+            ConfigVersion   = template.ConfigVersion,
+            Funds           = ordered,
+            FrozenPositions = template.FrozenPositions,
+            CashAvailableKr = template.CashAvailableKr,
             DataQuality     = new DataQuality
             {
-                MetadataRows  = step1Output.DataQuality.MetadataRows,
-                SummaryRows   = step1Output.DataQuality.SummaryRows,
-                SnapshotRows  = step1Output.DataQuality.SnapshotRows,
-                PositionsRows = step1Output.DataQuality.PositionsRows,
-                WriteoffCount = step1Output.DataQuality.WriteoffCount,
-                CoreCount     = step1Output.DataQuality.CoreCount,
-                Warnings      = mergedWarnings,
+                MetadataRows  = template.DataQuality.MetadataRows,
+                SummaryRows   = template.DataQuality.SummaryRows,
+                SnapshotRows  = template.DataQuality.SnapshotRows,
+                PositionsRows = template.DataQuality.PositionsRows,
+                WriteoffCount = template.DataQuality.WriteoffCount,
+                CoreCount     = template.DataQuality.CoreCount,
+                Warnings      = warnings,
             },
         };
+    }
+
+    // Per-step per-fund snapshots collected during the Merge fan-out. Each
+    // dictionary is keyed by Isin.Value (a plain string for thread-safe
+    // hashing) so we can reassemble in input order via the step1 template.
+    private sealed class PerStepCaptures
+    {
+        public ConcurrentDictionary<string, FundRecord> Step2 { get; } = new();
+        public ConcurrentDictionary<string, FundRecord> Step4 { get; } = new();
+        public ConcurrentDictionary<string, FundRecord> Step5 { get; } = new();
+        public ConcurrentDictionary<string, FundRecord> Step6 { get; } = new();
+        public ConcurrentDictionary<string, FundRecord> Step7 { get; } = new();
+        public ConcurrentDictionary<string, FundRecord> Step8 { get; } = new();
     }
 
     private async Task<FundRecord> RunFundAsync(
@@ -200,26 +331,33 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         IReadOnlyList<RotationTheme> activeThemes,
         IReadOnlyList<Catalyst> activeCatalysts,
         ConcurrentBag<string> warnings,
+        PerStepCaptures captures,
         CancellationToken ct)
     {
         var fund = input;
 
         fund = RunSyncStep(StepId.MetricsCalculator, fund, f => _metrics.ProcessFund(f, metricsConfig));
+        captures.Step2[fund.Isin.Value] = fund;
         ct.ThrowIfCancellationRequested();
 
         fund = RunSyncStep(StepId.SignalScorer, fund, f => _signal.ProcessFund(f, signalConfig));
+        captures.Step4[fund.Isin.Value] = fund;
         ct.ThrowIfCancellationRequested();
 
         fund = await RunAsyncStep(StepId.MacroAligner, fund, warnings,
             (f, token) => _macroAligner.ProcessFundAsync(f, activeThemes, token), ct).ConfigureAwait(false);
+        captures.Step5[fund.Isin.Value] = fund;
 
         fund = await RunAsyncStep(StepId.CatalystTagger, fund, warnings,
             (f, token) => _catalyst.ProcessFundAsync(f, activeCatalysts, token), ct).ConfigureAwait(false);
+        captures.Step6[fund.Isin.Value] = fund;
 
         fund = await RunAsyncStep(StepId.ThesisValidator, fund, warnings,
             (f, token) => _thesis.ProcessFundAsync(f, token), ct).ConfigureAwait(false);
+        captures.Step7[fund.Isin.Value] = fund;
 
         fund = RunSyncResultStep(StepId.Recommender, fund, warnings, f => _recommender.ProcessFund(f));
+        captures.Step8[fund.Isin.Value] = fund;
 
         return fund;
     }
