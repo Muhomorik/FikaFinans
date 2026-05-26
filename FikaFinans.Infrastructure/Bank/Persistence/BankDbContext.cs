@@ -16,6 +16,7 @@ public class BankDbContext : DbContext
     public DbSet<NavSnapshot> NavSnapshots => Set<NavSnapshot>();
     public DbSet<TradingOrder> TradingOrders => Set<TradingOrder>();
     public DbSet<PositionRow> Positions => Set<PositionRow>();
+    public DbSet<IsinProgressRow> IsinProgresses => Set<IsinProgressRow>();
 
     public BankDbContext(DbContextOptions<BankDbContext> options) : base(options) { }
 

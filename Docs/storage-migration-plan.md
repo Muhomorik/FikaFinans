@@ -1,7 +1,10 @@
 <!--
-  STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 4 (Step 10
-  Function) and Phase 6 (Azure Tables) still open; Phase 7 gated on
-  Phase 4. Per-phase status is annotated inline in §8 (Migration phases).
+  STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 7a
+  (IsinProgress repo foundation) shipped 2026-05-26 — the contract
+  + SQLite implementation exists; the streaming runner wire-up is
+  Phase 7b. Phase 4 (Step 10 Function) and Phase 6 (Azure Tables)
+  still open. Per-phase status is annotated inline in §8
+  (Migration phases).
 
   AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
   step before the cloud deploy. The intent is to land Pipeline-flow Phase 1
@@ -187,7 +190,7 @@ abstraction exists to prevent.
 | `FundHolding` | replaced by `Positions` ✅ | Done 2026-05-10. EF `DbSet`, configuration, and domain type all deleted. |
 | `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Backend pluggable (Phase 6). |
 | `Transaction`, `JournalEntry` | kept (bank-sim only) ✅ | Repo-fronted; cascade-FK nav prop replaced by two-reads + in-memory join in `LedgerService`. |
-| _(none)_ | `IsinProgress` | New. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. Phase 7. |
+| _(none)_ | `IsinProgress` ✅ (repo foundation 2026-05-26) | Repo + SQLite table exist; streaming runner does not write to it yet — Phase 7b. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. |
 | _(none)_ | `PortfolioTrades` | New. Step 10 daily output. PK/RK shape an open question — see §10. Phase 4. |
 
 ## Positions table
@@ -379,9 +382,10 @@ while the application logic is still in flux.
 
 ```mermaid
 flowchart LR
-  done["✅ Done<br/>Phases 1, 2, 3, 5<br/>(SQLite + repos<br/>+ Positions + Funds)"] --> rx["⏳ Pipeline-flow Phase 1<br/>Rx in-process stream"]
-  rx --> p7["⏳ Phase 7<br/>IsinProgress row<br/>+ Step01Json..Step09Json<br/>(in SQLite)"]
-  p7 --> p4["⏳ Phase 4<br/>SendToBank logic<br/>out of WPF"]
+  done["✅ Done<br/>Phases 1, 2, 3, 5<br/>(SQLite + repos<br/>+ Positions + Funds)"] --> rx["✅ Pipeline-flow Phase 1<br/>Rx in-process stream"]
+  rx --> p7a["✅ Phase 7a<br/>IsinProgress repo<br/>foundation"]
+  p7a --> p7b["⏳ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
+  p7b --> p4["⏳ Phase 4<br/>SendToBank logic<br/>out of WPF"]
   p4 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
   p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions"]
 ```
@@ -476,10 +480,48 @@ them.
    [InfrastructureModule](../FikaFinans.Infrastructure/DependencyInjection/InfrastructureModule.cs)).
    SQLite stays as the local-dev default.
 7. **Per-ISIN progress row + step JSON columns** land in the same
-   table-fronted contract as the rest of the data. **Not started —**
-   gated on Phase 4. This is when
-   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md)'s storage
-   section becomes real.
+   table-fronted contract as the rest of the data. Split into two
+   slices once the local-first sequence (§8 "Recommended sequence")
+   moved Phase 7 ahead of Phase 4.
+
+   **7a — Repository foundation.** ✅ **Done — 2026-05-26.** New
+   [`IsinProgressEntity`](../FikaFinans.Application/Storage/Bank/Entities/IsinProgressEntity.cs),
+   [`IsinProgressState`](../FikaFinans.Application/Storage/Bank/IsinProgressState.cs)
+   (`Free` / `Processing`), and
+   [`IIsinProgressRepository`](../FikaFinans.Application/Storage/Bank/IIsinProgressRepository.cs)
+   shipped in the Application layer. SQLite implementation lives in
+   [`SqliteIsinProgressRepository`](../FikaFinans.Infrastructure/Storage/Sqlite/SqliteIsinProgressRepository.cs),
+   backed by an `IsinProgress` table mapped by
+   [`IsinProgressRowConfiguration`](../FikaFinans.Infrastructure/Bank/Persistence/Configurations/IsinProgressRowConfiguration.cs)
+   with composite key `(PartitionKey, RowKey)` — partition is the
+   constant `"isin-progress"`, RowKey is the ISIN. Row carries the
+   state-machine fields (`State`, `RunId`, `NavDate`, `CurrentStep`,
+   `LatestProcessedNavDate`, `ProcessingStartedAt`, `LastError`,
+   `AttemptCount`) plus the nine inline step-output columns
+   `Step01Json` … `Step09Json` (nullable strings). State persists as
+   a string column for Tables wire compatibility; the repo converts
+   to/from the enum at the entity boundary. Autofac registers the
+   repo as a singleton next to the other SQLite repos. 9 NUnit tests
+   in
+   [`FikaFinans.InfrastructureV2.Tests/Storage/Sqlite/SqliteIsinProgressRepositoryTests.cs`](../FikaFinans.InfrastructureV2.Tests/Storage/Sqlite/SqliteIsinProgressRepositoryTests.cs)
+   exercise round-trip upsert, partition scan, batch upsert (incl.
+   cross-partition rejection), delete, missing-row null, and the
+   null-arg guard against an in-memory SQLite database created per
+   test. Drive-by fix: added the missing `HasConversion` for the
+   `Isin` value-object on
+   [`FundConfiguration`](../FikaFinans.Infrastructure/Bank/Persistence/Configurations/FundConfiguration.cs) —
+   the model validator threw on `EnsureCreated` once the new tests
+   actually exercised the SQLite path end-to-end.
+
+   **7b — Streaming runner integration.** **Not started.** Wires
+   `PipelineRunner.RunAllStreamingAsync` to write the per-ISIN row as
+   the run progresses: claim on Step 1 fan-out (state → `Processing`,
+   `RunId`, `ProcessingStartedAt`, clear `Step01Json` … `Step09Json`),
+   write each per-fund step output into its column at each per-ISIN
+   step boundary, write Step09Json after the universe-wide barrier,
+   and release on Step 10 completion (state → `Free`,
+   `LatestProcessedNavDate`). Phase 4 (SendToBank) follows once 7b
+   lands.
 
 ## Test strategy
 

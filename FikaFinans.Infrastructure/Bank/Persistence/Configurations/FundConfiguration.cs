@@ -1,5 +1,6 @@
 using FikaFinans.Domain.Bank.Funds;
 using FikaFinans.Domain.Bank.Identifiers;
+using FikaFinans.Domain.Identifiers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -14,7 +15,10 @@ public class FundConfiguration : IEntityTypeConfiguration<Fund>
             .HasConversion(id => id.Value, guid => new FundId(guid));
 
         builder.Property(f => f.Name).IsRequired().HasMaxLength(200);
-        builder.Property(f => f.Isin).IsRequired().HasMaxLength(12);
+        builder.Property(f => f.Isin)
+            .HasConversion(isin => isin.Value, value => new Isin(value))
+            .IsRequired()
+            .HasMaxLength(12);
         builder.Property(f => f.Currency).IsRequired().HasMaxLength(3);
 
         builder.HasIndex(f => f.Isin);

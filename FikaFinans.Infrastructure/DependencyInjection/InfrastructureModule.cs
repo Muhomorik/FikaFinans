@@ -204,6 +204,10 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.RegisterType<SqliteFundsRepository>()
             .As<IFundsRepository>()
             .SingleInstance();
+
+        builder.RegisterType<SqliteIsinProgressRepository>()
+            .As<IIsinProgressRepository>()
+            .SingleInstance();
     }
 
     private static void RegisterFoundryServices(ContainerBuilder builder)
