@@ -619,6 +619,116 @@ public sealed class PipelineRunnerTests
             async () => await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-6", ct: cts.Token));
     }
 
+    [Test]
+    public async Task RunAllStreamingAsync_HappyPath_DrivesIsinProgressClaimBlockStep9Release()
+    {
+        var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"));
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(step1);
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-1");
+
+        Assert.Multiple(() =>
+        {
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(step1, "stream-progress-1", It.IsAny<CancellationToken>()),
+                Times.Once);
+            _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
+                It.IsAny<PerIsinBlockResult>(), "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.WriteIsinProgressStep9Async(
+                "2026-W21", "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.ReleaseIsinProgressAsync(
+                step1, "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+        });
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_Step1Fails_DoesNotInvokeIsinProgressMethods()
+    {
+        _fixture.Freeze<Mock<IDataLoaderAgent>>()
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Throws(new InvalidOperationException("boom"));
+        _sut.Dispose();
+        _sut = _fixture.Create<PipelineRunner>();
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-2");
+
+        Assert.Multiple(() =>
+        {
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _gateway.Verify(x => x.WriteIsinProgressStep9Async(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _gateway.Verify(x => x.ReleaseIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        });
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_PerIsinBlockFails_ClaimsButDoesNotWriteBlockStep9OrRelease()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+        _thesis
+            .Setup(x => x.ProcessFundAsync(It.IsAny<FundRecord>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("LLM exploded"));
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-3");
+
+        Assert.Multiple(() =>
+        {
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _gateway.Verify(x => x.WriteIsinProgressStep9Async(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _gateway.Verify(x => x.ReleaseIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        });
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_Step10Fails_DoesNotRelease()
+    {
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeStep1Output(MakeFund("LU0001")));
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        var portfolio = _fixture.Freeze<Mock<IPortfolioConstructorAgent>>();
+        portfolio
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+            .Throws(new InvalidOperationException("step 10 boom"));
+        _sut.Dispose();
+        _sut = _fixture.Create<PipelineRunner>();
+
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-4");
+
+        Assert.Multiple(() =>
+        {
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.WriteIsinProgressStep9Async(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.ReleaseIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        });
+    }
+
     // ───────────────────────── fixtures ─────────────────────────
 
     private static DataLoaderOutput MakeStep1Output(params FundRecord[] funds) => new()

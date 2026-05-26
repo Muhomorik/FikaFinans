@@ -2,6 +2,8 @@ using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Configs;
+using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
@@ -11,16 +13,33 @@ namespace FikaFinans.Infrastructure.Pipeline;
 /// <summary>
 /// JSON / disk implementation of <see cref="IStreamingPipelineGateway"/>.
 /// Reads and writes the same files the universe-wide agents read and write,
-/// so a streaming run leaves identical on-disk artifacts behind.
+/// so a streaming run leaves identical on-disk artifacts behind. Also
+/// fronts the per-ISIN progress repository: the runner calls the
+/// claim/write/release methods at each phase boundary and this class
+/// serializes per-fund slices into the inline step JSON columns.
 /// </summary>
 public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
 {
-    private readonly IPathsService _paths;
+    /// <summary>Partition key for every <c>IsinProgress</c> row.</summary>
+    private const string IsinProgressPartition = "isin-progress";
 
-    public StreamingPipelineGateway(IPathsService paths)
+    /// <summary>
+    /// Chunk size used when batch-upserting per-ISIN rows. Matches the Tables
+    /// batch cap (<see cref="FikaFinans.Application.Storage.Bank.IPositionsRepository"/>
+    /// + friends) so the SQLite path stays drop-in compatible with the
+    /// eventual Tables binding.
+    /// </summary>
+    private const int IsinProgressBatchSize = 100;
+
+    private readonly IPathsService _paths;
+    private readonly IIsinProgressRepository _isinProgress;
+
+    public StreamingPipelineGateway(IPathsService paths, IIsinProgressRepository isinProgress)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(isinProgress);
         _paths = paths;
+        _isinProgress = isinProgress;
     }
 
     public DataLoaderOutput LoadStep1Output(string isoWeek, string runId)
@@ -72,4 +91,204 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions.Default));
     }
+
+    public async Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(step1Output);
+        ArgumentException.ThrowIfNullOrEmpty(runId);
+
+        var now = DateTimeOffset.UtcNow;
+
+        var entities = step1Output.Funds
+            .Select(fund => new IsinProgressEntity
+            {
+                PartitionKey = IsinProgressPartition,
+                RowKey = fund.Isin.Value,
+                Isin = fund.Isin.Value,
+                State = IsinProgressState.Processing,
+                RunId = runId,
+                CurrentStep = 1,
+                ProcessingStartedAt = now,
+                Step01Json = SerializeFund(fund),
+                // Clear every later column — see backend-nav-sync-plan.md
+                // §"Run boundary". Explicit nulls overwrite whatever lingered
+                // from the prior run.
+                Step02Json = null,
+                Step03Json = null,
+                Step04Json = null,
+                Step05Json = null,
+                Step06Json = null,
+                Step07Json = null,
+                Step08Json = null,
+                Step09Json = null,
+            })
+            .ToList();
+
+        await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
+    }
+
+    public async Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, string runId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        ArgumentException.ThrowIfNullOrEmpty(runId);
+
+        var step2By = block.Step2Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+        var step4By = block.Step4Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+        var step5By = block.Step5Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+        var step6By = block.Step6Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+        var step7By = block.Step7Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+        var step8By = block.Step8Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
+
+        // Use Step 2's fund list as the canonical iteration order — every
+        // boundary snapshot shares the same input order from Step 1.
+        var entities = new List<IsinProgressEntity>(block.Step2Output.Funds.Count);
+        foreach (var fund in block.Step2Output.Funds)
+        {
+            var isin = fund.Isin.Value;
+            var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false)
+                ?? new IsinProgressEntity
+                {
+                    PartitionKey = IsinProgressPartition,
+                    RowKey = isin,
+                    Isin = isin,
+                    State = IsinProgressState.Processing,
+                    RunId = runId,
+                };
+
+            entities.Add(new IsinProgressEntity
+            {
+                PartitionKey = existing.PartitionKey,
+                RowKey = existing.RowKey,
+                Isin = existing.Isin,
+                State = IsinProgressState.Processing,
+                RunId = runId,
+                NavDate = existing.NavDate,
+                CurrentStep = 8,
+                LatestProcessedNavDate = existing.LatestProcessedNavDate,
+                ProcessingStartedAt = existing.ProcessingStartedAt,
+                LastError = existing.LastError,
+                AttemptCount = existing.AttemptCount,
+                Step01Json = existing.Step01Json,
+                Step02Json = SerializeFund(step2By[isin]),
+                Step03Json = existing.Step03Json,
+                Step04Json = SerializeFund(step4By[isin]),
+                Step05Json = SerializeFund(step5By[isin]),
+                Step06Json = SerializeFund(step6By[isin]),
+                Step07Json = SerializeFund(step7By[isin]),
+                Step08Json = SerializeFund(step8By[isin]),
+                Step09Json = existing.Step09Json,
+            });
+        }
+
+        await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
+    }
+
+    public async Task WriteIsinProgressStep9Async(string isoWeek, string runId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(isoWeek);
+        ArgumentException.ThrowIfNullOrEmpty(runId);
+
+        var step9Path = _paths.UniverseEnricherOutput(isoWeek, runId);
+        var step9Output = JsonSerializer.Deserialize<DataLoaderOutput>(
+            File.ReadAllText(step9Path), JsonOptions.Default)
+            ?? throw new InvalidDataException($"Failed to deserialize Step 9 output at {step9Path}");
+
+        var entities = new List<IsinProgressEntity>(step9Output.Funds.Count);
+        foreach (var fund in step9Output.Funds)
+        {
+            var isin = fund.Isin.Value;
+            var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false)
+                ?? new IsinProgressEntity
+                {
+                    PartitionKey = IsinProgressPartition,
+                    RowKey = isin,
+                    Isin = isin,
+                    State = IsinProgressState.Processing,
+                    RunId = runId,
+                };
+
+            entities.Add(new IsinProgressEntity
+            {
+                PartitionKey = existing.PartitionKey,
+                RowKey = existing.RowKey,
+                Isin = existing.Isin,
+                State = IsinProgressState.Processing,
+                RunId = runId,
+                NavDate = existing.NavDate,
+                CurrentStep = 9,
+                LatestProcessedNavDate = existing.LatestProcessedNavDate,
+                ProcessingStartedAt = existing.ProcessingStartedAt,
+                LastError = existing.LastError,
+                AttemptCount = existing.AttemptCount,
+                Step01Json = existing.Step01Json,
+                Step02Json = existing.Step02Json,
+                Step03Json = existing.Step03Json,
+                Step04Json = existing.Step04Json,
+                Step05Json = existing.Step05Json,
+                Step06Json = existing.Step06Json,
+                Step07Json = existing.Step07Json,
+                Step08Json = existing.Step08Json,
+                Step09Json = SerializeFund(fund),
+            });
+        }
+
+        await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
+    }
+
+    public async Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(step1Output);
+        ArgumentException.ThrowIfNullOrEmpty(runId);
+
+        var entities = new List<IsinProgressEntity>(step1Output.Funds.Count);
+        foreach (var fund in step1Output.Funds)
+        {
+            var isin = fund.Isin.Value;
+            var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false);
+            if (existing is null) continue;
+
+            entities.Add(new IsinProgressEntity
+            {
+                PartitionKey = existing.PartitionKey,
+                RowKey = existing.RowKey,
+                Isin = existing.Isin,
+                State = IsinProgressState.Free,
+                RunId = existing.RunId,
+                NavDate = existing.NavDate,
+                CurrentStep = existing.CurrentStep,
+                LatestProcessedNavDate = existing.LatestProcessedNavDate,
+                ProcessingStartedAt = null,
+                LastError = existing.LastError,
+                AttemptCount = existing.AttemptCount,
+                Step01Json = existing.Step01Json,
+                Step02Json = existing.Step02Json,
+                Step03Json = existing.Step03Json,
+                Step04Json = existing.Step04Json,
+                Step05Json = existing.Step05Json,
+                Step06Json = existing.Step06Json,
+                Step07Json = existing.Step07Json,
+                Step08Json = existing.Step08Json,
+                Step09Json = existing.Step09Json,
+            });
+        }
+
+        await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
+    }
+
+    private async Task UpsertInChunksAsync(IReadOnlyList<IsinProgressEntity> entities, CancellationToken ct)
+    {
+        if (entities.Count == 0) return;
+
+        for (var offset = 0; offset < entities.Count; offset += IsinProgressBatchSize)
+        {
+            var chunk = entities
+                .Skip(offset)
+                .Take(IsinProgressBatchSize)
+                .ToList();
+            await _isinProgress.UpsertBatchAsync(IsinProgressPartition, chunk, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static string SerializeFund(FundRecord fund) =>
+        JsonSerializer.Serialize(fund, JsonOptions.Default);
 }

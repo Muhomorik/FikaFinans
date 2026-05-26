@@ -159,6 +159,11 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             return false;
         }
 
+        // Claim per-ISIN progress rows: state → Processing, Step01Json filled,
+        // every later step column cleared so prior-run columns can never
+        // coexist with the in-flight run.
+        await _gateway.ClaimIsinProgressAsync(step1Output, runId, ct).ConfigureAwait(false);
+
         var totalFunds = step1Output.Funds.Count;
         var blockSw = Stopwatch.StartNew();
         foreach (var step in PerIsinSteps)
@@ -176,6 +181,8 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             _gateway.SaveStepOutput(StepId.CatalystTagger,    isoWeek, runId, result.Step6Output);
             _gateway.SaveStepOutput(StepId.ThesisValidator,   isoWeek, runId, result.Step7Output);
             _gateway.SaveStepOutput(StepId.Recommender,       isoWeek, runId, result.Step8Output);
+
+            await _gateway.WriteIsinProgressBlockAsync(result, runId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -202,11 +209,15 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             return false;
         }
 
+        await _gateway.WriteIsinProgressStep9Async(isoWeek, runId, ct).ConfigureAwait(false);
+
         if (!await RunStepAsync(StepId.PortfolioConstructor, family, isoWeek, runId, ct).ConfigureAwait(false))
         {
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.PortfolioConstructor);
             return false;
         }
+
+        await _gateway.ReleaseIsinProgressAsync(step1Output, runId, ct).ConfigureAwait(false);
 
         _logger.Info("Streaming pipeline run completed: runId={RunId}", runId);
         return true;

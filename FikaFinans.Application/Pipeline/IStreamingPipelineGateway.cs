@@ -32,4 +32,41 @@ public interface IStreamingPipelineGateway
     /// their own agents.
     /// </summary>
     void SaveStepOutput(StepId step, string isoWeek, string runId, DataLoaderOutput output);
+
+    /// <summary>
+    /// Claim per-ISIN progress rows at the start of a streaming run. For each
+    /// fund in <paramref name="step1Output"/> upserts an
+    /// <c>IsinProgressEntity</c> with state <c>Processing</c>, the new
+    /// <paramref name="runId"/>, <c>CurrentStep = 1</c>,
+    /// <c>ProcessingStartedAt = UtcNow</c>, <c>Step01Json</c> populated, and
+    /// every later step column cleared (so columns from an earlier run never
+    /// coexist with the in-flight run — see backend-nav-sync-plan.md §"Run
+    /// boundary").
+    /// </summary>
+    Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Write the per-ISIN step columns produced by the per-ISIN block (Steps
+    /// 2 → 4 → 5 → 6 → 7 → 8). For each fund identity, upserts the row with
+    /// <c>Step02Json</c> … <c>Step08Json</c> populated from the matching
+    /// <see cref="PerIsinBlockResult"/> snapshot and <c>CurrentStep = 8</c>.
+    /// <c>Step03Json</c> stays null because Step 3 is universe-wide.
+    /// </summary>
+    Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, string runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Load the Step 9 (UniverseEnricher) output from disk and write
+    /// <c>Step09Json</c> + <c>CurrentStep = 9</c> for every fund into its
+    /// per-ISIN row. Called after the universe-wide Step 9 barrier completes.
+    /// </summary>
+    Task WriteIsinProgressStep9Async(string isoWeek, string runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Release per-ISIN progress rows at the end of a successful streaming
+    /// run. For each fund in <paramref name="step1Output"/> upserts the row
+    /// with state <c>Free</c> and clears <c>ProcessingStartedAt</c>; existing
+    /// step columns + <c>RunId</c> are preserved as a record of the latest
+    /// run.
+    /// </summary>
+    Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default);
 }

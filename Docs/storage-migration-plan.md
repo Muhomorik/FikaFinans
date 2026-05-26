@@ -1,9 +1,9 @@
 <!--
-  STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 7a
-  (IsinProgress repo foundation) shipped 2026-05-26 — the contract
-  + SQLite implementation exists; the streaming runner wire-up is
-  Phase 7b. Phase 4 (Step 10 Function) and Phase 6 (Azure Tables)
-  still open. Per-phase status is annotated inline in §8
+  STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 7
+  (IsinProgress row + Step01Json…Step09Json inline columns)
+  shipped 2026-05-26 — repo foundation (7a) + streaming runner
+  integration (7b). Phase 4 (Step 10 Function) and Phase 6 (Azure
+  Tables) still open. Per-phase status is annotated inline in §8
   (Migration phases).
 
   AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
@@ -190,7 +190,7 @@ abstraction exists to prevent.
 | `FundHolding` | replaced by `Positions` ✅ | Done 2026-05-10. EF `DbSet`, configuration, and domain type all deleted. |
 | `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Backend pluggable (Phase 6). |
 | `Transaction`, `JournalEntry` | kept (bank-sim only) ✅ | Repo-fronted; cascade-FK nav prop replaced by two-reads + in-memory join in `LedgerService`. |
-| _(none)_ | `IsinProgress` ✅ (repo foundation 2026-05-26) | Repo + SQLite table exist; streaming runner does not write to it yet — Phase 7b. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. |
+| _(none)_ | `IsinProgress` ✅ (2026-05-26) | Repo + SQLite table + streaming-runner integration shipped. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. Written by `PipelineRunner.RunAllStreamingAsync` at four boundaries: claim post-Step-1, block columns post per-ISIN merge, Step09Json post-Step-9, release post-Step-10. |
 | _(none)_ | `PortfolioTrades` | New. Step 10 daily output. PK/RK shape an open question — see §10. Phase 4. |
 
 ## Positions table
@@ -384,7 +384,7 @@ while the application logic is still in flux.
 flowchart LR
   done["✅ Done<br/>Phases 1, 2, 3, 5<br/>(SQLite + repos<br/>+ Positions + Funds)"] --> rx["✅ Pipeline-flow Phase 1<br/>Rx in-process stream"]
   rx --> p7a["✅ Phase 7a<br/>IsinProgress repo<br/>foundation"]
-  p7a --> p7b["⏳ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
+  p7a --> p7b["✅ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
   p7b --> p4["⏳ Phase 4<br/>SendToBank logic<br/>out of WPF"]
   p4 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
   p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions"]
@@ -513,15 +513,45 @@ them.
    the model validator threw on `EnsureCreated` once the new tests
    actually exercised the SQLite path end-to-end.
 
-   **7b — Streaming runner integration.** **Not started.** Wires
-   `PipelineRunner.RunAllStreamingAsync` to write the per-ISIN row as
-   the run progresses: claim on Step 1 fan-out (state → `Processing`,
-   `RunId`, `ProcessingStartedAt`, clear `Step01Json` … `Step09Json`),
-   write each per-fund step output into its column at each per-ISIN
-   step boundary, write Step09Json after the universe-wide barrier,
-   and release on Step 10 completion (state → `Free`,
-   `LatestProcessedNavDate`). Phase 4 (SendToBank) follows once 7b
-   lands.
+   **7b — Streaming runner integration.** ✅ **Done — 2026-05-26.**
+   [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+   now writes the per-ISIN row at four phase boundaries via four new
+   methods on
+   [`IStreamingPipelineGateway`](../FikaFinans.Application/Pipeline/IStreamingPipelineGateway.cs):
+
+   - **`ClaimIsinProgressAsync`** — after Step 1 + Step 3 outputs are
+     loaded. For every fund: upsert with `State = Processing`,
+     `RunId`, `CurrentStep = 1`, `ProcessingStartedAt = UtcNow`,
+     `Step01Json` populated, and `Step02Json` … `Step09Json` cleared
+     so prior-run columns can't coexist with the in-flight run.
+   - **`WriteIsinProgressBlockAsync`** — after the per-ISIN block
+     finishes (and the six boundary JSON files are saved). Populates
+     `Step02Json` / `Step04Json` … `Step08Json` from the matching
+     `PerIsinBlockResult` snapshot and bumps `CurrentStep = 8`.
+     `Step03Json` stays null (Step 3 is universe-wide).
+   - **`WriteIsinProgressStep9Async`** — after the universe-wide
+     Step 9 barrier. The gateway loads the freshly-written Step 9
+     output from disk and writes `Step09Json` per fund, bumping
+     `CurrentStep = 9`.
+   - **`ReleaseIsinProgressAsync`** — after Step 10 succeeds. Flips
+     every fund's row to `State = Free` and clears
+     `ProcessingStartedAt`; `RunId` + every step column are
+     preserved as the latest-run record.
+
+   The
+   [`StreamingPipelineGateway`](../FikaFinans.Infrastructure/Pipeline/StreamingPipelineGateway.cs)
+   implementation owns per-fund `FundRecord` serialization (via
+   `JsonOptions.Default`) and batches writes in chunks of 100 rows
+   through `IIsinProgressRepository.UpsertBatchAsync` to stay
+   compatible with the Azure Tables batch cap. 4 new tests in
+   [`FikaFinans.Application.Tests/Pipeline/PipelineRunnerTests.cs`](../FikaFinans.Application.Tests/Pipeline/PipelineRunnerTests.cs)
+   verify the orchestration — claim/block/step9/release fire on the
+   happy path; failures at Step 1, the per-ISIN block, or Step 10
+   short-circuit the appropriate gateway calls. 6 new tests in
+   [`FikaFinans.InfrastructureV2.Tests/Pipeline/StreamingPipelineGatewayIsinProgressTests.cs`](../FikaFinans.InfrastructureV2.Tests/Pipeline/StreamingPipelineGatewayIsinProgressTests.cs)
+   wire a real `SqliteIsinProgressRepository` over an in-memory
+   SQLite database and verify each method writes the expected
+   columns + state transition. Phase 4 (SendToBank) follows next.
 
 ## Test strategy
 
