@@ -26,6 +26,8 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
     private bool _isRunning;
     private string _outputJson = string.Empty;
     private bool _errorsExpanded;
+    private int _perFundProcessed;
+    private int _perFundTotal;
 
     public abstract int StepNumber { get; }
     public abstract string AgentName { get; }
@@ -101,6 +103,42 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
         get => _errorsExpanded;
         set => SetProperty(ref _errorsExpanded, value, nameof(ErrorsExpanded));
     }
+
+    /// <summary>
+    /// Per-fund progress count for per-ISIN steps (2, 4, 5, 6, 7, 8) during a
+    /// streaming run. Incremented on every per-fund <c>Succeeded</c> event;
+    /// reset to 0 when the universe-wide <c>Started</c> event for this step
+    /// arrives.
+    /// </summary>
+    public int PerFundProcessed
+    {
+        get => _perFundProcessed;
+        set
+        {
+            SetProperty(ref _perFundProcessed, value, nameof(PerFundProcessed));
+            RaisePropertyChanged(nameof(PerFundProgressText));
+        }
+    }
+
+    /// <summary>
+    /// Universe size for the streaming run. Set from the universe-wide
+    /// <c>Started</c> event's <c>Total</c> field at the start of the per-ISIN
+    /// block. Zero outside a streaming run.
+    /// </summary>
+    public int PerFundTotal
+    {
+        get => _perFundTotal;
+        set
+        {
+            SetProperty(ref _perFundTotal, value, nameof(PerFundTotal));
+            RaisePropertyChanged(nameof(PerFundProgressText));
+        }
+    }
+
+    /// <summary>"137 / 1500" once a streaming run sets the total; empty otherwise.</summary>
+    public string PerFundProgressText => _perFundTotal > 0
+        ? $"{_perFundProcessed} / {_perFundTotal}"
+        : string.Empty;
 
     // ── Run context (set by MainWindowViewModel before each run) ──────────
     public string Family  { get; set; } = string.Empty;

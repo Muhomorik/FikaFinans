@@ -239,12 +239,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             vm.Status = StepStatus.Pending;
             vm.HasError = false;
             vm.ErrorText = string.Empty;
+            vm.PerFundProcessed = 0;
+            vm.PerFundTotal = 0;
         }
 
         bool allOk;
         try
         {
-            allOk = await _runner.RunAllAsync(SelectedFamily, SelectedWeek, RunId, ct);
+            allOk = await _runner.RunAllStreamingAsync(SelectedFamily, SelectedWeek, RunId, ct: ct);
         }
         catch (OperationCanceledException)
         {
@@ -286,6 +288,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_stepsByNumber is null) return;
         if (!_stepsByNumber.TryGetValue(evt.Step.Value, out var vm)) return;
 
+        // Per-fund ticks (Isin populated) drive the progress counter on the
+        // six per-ISIN step VMs without flipping the universe-wide status.
+        if (evt.Isin is not null)
+        {
+            if (evt.Kind == StepEventKind.Succeeded)
+                vm.PerFundProcessed++;
+            return;
+        }
+
         switch (evt.Kind)
         {
             case StepEventKind.Started:
@@ -293,6 +304,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 vm.IsRunning = true;
                 vm.HasError = false;
                 vm.ErrorText = string.Empty;
+                if (evt.Total is { } total)
+                {
+                    vm.PerFundTotal = total;
+                    vm.PerFundProcessed = 0;
+                }
                 SelectedTabIndex = vm.StepNumber;
                 RunStatusText = $"Step {vm.StepNumber}/10…";
                 break;

@@ -140,17 +140,32 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         // Started/Succeeded events with Isin populated stream during
         // execution; universe-wide Succeeded events for all six steps fire
         // once the boundary files are written.
+        DataLoaderOutput step1Output;
+        MacroContext macroContext;
+        MetricsCalculatorConfig metricsConfig;
+        SignalScorerConfig signalConfig;
+        try
+        {
+            step1Output = _gateway.LoadStep1Output(isoWeek, runId);
+            macroContext = _gateway.LoadStep3Output(isoWeek, runId);
+            metricsConfig = _gateway.LoadMetricsConfig();
+            signalConfig = _gateway.LoadSignalConfig();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Failed to load streaming pipeline inputs from gateway");
+            foreach (var step in PerIsinSteps)
+                Emit(new StepEvent(step, StepEventKind.Failed, Message: ex.Message));
+            return false;
+        }
+
+        var totalFunds = step1Output.Funds.Count;
         var blockSw = Stopwatch.StartNew();
         foreach (var step in PerIsinSteps)
-            Emit(new StepEvent(step, StepEventKind.Started));
+            Emit(new StepEvent(step, StepEventKind.Started, Total: totalFunds));
 
         try
         {
-            var step1Output = _gateway.LoadStep1Output(isoWeek, runId);
-            var macroContext = _gateway.LoadStep3Output(isoWeek, runId);
-            var metricsConfig = _gateway.LoadMetricsConfig();
-            var signalConfig = _gateway.LoadSignalConfig();
-
             var result = await RunPerIsinBlockAsync(
                 step1Output, macroContext, metricsConfig, signalConfig, maxConcurrent, ct)
                 .ConfigureAwait(false);

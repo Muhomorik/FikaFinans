@@ -188,15 +188,50 @@
   ordering test for slice 3's primitive plus 6 for the wiring),
   InfrastructureV2 207/207.
 
-  Still to do for per-ISIN streaming:
-  - WPF: swap `MainWindowViewModel.OnRunAllAsync` to call
-    `RunAllStreamingAsync` instead of `RunAllAsync`. Add a
-    per-fund progress counter on each per-ISIN step VM (e.g.
-    "Step 4 — 137 / 1500") fed by `StepEvent`s where `Isin` is
-    populated.
+  Slice 5 (2026-05-26): WPF + integration test. The "Run All"
+  button now drives the streaming runner, and per-fund ticks
+  emitted during the per-ISIN block update a live progress counter
+  on each of the six per-ISIN step tabs.
+  - `MainWindowViewModel.OnRunAllAsync` calls
+    `RunAllStreamingAsync` (instead of `RunAllAsync`), keeping its
+    existing cancellation/status-text plumbing intact.
+  - `StepEvent` gained an optional `Total` field, set on the
+    universe-wide `Started` event for each of the six per-ISIN
+    steps to the streaming universe size (Step 1 fund count). The
+    field is null for every other event, so the contract change is
+    purely additive.
+  - `StepViewModel` gained `PerFundProcessed`, `PerFundTotal`, and
+    a computed `PerFundProgressText` ("137 / 1500" once Total is
+    set; empty otherwise). The WPF `StepView` binds the new text
+    into the Run-status panel as a "Progress" row.
+  - `MainWindowViewModel.OnStepEvent` routes universe-wide events
+    exactly as before (status pip, tab follow, LoadOutputAsync).
+    Per-fund events (`Isin` populated) bump the per-step counter
+    without flipping the tab status. The universe-`Started` event
+    with `Total` set captures the denominator and resets the
+    counter to 0.
+  - Stale XML doc on `StepEvent` ("no agent is wired to the
+    per-fund path yet — the field exists so the contract is
+    locked before…") replaced by a current-state description that
+    documents the `Total` field.
   - Integration test for `StreamingPipelineGateway` against real
-    disk paths via `TestPathsService` (round-trip a write +
-    reload).
+    disk paths in `FikaFinans.InfrastructureV2.Tests/Pipeline/`,
+    seven cases: round-trip a `DataLoaderOutput` through
+    `SaveStepOutput` for all six per-ISIN steps; reject the four
+    universe-wide steps; round-trip Step 1 and Step 3 outputs
+    through write-then-load; verify the two `LoadConfig` paths
+    deserialise the real fixtures; assert `LoadStep1Output` throws
+    `FileNotFoundException` for a missing file. Each test writes
+    to a unique Guid-based runId and cleans up in TearDown.
+
+  Build is green end-to-end (full solution, 0 errors, 21
+  pre-existing duplicate-using warnings unchanged). All tests pass:
+  Domain 1/1, Application 27/27, InfrastructureV2 **214/214** (207
+  + 7 new in slice 5).
+
+  Per-ISIN streaming work is now end-to-end complete: orchestrator
+  primitive + universe-wide wiring + WPF UI + disk-path integration
+  test all shipped.
 
   Phase numbering in this doc mirrors the Phase 1 / Phase 2 split
   that previously lived in

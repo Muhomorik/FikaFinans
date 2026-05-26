@@ -122,6 +122,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Last run:" Style="{StaticResource ff.SmallStyle}"/>
@@ -130,11 +131,14 @@
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Duration:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
                         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DurationText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Summary:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
-                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding OutputSummaryText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Progress:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding PerFundProgressText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Status:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
-                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding StatusPip}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Summary:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding OutputSummaryText}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Status:" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}"/>
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding StatusPip}" Style="{StaticResource ff.SmallStyle}" Margin="{StaticResource ff.CompactSpacing}" FontWeight="SemiBold"/>
                     </Grid>
                 </StackPanel>
             </Border>
