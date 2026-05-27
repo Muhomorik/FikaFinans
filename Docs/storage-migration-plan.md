@@ -1,9 +1,13 @@
 <!--
   STATUS: PHASES 1+2+3+5 SHIPPED 2026-05-10..2026-05-13. Phase 7
   (IsinProgress row + Step01Json…Step09Json inline columns)
-  shipped 2026-05-26 — repo foundation (7a) + streaming runner
-  integration (7b). Phase 4 (Step 10 Function) and Phase 6 (Azure
-  Tables) still open. Per-phase status is annotated inline in §8
+  shipped 2026-05-26. Phase 4 local-first slice shipped 2026-05-27 —
+  SendToBank submit loop lifted into ISendToBankService /
+  SendToBankService (Application layer); WPF button now a thin
+  caller; the eventual Function host is just a second caller. The
+  cloud-hosted half (daily timer + reconciliation trigger
+  decision) is blocked on Pipeline Phase 2. Phase 6 (Azure Tables)
+  still open. Per-phase status is annotated inline in §8
   (Migration phases).
 
   AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
@@ -188,7 +192,7 @@ abstraction exists to prevent.
 | `Fund` | `Fund` (kept, repo-fronted) ✅ | Done 2026-05-13. Phase 5 introduced `IFundsRepository` + typed lookups (`GetByIsinAsync(Isin)`, `GetByIdAsync(FundId)`, `GetLatestNavByFundIdAsync`). Domain `Fund` survives as the rehydrated aggregate; EF mapping remains but `_dbFactory` is gone from all four bank-sim consumers. Pipeline still reads fund metadata from YR endpoint per [backend-nav-sync-plan.md §Data Fetch](./backend-nav-sync-plan.md#data-fetch--yr-fund-endpoint). |
 | `NavSnapshot` | `NavSnapshot` (kept, repo-fronted) ✅ | Done 2026-05-13. Cascade FK from `Fund` → `NavHistory` dropped; `NavSnapshot` is now a top-level `DbSet` indexed on `FundId`. `Fund.NavHistory` is `Ignore`d in EF — the repo populates the backing field manually via `Fund.Rehydrate(...)` when needed. NAV history lives at partition `"nav/{isin}"`. |
 | `FundHolding` | replaced by `Positions` ✅ | Done 2026-05-10. EF `DbSet`, configuration, and domain type all deleted. |
-| `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Backend pluggable (Phase 6). |
+| `TradingOrder` | `TradingOrder` (kept, repo-fronted) ✅ | Output of Step 10's SendToBank. Written via `ISendToBankService` (Phase 4a, 2026-05-27) — same code path for the WPF button and the eventual daily Function. Backend pluggable (Phase 6). |
 | `Transaction`, `JournalEntry` | kept (bank-sim only) ✅ | Repo-fronted; cascade-FK nav prop replaced by two-reads + in-memory join in `LedgerService`. |
 | _(none)_ | `IsinProgress` ✅ (2026-05-26) | Repo + SQLite table + streaming-runner integration shipped. Per-ISIN row from [backend-nav-sync-plan.md §Progress Table](./backend-nav-sync-plan.md#progress-table--per-isin-state) — state + Step01Json…Step09Json + RunId. Written by `PipelineRunner.RunAllStreamingAsync` at four boundaries: claim post-Step-1, block columns post per-ISIN merge, Step09Json post-Step-9, release post-Step-10. |
 | _(none)_ | `PortfolioTrades` | New. Step 10 daily output. PK/RK shape an open question — see §10. Phase 4. |
@@ -385,9 +389,9 @@ flowchart LR
   done["✅ Done<br/>Phases 1, 2, 3, 5<br/>(SQLite + repos<br/>+ Positions + Funds)"] --> rx["✅ Pipeline-flow Phase 1<br/>Rx in-process stream"]
   rx --> p7a["✅ Phase 7a<br/>IsinProgress repo<br/>foundation"]
   p7a --> p7b["✅ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
-  p7b --> p4["⏳ Phase 4<br/>SendToBank logic<br/>out of WPF"]
-  p4 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
-  p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions"]
+  p7b --> p4local["✅ Phase 4 local-first<br/>SendToBank lifted into<br/>ISendToBankService"]
+  p4local --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
+  p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions<br/>(hosts Step 10 service)"]
 ```
 
 Pipeline-flow phases live in
@@ -445,11 +449,54 @@ them.
    [PositionsCsvWriter](../FikaFinans.Infrastructure/Pipeline/Csv/PositionsCsvWriter.cs).
    `positions.csv` is no longer a runtime read path — only a seed +
    test-fixture input + diagnostic output, exactly per §5.4.
-4. **Move SendToBank into the Step 10 Function.** **Not started.**
-   Blocked on the queue-driven backend from
-   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md) existing.
-   Function reads Positions, writes `TradingOrder`. WPF becomes the
-   read-only view (or keeps a manual trigger — open question in §10).
+4. **Move SendToBank into the Step 10 Function.** Split into two
+   slices once the SendToBank submit loop turned out to be
+   ~50 lines of orchestration over already-Application-shaped
+   contracts (`ITradingService`, `IPortfolioQueryService`).
+
+   **4a — Local-first: lift the submit loop into an Application
+   service.** ✅ **Done — 2026-05-27.** New
+   [`ISendToBankService`](../FikaFinans.Application/Bank/ISendToBankService.cs)
+   + [`SendToBankResult`](../FikaFinans.Application/Bank/SendToBankResult.cs)
+   contract and
+   [`SendToBankService`](../FikaFinans.Application/Bank/SendToBankService.cs)
+   implementation live entirely in the Application layer (depends
+   only on `ITradingService` + `IPortfolioQueryService`, no WPF or
+   Infrastructure leakage). The service walks every trade in a
+   `TradesOutput`, maps it to the matching bank-sim
+   `FundPositionDto` by ISIN, computes units for Trim / PartialSell
+   from each position's NAV-per-unit, and submits the order. Skip
+   reasons (Hold/NoOp, missing ISIN, zero-unit math, trading-
+   service rejection) are tallied into `SendToBankResult.Skipped`
+   and the diagnostic messages aggregated into
+   `SendToBankResult.Warnings`.
+   [`Step10PortfolioConstructorViewModel`](../FikaFinans.Wpf/ViewModels/Steps/Step10PortfolioConstructorViewModel.cs)
+   is now a thin caller: the SendToBank button just awaits
+   `_sendToBank.SubmitAsync(_lastOutput)` and writes the result
+   into the existing summary text. The VM dropped its
+   `ITradingService` / `IPortfolioQueryService` dependencies — the
+   service owns them. Autofac singleton wiring in
+   [`InfrastructureModule.cs`](../FikaFinans.Infrastructure/DependencyInjection/InfrastructureModule.cs)
+   next to the other bank-sim services. 11 NUnit tests in
+   [`FikaFinans.Application.Tests/Bank/SendToBankServiceTests.cs`](../FikaFinans.Application.Tests/Bank/SendToBankServiceTests.cs)
+   cover every trade-type branch (Buy / TopUp → BuyOrder; Sell →
+   SellOrder with full units; Trim / PartialSell → unit math from
+   NAV-per-unit; Trim with zero units → silent skip; Hold / NoOp →
+   silent skip; missing ISIN → warning + skip count; trading-
+   service rejection → warning + skip count; mixed-trades tally;
+   null-arg guard).
+
+   Decision (resolved from §10 open question): the WPF manual
+   trigger **stays**. Same `SubmitAsync` code path now serves both
+   the manual button and the eventual Function — no duplicated
+   logic, no fork between local-dev and cloud.
+
+   **4b — Function host (daily timer).** **Not started.** Blocks
+   on Pipeline Phase 2 — wraps `ISendToBankService` in a
+   timer-triggered Function plus picks the reconciliation trigger
+   (synchronous after ack vs event callback from the bank stub —
+   still open in §10). With 4a done, the Function shell is a thin
+   adapter; the trading logic doesn't move again.
 5. **Retire direct EF reads of `Fund`, `NavSnapshot`, `FundHolding`.**
    ✅ **Done — 2026-05-10 (`FundHolding`) + 2026-05-13 (`Fund` /
    `NavSnapshot`).** `FundHolding` is fully deleted (EF `DbSet`,

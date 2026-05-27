@@ -6,10 +6,8 @@ using DevExpress.Mvvm;
 using FikaFinans.Application.Bank;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
-using FikaFinans.Domain.Bank.Common;
 using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline.Json;
-using FluentResults;
 using FikaFinans.Wpf.Services;
 using NLog;
 
@@ -19,8 +17,7 @@ public sealed class Step10PortfolioConstructorViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly IPortfolioConstructorAgent? _agent;
-    private readonly ITradingService? _trading;
-    private readonly IPortfolioQueryService? _portfolio;
+    private readonly ISendToBankService? _sendToBank;
 
     private TradesOutput? _lastOutput;
     private readonly AsyncCommand _sendToBankCommand;
@@ -38,14 +35,13 @@ public sealed class Step10PortfolioConstructorViewModel : StepViewModel
 
     public Step10PortfolioConstructorViewModel(ILogger logger, IScheduler uiScheduler,
         IPathsService paths, IPortfolioConstructorAgent agent,
-        ITradingService trading, IPortfolioQueryService portfolio,
+        ISendToBankService sendToBank,
         IConfigEditorDialogService configEditor)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
-        _trading = trading;
-        _portfolio = portfolio;
+        _sendToBank = sendToBank;
         _configEditorService = configEditor;
         _sendToBankCommand = new AsyncCommand(SendToBankAsync, CanSendToBank);
     }
@@ -95,57 +91,17 @@ public sealed class Step10PortfolioConstructorViewModel : StepViewModel
         OutputSummaryText = $"{output.Trades.Count} trades · {output.ConstraintViolations.Count} violations";
     }
 
-    private bool CanSendToBank() => _lastOutput is not null && _trading is not null && _portfolio is not null;
+    private bool CanSendToBank() => _lastOutput is not null && _sendToBank is not null;
 
     private async Task SendToBankAsync()
     {
-        if (_lastOutput is null || _trading is null || _portfolio is null)
+        if (_lastOutput is null || _sendToBank is null)
             return;
 
-        var positions = await _portfolio.GetFundPositionsAsync();
-        var isinMap = positions.ToDictionary(p => p.Isin);
+        var result = await _sendToBank.SubmitAsync(_lastOutput);
 
-        int sent = 0, skipped = 0;
-        foreach (var trade in _lastOutput.Trades)
-        {
-            if (trade.TradeType is TradeType.Hold or TradeType.NoOp)
-                continue;
-
-            if (!isinMap.TryGetValue(trade.Isin, out var pos))
-            {
-                Logger?.Warn("No bank fund found for ISIN {Isin} — skipping", trade.Isin);
-                skipped++;
-                continue;
-            }
-
-            Result<Domain.Bank.Identifiers.TradingOrderId> result;
-
-            if (trade.TradeType is TradeType.Buy or TradeType.TopUp)
-            {
-                result = await _trading.CreateBuyOrderAsync(pos.FundId, Money.SEK(trade.AmountKr));
-            }
-            else if (trade.TradeType is TradeType.Sell)
-            {
-                result = await _trading.CreateSellOrderAsync(pos.FundId, pos.Units);
-            }
-            else // Trim, PartialSell
-            {
-                if (pos.Units <= 0) { skipped++; continue; }
-                var navPerUnit = pos.CurrentValue.Amount / pos.Units;
-                var units = navPerUnit > 0 ? trade.AmountKr / navPerUnit : 0m;
-                if (units <= 0) { skipped++; continue; }
-                result = await _trading.CreateSellOrderAsync(pos.FundId, units);
-            }
-
-            if (result.IsSuccess)
-                sent++;
-            else
-            {
-                Logger?.Warn("Order rejected for {Isin}: {Error}", trade.Isin, result.Errors[0].Message);
-                skipped++;
-            }
-        }
-
-        OutputSummaryText = $"{_lastOutput.Trades.Count} trades · {_lastOutput.ConstraintViolations.Count} violations · {sent} sent, {skipped} skipped";
+        OutputSummaryText =
+            $"{_lastOutput.Trades.Count} trades · {_lastOutput.ConstraintViolations.Count} violations · " +
+            $"{result.Sent} sent, {result.Skipped} skipped";
     }
 }

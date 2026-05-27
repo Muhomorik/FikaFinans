@@ -153,6 +153,13 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<IPortfolioQueryService>()
             .SingleInstance();
 
+        builder.Register(ctx => new SendToBankService(
+                logger: LogManager.GetLogger(nameof(SendToBankService)),
+                trading: ctx.Resolve<ITradingService>(),
+                portfolio: ctx.Resolve<IPortfolioQueryService>()))
+            .As<ISendToBankService>()
+            .SingleInstance();
+
         builder.RegisterType<SettlementEngine>()
             .As<ISettlementEngine>()
             .SingleInstance();
