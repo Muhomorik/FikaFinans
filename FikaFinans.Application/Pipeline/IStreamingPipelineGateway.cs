@@ -62,6 +62,19 @@ public interface IStreamingPipelineGateway
     Task WriteIsinProgressStep9Async(string isoWeek, string runId, CancellationToken ct = default);
 
     /// <summary>
+    /// Stamp a per-fund failure into the IsinProgress row: sets
+    /// <c>LastError</c> to <paramref name="errorMessage"/> and increments
+    /// <c>AttemptCount</c>. Called from the streaming runner once for each
+    /// fund whose per-ISIN chain threw mid-run (see
+    /// <see cref="PerIsinBlockResult.FailedFunds"/>). State stays
+    /// <c>Processing</c>; the row is flipped back to <c>Free</c> at the end
+    /// of the run via <see cref="ReleaseIsinProgressAsync"/>. No-op if the
+    /// row doesn't exist (e.g. standalone <see cref="PipelineRunner.RunPerIsinBlockAsync"/>
+    /// callers that never claimed).
+    /// </summary>
+    Task MarkFundFailedAsync(string isin, string runId, string errorMessage, CancellationToken ct = default);
+
+    /// <summary>
     /// Release per-ISIN progress rows at the end of a successful streaming
     /// run. For each fund in <paramref name="step1Output"/> upserts the row
     /// with state <c>Free</c> and clears <c>ProcessingStartedAt</c>; existing

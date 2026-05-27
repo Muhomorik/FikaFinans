@@ -143,7 +143,8 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Step5Output: MakeStep1Output("LU0000000001"),
             Step6Output: MakeStep1Output("LU0000000001"),
             Step7Output: MakeStep1Output("LU0000000001"),
-            Step8Output: MakeStep1Output("LU0000000001"));
+            Step8Output: MakeStep1Output("LU0000000001"),
+            FailedFunds: new Dictionary<string, string>());
 
         await sut.WriteIsinProgressBlockAsync(block, _runId);
 
@@ -220,6 +221,41 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         var step1 = MakeStep1Output("LU0000000001");
 
         await sut.ReleaseIsinProgressAsync(step1, _runId);
+
+        var rows = await _repo.QueryPartitionAsync(Partition);
+        Assert.That(rows, Is.Empty);
+    }
+
+    [Test]
+    public async Task MarkFundFailedAsync_SetsLastErrorBumpsAttemptCountAndPreservesColumns()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), _runId);
+
+        await sut.MarkFundFailedAsync("LU0000000001", _runId, "Step 7 exploded");
+
+        var row = await _repo.GetAsync(Partition, "LU0000000001");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row, Is.Not.Null);
+            Assert.That(row!.LastError, Is.EqualTo("Step 7 exploded"));
+            Assert.That(row.AttemptCount, Is.EqualTo(1), "AttemptCount bumps on each MarkFundFailed call");
+            Assert.That(row.RunId, Is.EqualTo(_runId));
+            Assert.That(row.State, Is.EqualTo(IsinProgressState.Processing),
+                "State is left Processing — Release flips it to Free at end of run");
+            Assert.That(row.Step01Json, Is.Not.Null, "Step01Json from Claim is preserved");
+        });
+    }
+
+    [Test]
+    public async Task MarkFundFailedAsync_MissingRow_IsNoOp()
+    {
+        // Standalone RunPerIsinBlockAsync callers (tests) never Claim, so the
+        // row may not exist. The gateway should swallow that case rather than
+        // surfacing a KeyNotFound / NullReference equivalent.
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+
+        await sut.MarkFundFailedAsync("LU0000000099", _runId, "anything");
 
         var rows = await _repo.QueryPartitionAsync(Partition);
         Assert.That(rows, Is.Empty);

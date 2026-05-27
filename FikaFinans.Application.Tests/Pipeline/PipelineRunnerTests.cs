@@ -438,8 +438,13 @@ public sealed class PipelineRunnerTests
     }
 
     [Test]
-    public void RunPerIsinBlockAsync_StepThrows_EmitsFailedWithIsinAndPropagates()
+    public async Task RunPerIsinBlockAsync_StepThrows_EmitsFailedWithIsinAndDropsFundFromBoundaryOutputs()
     {
+        // Per Open Question #6 resolution: a per-fund failure must NOT
+        // propagate out of the per-ISIN block — the failing fund's Failed
+        // StepEvent fires, the fund is dropped from every boundary snapshot,
+        // and the merge continues. (Sibling-survives behaviour is verified by
+        // RunPerIsinBlockAsync_OneFundThrows_DropsFundAndContinuesOthers.)
         var failingIsin = "LU0099";
         _thesis
             .Setup(x => x.ProcessFundAsync(
@@ -452,16 +457,73 @@ public sealed class PipelineRunnerTests
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await _sut.RunPerIsinBlockAsync(
-                step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default,
-                maxConcurrent: 1));
+        var result = await _sut.RunPerIsinBlockAsync(
+            step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default,
+            maxConcurrent: 1);
 
-        var failed = observed.SingleOrDefault(e => e.Kind == StepEventKind.Failed);
-        Assert.That(failed, Is.Not.Null);
-        Assert.That(failed!.Step, Is.EqualTo(StepId.ThesisValidator));
-        Assert.That(failed.Isin?.Value, Is.EqualTo(failingIsin));
-        Assert.That(failed.Message, Does.Contain("LLM exploded"));
+        Assert.Multiple(() =>
+        {
+            var failed = observed.SingleOrDefault(e => e.Kind == StepEventKind.Failed);
+            Assert.That(failed, Is.Not.Null);
+            Assert.That(failed!.Step, Is.EqualTo(StepId.ThesisValidator));
+            Assert.That(failed.Isin?.Value, Is.EqualTo(failingIsin));
+            Assert.That(failed.Message, Does.Contain("LLM exploded"));
+
+            Assert.That(result.FailedFunds, Has.Count.EqualTo(1));
+            Assert.That(result.FailedFunds[failingIsin], Does.Contain("LLM exploded"));
+            Assert.That(result.Step2Output.Funds, Is.Empty, "failed fund is dropped from boundary outputs");
+            Assert.That(result.Step8Output.Funds, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RunPerIsinBlockAsync_OneFundThrows_DropsFundAndContinuesOthers()
+    {
+        // Closes pipeline-step-flow-plan.md Open Question #6 (Error routing):
+        // one bad fund must drop out of the stream while siblings keep
+        // streaming through the full per-ISIN chain.
+        var failingIsin = "LU0099";
+        _thesis
+            .Setup(x => x.ProcessFundAsync(
+                It.Is<FundRecord>(f => f.Isin.Value == failingIsin),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("LLM exploded for LU0099"));
+
+        var step1 = MakeStep1Output(
+            MakeFund("LU0001"), MakeFund(failingIsin), MakeFund("LU0002"));
+        var macro = MakeMacroContext();
+        var observed = new List<StepEvent>();
+        using var sub = _sut.Events.Subscribe(observed.Add);
+
+        var result = await _sut.RunPerIsinBlockAsync(
+            step1, macro, MetricsCalculatorConfig.Default, SignalScorerConfig.Default,
+            maxConcurrent: 2);
+
+        Assert.Multiple(() =>
+        {
+            // Failed fund dropped from every boundary
+            Assert.That(result.FailedFunds.Keys, Is.EquivalentTo(new[] { failingIsin }));
+            Assert.That(result.Step2Output.Funds.Select(f => f.Isin.Value),
+                Is.EquivalentTo(new[] { "LU0001", "LU0002" }));
+            Assert.That(result.Step8Output.Funds.Select(f => f.Isin.Value),
+                Is.EquivalentTo(new[] { "LU0001", "LU0002" }));
+
+            // Sibling funds emit Succeeded for the full chain
+            foreach (var survivor in new[] { "LU0001", "LU0002" })
+            {
+                Assert.That(observed.Any(e =>
+                        e.Step == StepId.Recommender
+                        && e.Kind == StepEventKind.Succeeded
+                        && e.Isin?.Value == survivor),
+                    Is.True, $"{survivor} should complete the full per-ISIN chain");
+            }
+
+            // Failing fund emits exactly one Failed (at Step 7)
+            var failed = observed.SingleOrDefault(e =>
+                e.Kind == StepEventKind.Failed && e.Isin?.Value == failingIsin);
+            Assert.That(failed, Is.Not.Null);
+            Assert.That(failed!.Step, Is.EqualTo(StepId.ThesisValidator));
+        });
     }
 
     [Test]
@@ -575,22 +637,28 @@ public sealed class PipelineRunnerTests
     }
 
     [Test]
-    public async Task RunAllStreamingAsync_PerIsinBlockFails_EmitsFailedForAllSixPerIsinSteps()
+    public async Task RunAllStreamingAsync_OneFundFails_RunSucceedsAndOtherFundsComplete()
     {
+        // Per Open Q #6: per-fund failures no longer cascade to universe-level
+        // Failed events. The run succeeds and surviving funds complete the
+        // full per-ISIN chain. The failing fund still emits its per-fund
+        // Failed event.
         _gateway
             .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeStep1Output(MakeFund("LU0001")));
+            .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099"), MakeFund("LU0002")));
         _gateway
             .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeMacroContext());
         _thesis
-            .Setup(x => x.ProcessFundAsync(It.IsAny<FundRecord>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("LLM exploded"));
+            .Setup(x => x.ProcessFundAsync(
+                It.Is<FundRecord>(f => f.Isin.Value == "LU0099"),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("LLM exploded for LU0099"));
 
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-5");
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-isolate-1");
 
         var perIsinSteps = new[]
         {
@@ -599,13 +667,19 @@ public sealed class PipelineRunnerTests
         };
         Assert.Multiple(() =>
         {
-            Assert.That(result, Is.False);
+            Assert.That(result, Is.True, "isolated per-fund failures must not fail the run");
             foreach (var step in perIsinSteps)
             {
                 Assert.That(observed.Any(e =>
-                    e.Step == step && e.Kind == StepEventKind.Failed && e.Isin is null),
-                    Is.True, $"missing universe-level Failed event for {step}");
+                        e.Step == step && e.Kind == StepEventKind.Succeeded && e.Isin is null),
+                    Is.True, $"universe-Succeeded must still fire for {step}");
+                Assert.That(observed.Any(e =>
+                        e.Step == step && e.Kind == StepEventKind.Failed && e.Isin is null),
+                    Is.False, $"per-fund failure must not bubble to universe-level Failed for {step}");
             }
+            Assert.That(observed.Any(e =>
+                    e.Kind == StepEventKind.Failed && e.Isin?.Value == "LU0099"),
+                Is.True, "failing fund still emits a per-fund Failed event");
         });
     }
 
@@ -739,30 +813,40 @@ public sealed class PipelineRunnerTests
     }
 
     [Test]
-    public async Task RunAllStreamingAsync_PerIsinBlockFails_ClaimsButDoesNotWriteBlockStep9OrRelease()
+    public async Task RunAllStreamingAsync_OneFundFails_AllGatewayMethodsCalledIncludingMarkFundFailed()
     {
+        // Per Open Q #6: per-fund failures are isolated, so the block
+        // "succeeds" with the surviving funds; all four IsinProgress lifecycle
+        // methods still fire, plus MarkFundFailedAsync once per failed fund.
         _gateway
             .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeStep1Output(MakeFund("LU0001")));
+            .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099")));
         _gateway
             .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeMacroContext());
         _thesis
-            .Setup(x => x.ProcessFundAsync(It.IsAny<FundRecord>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ProcessFundAsync(
+                It.Is<FundRecord>(f => f.Isin.Value == "LU0099"),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM exploded"));
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-3");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-isolate-2");
 
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
-                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.MarkFundFailedAsync(
+                "LU0099", "stream-isolate-2", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            _gateway.Verify(x => x.MarkFundFailedAsync(
+                "LU0001", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "surviving funds must not be marked failed");
         });
     }
 

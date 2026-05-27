@@ -578,10 +578,38 @@ first.
   measured. Same number the Phase 2 Function host will use — see
   the equivalent open question in
   [backend-nav-sync-plan.md §Open Questions](./backend-nav-sync-plan.md#open-questions).
-- **Error routing.** A bad fund inside Step N — does it produce a
-  `Failed` `StepEvent` and drop out of the stream, or block the
-  whole run? The cloud shape will lean "drop and dead-letter"; Phase
-  1 should match so behaviour transfers cleanly.
+- **Error routing.** ✅ **Resolved 2026-05-27.** Per-fund failures are
+  isolated: when a fund throws inside any per-ISIN step, the helper
+  emits its `Failed` `StepEvent` with the fund's `Isin`, the fund is
+  recorded in a `failedIsins` map inside
+  [`PipelineRunner.RunFundAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs),
+  and the merge continues draining siblings. `BuildUniverse` drops
+  failed funds from every boundary snapshot (Steps 2/4/5/6/7/8), so
+  downstream consumers see a smaller-but-clean universe.
+  [`PerIsinBlockResult`](../FikaFinans.Application/Pipeline/PerIsinBlockResult.cs)
+  now exposes a `FailedFunds` map (ISIN → error message); the
+  streaming runner stamps each entry into the per-ISIN row via the
+  new
+  [`IStreamingPipelineGateway.MarkFundFailedAsync`](../FikaFinans.Application/Pipeline/IStreamingPipelineGateway.cs)
+  method (sets `LastError`, bumps `AttemptCount`). State stays
+  `Processing` and is flipped to `Free` at end-of-run by
+  `ReleaseIsinProgressAsync` — the local equivalent of the cloud
+  "drop and dead-letter" pattern lands in `LastError` rather than a
+  dedicated queue. Universe-wide events stay `Succeeded` for the
+  per-ISIN steps even if every fund fails — the run reports `true`.
+  Coverage in
+  [`PipelineRunnerTests.cs`](../FikaFinans.Application.Tests/Pipeline/PipelineRunnerTests.cs)
+  (`RunPerIsinBlockAsync_OneFundThrows_DropsFundAndContinuesOthers`,
+  `RunPerIsinBlockAsync_StepThrows_EmitsFailedWithIsinAndDropsFundFromBoundaryOutputs`,
+  `RunAllStreamingAsync_OneFundFails_RunSucceedsAndOtherFundsComplete`,
+  `RunAllStreamingAsync_OneFundFails_AllGatewayMethodsCalledIncludingMarkFundFailed`)
+  plus repo-level
+  [`StreamingPipelineGatewayIsinProgressTests`](../FikaFinans.InfrastructureV2.Tests/Pipeline/StreamingPipelineGatewayIsinProgressTests.cs)
+  (`MarkFundFailedAsync_SetsLastErrorBumpsAttemptCountAndPreservesColumns`,
+  `MarkFundFailedAsync_MissingRow_IsNoOp`). Follow-up flagged but
+  deferred: clearing `LastError` on a clean run (in `Claim` or
+  `Release`) — not strictly needed for Phase 1, but worth revisiting
+  before Phase 2.
 - **Cancellation.** ✅ **Resolved 2026-05-27.** Audit confirmed the
   `CancellationToken` flows end-to-end through the Rx pipeline.
   [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)

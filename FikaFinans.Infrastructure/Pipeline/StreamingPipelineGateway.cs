@@ -275,6 +275,42 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
+    public async Task MarkFundFailedAsync(string isin, string runId, string errorMessage, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(isin);
+        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentNullException.ThrowIfNull(errorMessage);
+
+        var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false);
+        if (existing is null) return;
+
+        var updated = new IsinProgressEntity
+        {
+            PartitionKey = existing.PartitionKey,
+            RowKey = existing.RowKey,
+            Isin = existing.Isin,
+            State = existing.State,
+            RunId = runId,
+            NavDate = existing.NavDate,
+            CurrentStep = existing.CurrentStep,
+            LatestProcessedNavDate = existing.LatestProcessedNavDate,
+            ProcessingStartedAt = existing.ProcessingStartedAt,
+            LastError = errorMessage,
+            AttemptCount = existing.AttemptCount + 1,
+            Step01Json = existing.Step01Json,
+            Step02Json = existing.Step02Json,
+            Step03Json = existing.Step03Json,
+            Step04Json = existing.Step04Json,
+            Step05Json = existing.Step05Json,
+            Step06Json = existing.Step06Json,
+            Step07Json = existing.Step07Json,
+            Step08Json = existing.Step08Json,
+            Step09Json = existing.Step09Json,
+        };
+
+        await _isinProgress.UpsertAsync(updated, ct).ConfigureAwait(false);
+    }
+
     private async Task UpsertInChunksAsync(IReadOnlyList<IsinProgressEntity> entities, CancellationToken ct)
     {
         if (entities.Count == 0) return;

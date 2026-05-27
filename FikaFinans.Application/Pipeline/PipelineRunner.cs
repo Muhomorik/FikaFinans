@@ -183,6 +183,9 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             _gateway.SaveStepOutput(StepId.Recommender,       isoWeek, runId, result.Step8Output);
 
             await _gateway.WriteIsinProgressBlockAsync(result, runId, ct).ConfigureAwait(false);
+
+            foreach (var (failedIsin, message) in result.FailedFunds)
+                await _gateway.MarkFundFailedAsync(failedIsin, runId, message, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -284,33 +287,39 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
 
         var warnings = new ConcurrentBag<string>();
         var captures = new PerStepCaptures();
+        var failedIsins = new ConcurrentDictionary<string, string>();
 
         await step1Output.Funds
             .ToObservable()
             .Select(fund => Observable.FromAsync(token => RunFundAsync(
-                fund, metricsConfig, signalConfig, activeThemes, activeCatalysts, warnings, captures, token)))
+                fund, metricsConfig, signalConfig, activeThemes, activeCatalysts,
+                warnings, captures, failedIsins, token)))
             .Merge(maxConcurrent)
             .ToList()
             .ToTask(ct)
             .ConfigureAwait(false);
 
         var mergedWarnings = step1Output.DataQuality.Warnings.Concat(warnings).ToList();
+        var failedFunds = (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(failedIsins);
 
         return new PerIsinBlockResult(
-            Step2Output: BuildUniverse(step1Output, captures.Step2, mergedWarnings),
-            Step4Output: BuildUniverse(step1Output, captures.Step4, mergedWarnings),
-            Step5Output: BuildUniverse(step1Output, captures.Step5, mergedWarnings),
-            Step6Output: BuildUniverse(step1Output, captures.Step6, mergedWarnings),
-            Step7Output: BuildUniverse(step1Output, captures.Step7, mergedWarnings),
-            Step8Output: BuildUniverse(step1Output, captures.Step8, mergedWarnings));
+            Step2Output: BuildUniverse(step1Output, captures.Step2, mergedWarnings, failedIsins),
+            Step4Output: BuildUniverse(step1Output, captures.Step4, mergedWarnings, failedIsins),
+            Step5Output: BuildUniverse(step1Output, captures.Step5, mergedWarnings, failedIsins),
+            Step6Output: BuildUniverse(step1Output, captures.Step6, mergedWarnings, failedIsins),
+            Step7Output: BuildUniverse(step1Output, captures.Step7, mergedWarnings, failedIsins),
+            Step8Output: BuildUniverse(step1Output, captures.Step8, mergedWarnings, failedIsins),
+            FailedFunds: failedFunds);
     }
 
     private static DataLoaderOutput BuildUniverse(
         DataLoaderOutput template,
         ConcurrentDictionary<string, FundRecord> capture,
-        List<string> warnings)
+        List<string> warnings,
+        ConcurrentDictionary<string, string> failedIsins)
     {
         var ordered = template.Funds
+            .Where(f => !failedIsins.ContainsKey(f.Isin.Value))
             .Select(f => capture[f.Isin.Value])
             .ToList();
 
@@ -350,7 +359,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         public ConcurrentDictionary<string, FundRecord> Step8 { get; } = new();
     }
 
-    private async Task<FundRecord> RunFundAsync(
+    private async Task<FundRecord?> RunFundAsync(
         FundRecord input,
         MetricsCalculatorConfig metricsConfig,
         SignalScorerConfig signalConfig,
@@ -358,34 +367,53 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         IReadOnlyList<Catalyst> activeCatalysts,
         ConcurrentBag<string> warnings,
         PerStepCaptures captures,
+        ConcurrentDictionary<string, string> failedIsins,
         CancellationToken ct)
     {
         var fund = input;
+        var isin = fund.Isin.Value;
 
-        fund = RunSyncStep(StepId.MetricsCalculator, fund, f => _metrics.ProcessFund(f, metricsConfig));
-        captures.Step2[fund.Isin.Value] = fund;
-        ct.ThrowIfCancellationRequested();
+        try
+        {
+            fund = RunSyncStep(StepId.MetricsCalculator, fund, f => _metrics.ProcessFund(f, metricsConfig));
+            captures.Step2[isin] = fund;
+            ct.ThrowIfCancellationRequested();
 
-        fund = RunSyncStep(StepId.SignalScorer, fund, f => _signal.ProcessFund(f, signalConfig));
-        captures.Step4[fund.Isin.Value] = fund;
-        ct.ThrowIfCancellationRequested();
+            fund = RunSyncStep(StepId.SignalScorer, fund, f => _signal.ProcessFund(f, signalConfig));
+            captures.Step4[isin] = fund;
+            ct.ThrowIfCancellationRequested();
 
-        fund = await RunAsyncStep(StepId.MacroAligner, fund, warnings,
-            (f, token) => _macroAligner.ProcessFundAsync(f, activeThemes, token), ct).ConfigureAwait(false);
-        captures.Step5[fund.Isin.Value] = fund;
+            fund = await RunAsyncStep(StepId.MacroAligner, fund, warnings,
+                (f, token) => _macroAligner.ProcessFundAsync(f, activeThemes, token), ct).ConfigureAwait(false);
+            captures.Step5[isin] = fund;
 
-        fund = await RunAsyncStep(StepId.CatalystTagger, fund, warnings,
-            (f, token) => _catalyst.ProcessFundAsync(f, activeCatalysts, token), ct).ConfigureAwait(false);
-        captures.Step6[fund.Isin.Value] = fund;
+            fund = await RunAsyncStep(StepId.CatalystTagger, fund, warnings,
+                (f, token) => _catalyst.ProcessFundAsync(f, activeCatalysts, token), ct).ConfigureAwait(false);
+            captures.Step6[isin] = fund;
 
-        fund = await RunAsyncStep(StepId.ThesisValidator, fund, warnings,
-            (f, token) => _thesis.ProcessFundAsync(f, token), ct).ConfigureAwait(false);
-        captures.Step7[fund.Isin.Value] = fund;
+            fund = await RunAsyncStep(StepId.ThesisValidator, fund, warnings,
+                (f, token) => _thesis.ProcessFundAsync(f, token), ct).ConfigureAwait(false);
+            captures.Step7[isin] = fund;
 
-        fund = RunSyncResultStep(StepId.Recommender, fund, warnings, f => _recommender.ProcessFund(f));
-        captures.Step8[fund.Isin.Value] = fund;
+            fund = RunSyncResultStep(StepId.Recommender, fund, warnings, f => _recommender.ProcessFund(f));
+            captures.Step8[isin] = fund;
 
-        return fund;
+            return fund;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Per-fund failure: isolate. The throwing helper already emitted a
+            // Failed StepEvent with this fund's Isin; record the failure so the
+            // outer Merge keeps draining siblings, BuildUniverse drops the fund
+            // from every boundary snapshot, and the runner stamps LastError on
+            // the IsinProgress row via MarkFundFailedAsync.
+            failedIsins[isin] = ex.Message;
+            return null;
+        }
     }
 
     private FundRecord RunSyncStep(StepId step, FundRecord input, Func<FundRecord, FundRecord> body)
