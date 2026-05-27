@@ -582,10 +582,26 @@ first.
   `Failed` `StepEvent` and drop out of the stream, or block the
   whole run? The cloud shape will lean "drop and dead-letter"; Phase
   1 should match so behaviour transfers cleanly.
-- **Cancellation.** `OnRunAllAsync` already threads a
-  `CancellationTokenSource`. The Rx pipeline needs to honour it
-  end-to-end — confirm the operator chain disposes promptly on
-  cancel.
+- **Cancellation.** ✅ **Resolved 2026-05-27.** Audit confirmed the
+  `CancellationToken` flows end-to-end through the Rx pipeline.
+  [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+  passes the token to every IsinProgress gateway call and to every
+  per-step barrier; the per-ISIN block streams via
+  `Observable.FromAsync(token => RunFundAsync(..., token))` so a
+  cancelled outer `ToTask(ct)` disposes the subscription and cascades
+  cancellation to the in-flight fund. Per-step checks
+  (`ct.ThrowIfCancellationRequested()` between the sync steps 2/4)
+  and async token propagation (steps 5/6/7's `ProcessFundAsync`
+  accept the token) both honour it; `OperationCanceledException` is
+  caught and rethrown separately from general exceptions at every
+  layer so cancellation never becomes a `Failed` `StepEvent`. The
+  pre-cancelled-token tests from Slice 4 are now joined by a
+  mid-stream test in
+  [`PipelineRunnerTests.cs`](../FikaFinans.Application.Tests/Pipeline/PipelineRunnerTests.cs)
+  (`RunAllStreamingAsync_CancelledMidStream_HaltsMergeAndDoesNotStartLaterFunds`):
+  the Merge halts on cancellation, `OperationCanceledException` /
+  `TaskCanceledException` surfaces, and funds queued after the
+  cancellation point never start any step.
 
 ## Out of Scope for This Document
 

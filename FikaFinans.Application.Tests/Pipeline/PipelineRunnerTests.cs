@@ -620,6 +620,75 @@ public sealed class PipelineRunnerTests
     }
 
     [Test]
+    public void RunAllStreamingAsync_CancelledMidStream_HaltsMergeAndDoesNotStartLaterFunds()
+    {
+        // Closes pipeline-step-flow-plan.md Open Question #7 (Cancellation):
+        // confirms the Rx operator chain honours a token cancelled mid-flight
+        // (not just pre-flight) by halting the per-ISIN Merge so funds queued
+        // after the cancellation point never start.
+        using var cts = new CancellationTokenSource();
+        var step1 = MakeStep1Output(
+            MakeFund("LU0001"), MakeFund("LU0002"),
+            MakeFund("LU0003"), MakeFund("LU0004"));
+        _gateway
+            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(step1);
+        _gateway
+            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(MakeMacroContext());
+
+        // With maxConcurrent: 1 funds process sequentially in input order.
+        // Cancel during the 2nd fund's Step 7 so LU0001 completes the chain,
+        // LU0002's Step 7 throws OCE, and LU0003 + LU0004 must not start.
+        var thesisInvocations = 0;
+        _thesis
+            .Setup(x => x.ProcessFundAsync(
+                It.IsAny<FundRecord>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((FundRecord f, CancellationToken _) =>
+            {
+                var n = Interlocked.Increment(ref thesisInvocations);
+                if (n == 2)
+                {
+                    cts.Cancel();
+                    return Task.FromException<FundProcessingResult>(
+                        new OperationCanceledException(cts.Token));
+                }
+                return Task.FromResult(new FundProcessingResult(f, Array.Empty<string>()));
+            });
+
+        var observed = new List<StepEvent>();
+        using var sub = _sut.Events.Subscribe(observed.Add);
+
+        // ToTask(ct) surfaces a TaskCanceledException (subclass of OCE) when
+        // the outer token cancels mid-stream — accept either exact type.
+        Assert.That(async () => await _sut.RunAllStreamingAsync(
+                "OPM", "2026-W21", "stream-cancel-mid",
+                maxConcurrent: 1, ct: cts.Token),
+            Throws.InstanceOf<OperationCanceledException>());
+
+        var startedIsins = observed
+            .Where(e => e.Kind == StepEventKind.Started && e.Isin is not null)
+            .Select(e => e.Isin!.Value)
+            .Distinct()
+            .ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(observed.Any(e =>
+                    e.Step == StepId.Recommender
+                    && e.Kind == StepEventKind.Succeeded
+                    && e.Isin?.Value == "LU0001"),
+                Is.True,
+                "LU0001 should have completed the chain before cancellation fired");
+            Assert.That(startedIsins, Does.Not.Contain("LU0003"),
+                "LU0003 must not start once cancellation fires mid-stream");
+            Assert.That(startedIsins, Does.Not.Contain("LU0004"),
+                "LU0004 must not start once cancellation fires mid-stream");
+        });
+    }
+
+    [Test]
     public async Task RunAllStreamingAsync_HappyPath_DrivesIsinProgressClaimBlockStep9Release()
     {
         var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"));
