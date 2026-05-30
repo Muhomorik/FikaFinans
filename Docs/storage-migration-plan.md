@@ -628,8 +628,19 @@ them.
    Sub-step sequence (refined per-step before each lands):
 
    - **8a.** Thread Step 9's in-memory output into
-     `WriteIsinProgressStep9Async` so the gateway stops reading the
-     Step 9 file off disk.
+     `WriteIsinProgressStep9Async`. ✅ **Done — 2026-05-30.** The
+     iso-week parameter dropped; the gateway no longer reads the
+     Step 9 file off disk. The caller in
+     [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+     invokes the universe-enricher agent directly (instead of via
+     `RunStepAsync`) so the in-memory output is preserved and
+     handed straight to the gateway. Gateway test in
+     [`StreamingPipelineGatewayIsinProgressTests`](../FikaFinans.InfrastructureV2.Tests/Pipeline/StreamingPipelineGatewayIsinProgressTests.cs)
+     drops the disk-write boilerplate and gains a null-guard test;
+     four mock verifications in
+     [`PipelineRunnerTests`](../FikaFinans.Application.Tests/Pipeline/PipelineRunnerTests.cs)
+     updated for the new signature. Application.Tests 44/44;
+     InfrastructureV2.Tests gateway 18/18.
    - **8b.** Retarget Step 9 + Step 10's universe-wide reads to
      assemble `DataLoaderOutput` from `Step08Json` / `Step09Json`
      columns.

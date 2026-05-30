@@ -79,7 +79,7 @@ public sealed class PipelineRunnerTests
         _enricher = _fixture.Freeze<Mock<IUniverseEnricherAgent>>();
         _enricher
             .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(default(DataLoaderOutput)!);
+            .ReturnsAsync(() => MakeStep1Output());
 
         // The three sync per-ISIN agents — AutoMoq returns null for ProcessFund
         // (FundRecord is a class), which would break the per-fund chain. Stub
@@ -787,7 +787,7 @@ public sealed class PipelineRunnerTests
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                "2026-W21", "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
                 step1, "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
         });
@@ -811,7 +811,7 @@ public sealed class PipelineRunnerTests
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         });
@@ -844,7 +844,7 @@ public sealed class PipelineRunnerTests
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.MarkFundFailedAsync(
@@ -881,7 +881,7 @@ public sealed class PipelineRunnerTests
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         });

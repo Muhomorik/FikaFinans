@@ -211,14 +211,34 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         foreach (var step in PerIsinSteps)
             Emit(new StepEvent(step, StepEventKind.Succeeded, Duration: blockSw.Elapsed));
 
-        // Universe-wide barriers after the per-ISIN block.
-        if (!await RunStepAsync(StepId.UniverseEnricher, family, isoWeek, runId, ct).ConfigureAwait(false))
+        // Universe-wide Step 9 barrier. Phase 8 sub-step 8a: capture the
+        // in-memory output here so the gateway's Step09Json write doesn't
+        // round-trip through disk. Step 9 event-emit duplicates RunStepAsync's
+        // pattern because RunStepAsync drops the agent's return value.
+        DataLoaderOutput step9Output;
+        var step9Sw = Stopwatch.StartNew();
+        Emit(new StepEvent(StepId.UniverseEnricher, StepEventKind.Started));
+        try
         {
+            step9Output = await _enricher.RunAsync(isoWeek, runId, ct).ConfigureAwait(false);
+            step9Sw.Stop();
+            Emit(new StepEvent(StepId.UniverseEnricher, StepEventKind.Succeeded, Duration: step9Sw.Elapsed));
+        }
+        catch (OperationCanceledException)
+        {
+            step9Sw.Stop();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            step9Sw.Stop();
+            _logger.Error(ex, "{Step} failed", StepId.UniverseEnricher);
+            Emit(new StepEvent(StepId.UniverseEnricher, StepEventKind.Failed, Message: ex.Message, Duration: step9Sw.Elapsed));
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.UniverseEnricher);
             return false;
         }
 
-        await _gateway.WriteIsinProgressStep9Async(isoWeek, runId, ct).ConfigureAwait(false);
+        await _gateway.WriteIsinProgressStep9Async(step9Output, runId, ct).ConfigureAwait(false);
 
         if (!await RunStepAsync(StepId.PortfolioConstructor, family, isoWeek, runId, ct).ConfigureAwait(false))
         {

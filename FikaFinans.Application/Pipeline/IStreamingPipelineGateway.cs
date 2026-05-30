@@ -55,11 +55,13 @@ public interface IStreamingPipelineGateway
     Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, string runId, CancellationToken ct = default);
 
     /// <summary>
-    /// Load the Step 9 (UniverseEnricher) output from disk and write
-    /// <c>Step09Json</c> + <c>CurrentStep = 9</c> for every fund into its
-    /// per-ISIN row. Called after the universe-wide Step 9 barrier completes.
+    /// Write <c>Step09Json</c> + <c>CurrentStep = 9</c> for every fund in
+    /// <paramref name="step9Output"/> into its per-ISIN row. Called after the
+    /// universe-wide Step 9 barrier completes; the caller threads Step 9's
+    /// in-memory <see cref="DataLoaderOutput"/> through so the gateway no
+    /// longer round-trips it via disk JSON (Phase 8 sub-step 8a).
     /// </summary>
-    Task WriteIsinProgressStep9Async(string isoWeek, string runId, CancellationToken ct = default);
+    Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, string runId, CancellationToken ct = default);
 
     /// <summary>
     /// Stamp a per-fund failure into the IsinProgress row: sets

@@ -166,20 +166,17 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     }
 
     [Test]
-    public async Task WriteIsinProgressStep9Async_LoadsFromDiskAndPopulatesStep09Json()
+    public async Task WriteIsinProgressStep9Async_PopulatesStep09JsonFromInMemoryOutput()
     {
+        // Phase 8 sub-step 8a: caller threads Step 9's in-memory
+        // DataLoaderOutput through; no disk round-trip.
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001");
         await sut.ClaimIsinProgressAsync(step1, _runId);
 
-        var paths = new TestPathsService();
-        var step9Path = paths.UniverseEnricherOutput(IsoWeek, _runId);
-        _filesToCleanup.Add(step9Path);
-        Directory.CreateDirectory(Path.GetDirectoryName(step9Path)!);
-        File.WriteAllText(step9Path, JsonSerializer.Serialize(
-            MakeStep1Output("LU0000000001"), JsonOptions.Default));
+        var step9Output = MakeStep1Output("LU0000000001");
 
-        await sut.WriteIsinProgressStep9Async(IsoWeek, _runId);
+        await sut.WriteIsinProgressStep9Async(step9Output, _runId);
 
         var row = await _repo.GetAsync(Partition, "LU0000000001");
         Assert.Multiple(() =>
@@ -188,6 +185,15 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Assert.That(row.State, Is.EqualTo(IsinProgressState.Processing));
             Assert.That(row.Step09Json, Is.Not.Null.And.Not.Empty);
         });
+    }
+
+    [Test]
+    public void WriteIsinProgressStep9Async_NullOutput_ThrowsArgumentNullException()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+
+        Assert.ThrowsAsync<ArgumentNullException>(
+            () => sut.WriteIsinProgressStep9Async(null!, _runId));
     }
 
     [Test]

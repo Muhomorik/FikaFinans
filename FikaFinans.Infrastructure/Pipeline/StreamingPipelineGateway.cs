@@ -197,15 +197,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task WriteIsinProgressStep9Async(string isoWeek, string runId, CancellationToken ct = default)
+    public async Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, string runId, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(isoWeek);
+        ArgumentNullException.ThrowIfNull(step9Output);
         ArgumentException.ThrowIfNullOrEmpty(runId);
-
-        var step9Path = _paths.UniverseEnricherOutput(isoWeek, runId);
-        var step9Output = JsonSerializer.Deserialize<DataLoaderOutput>(
-            File.ReadAllText(step9Path), JsonOptions.Default)
-            ?? throw new InvalidDataException($"Failed to deserialize Step 9 output at {step9Path}");
 
         var entities = new List<IsinProgressEntity>(step9Output.Funds.Count);
         foreach (var fund in step9Output.Funds)
