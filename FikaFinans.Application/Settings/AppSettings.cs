@@ -32,15 +32,17 @@ public sealed record PipelineSettings
     public int MaxConcurrentFunds { get; init; } = 5;
 
     /// <summary>
-    /// When <c>true</c> (default), the streaming runner writes per-ISIN
-    /// boundary JSON files to disk alongside the SQLite checkpoint columns
-    /// so the per-tab "Run this step" buttons keep working. Flag installed
-    /// 2026-05-27 per Open Question #4 in
-    /// <c>Docs/pipeline-step-flow-plan.md</c>; default flips to <c>false</c>
-    /// once the canonical-SQLite migration retires the disk readers
-    /// (future plan).
+    /// Developer-debugging only — leave <c>false</c> in normal use.
+    /// Default flipped from <c>true</c> to <c>false</c> on 2026-05-30
+    /// (Phase 8 sub-step 8d in
+    /// <c>Docs/storage-migration-plan.md</c>). When <c>true</c>, the
+    /// streaming runner writes per-ISIN boundary JSON files to disk in
+    /// addition to populating the SQLite IsinProgress columns. The
+    /// canonical source is the SQLite columns; WPF reads from there.
+    /// Flip to <c>true</c> for diff-against-prior-run debugging or
+    /// ad-hoc CLI tooling.
     /// </summary>
-    public bool WriteDiskJsonArtifacts { get; init; } = true;
+    public bool WriteDiskJsonArtifacts { get; init; } = false;
 }
 
 public sealed record DatabaseSettings

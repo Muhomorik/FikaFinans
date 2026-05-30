@@ -46,6 +46,9 @@ public sealed class StreamingPipelineGatewayIntegrationTests
     [Test]
     public void SaveStepOutput_PerIsinSteps_RoundTripsThroughDisk()
     {
+        // 8d flipped the default to false — this test exercises the opt-in
+        // disk-write path, so it must explicitly enable the flag.
+        _fixture.Inject(new StreamingPipelineOptions { WriteDiskJsonArtifacts = true });
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var output = MakeOutput(_runId, "LU0000000001", "LU0000000002");
         var paths = new TestPathsService();
@@ -93,6 +96,18 @@ public sealed class StreamingPipelineGatewayIntegrationTests
             Assert.Throws<ArgumentOutOfRangeException>(
                 () => sut.SaveStepOutput(StepId.PortfolioConstructor, IsoWeek, _runId, output));
         });
+    }
+
+    [Test]
+    public void StreamingPipelineOptions_WriteDiskJsonArtifactsDefault_IsFalse()
+    {
+        // Sentinel test for 8d: if anyone flips the default back to true,
+        // this fires before silent disk writes start happening again.
+        var options = new StreamingPipelineOptions();
+
+        Assert.That(options.WriteDiskJsonArtifacts, Is.False,
+            "Default flipped to false on 2026-05-30 (Phase 8 sub-step 8d). " +
+            "SQLite IsinProgress columns are the canonical step-output store.");
     }
 
     [Test]

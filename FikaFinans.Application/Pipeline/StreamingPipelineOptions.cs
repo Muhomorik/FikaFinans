@@ -27,18 +27,15 @@ public sealed record StreamingPipelineOptions
     public int MaxConcurrentFunds { get; init; } = DefaultMaxConcurrentFunds;
 
     /// <summary>
-    /// When <c>true</c> (default), <see cref="IStreamingPipelineGateway.SaveStepOutput"/>
-    /// writes the six per-ISIN boundary JSON files to disk so the per-tab
-    /// "Run this step" buttons and the WPF
-    /// <c>StepViewModel.LoadOutputAsync</c> paths keep working after a
-    /// streaming run. Per Open Question #4 in
-    /// <c>Docs/pipeline-step-flow-plan.md</c> the disk JSON is dev-debugging
-    /// scaffolding: once the per-ISIN row inspector UI replaces what disk
-    /// JSON gave engineers, this flag flips to <c>false</c> by default and
-    /// the canonical-SQLite migration retires the disk readers (separate
-    /// future plan). IsinProgress column writes are unaffected — the
-    /// gateway always populates Step01Json..Step09Json regardless of this
-    /// flag.
+    /// When <c>true</c>, <see cref="IStreamingPipelineGateway.SaveStepOutput"/>
+    /// writes the six per-ISIN boundary JSON files to disk for
+    /// developer-debugging only. Default is <c>false</c> as of 2026-05-30
+    /// (Phase 8 sub-step 8d) — the canonical source of step outputs is the
+    /// SQLite <c>IsinProgress</c> Step01Json..Step09Json columns; WPF
+    /// per-step VMs read from there (8c). Flip to <c>true</c> in
+    /// <c>appsettings.json</c> when you need on-disk JSON to diff against
+    /// a known-good prior run, or for ad-hoc CLI tooling. IsinProgress
+    /// column writes are unaffected by this flag — they always happen.
     /// </summary>
-    public bool WriteDiskJsonArtifacts { get; init; } = true;
+    public bool WriteDiskJsonArtifacts { get; init; } = false;
 }

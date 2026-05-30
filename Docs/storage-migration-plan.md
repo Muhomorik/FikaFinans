@@ -690,7 +690,25 @@ them.
      is the verification path. Application.Tests 44/44;
      InfrastructureV2.Tests 239/239 (no regression).
    - **8d.** Flip `WriteDiskJsonArtifacts` default to `false`.
-     Smoke run confirms zero disk artifacts in the runtime path.
+     ✅ **Done — 2026-05-30.** Default flipped in
+     [`StreamingPipelineOptions`](../FikaFinans.Application/Pipeline/StreamingPipelineOptions.cs)
+     and
+     [`AppSettings.PipelineSettings`](../FikaFinans.Application/Settings/AppSettings.cs);
+     both docstrings updated to call the field "developer-debugging
+     only — leave false in normal use." A new sentinel test
+     `StreamingPipelineOptions_WriteDiskJsonArtifactsDefault_IsFalse`
+     fires immediately if anyone flips the default back. The
+     existing `SaveStepOutput_PerIsinSteps_RoundTripsThroughDisk`
+     integration test now injects an options instance with
+     `WriteDiskJsonArtifacts = true` explicitly (it exercises the
+     opt-in disk-write path). Per-ISIN boundary JSON files
+     (Step 2/4/5/6/7/8 from PerIsinBlockResult) no longer hit disk
+     by default; Step 1, Step 3, Step 9, Step 10 disk files
+     unaffected (their agents call `WriteJson` directly, ungated —
+     retirement deferred to 8e or beyond). Application.Tests 44/44;
+     InfrastructureV2.Tests gateway 24/24. Manual smoke run still
+     pending; recommended before 8e deletes the disk-write code
+     entirely.
    - **8e.** Delete the dead disk-write/-read paths
      (`SaveStepOutput` body, `LoadStep1Output`, `LoadStep3Output`,
      unused `IPathsService` per-step paths).
