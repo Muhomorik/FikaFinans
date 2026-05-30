@@ -6,9 +6,11 @@
   SendToBankService (Application layer); WPF button now a thin
   caller; the eventual Function host is just a second caller. The
   cloud-hosted half (daily timer + reconciliation trigger
-  decision) is blocked on Pipeline Phase 2. Phase 6 (Azure Tables)
-  still open. Per-phase status is annotated inline in §8
-  (Migration phases).
+  decision) is blocked on Pipeline Phase 2. Phase 8 (disk-JSON
+  retirement — SQLite becomes the canonical step-output source)
+  scoped 2026-05-30; not yet started. Phase 6 (Azure Tables) still
+  open and remains last per the agreed sequence. Per-phase status
+  is annotated inline in §8 (Migration phases).
 
   AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
   step before the cloud deploy. The intent is to land Pipeline-flow Phase 1
@@ -390,7 +392,8 @@ flowchart LR
   rx --> p7a["✅ Phase 7a<br/>IsinProgress repo<br/>foundation"]
   p7a --> p7b["✅ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
   p7b --> p4local["✅ Phase 4 local-first<br/>SendToBank lifted into<br/>ISendToBankService"]
-  p4local --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
+  p4local --> p8["⏳ Phase 8<br/>Disk-JSON retirement<br/>SQLite canonical"]
+  p8 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
   p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions<br/>(hosts Step 10 service)"]
 ```
 
@@ -599,6 +602,54 @@ them.
    wire a real `SqliteIsinProgressRepository` over an in-memory
    SQLite database and verify each method writes the expected
    columns + state transition. Phase 4 (SendToBank) follows next.
+8. **Disk-JSON retirement — make SQLite the canonical step-output
+   source.** **Not started; scoped 2026-05-30.** Phase 7 shipped the
+   per-ISIN row + `Step01Json…Step09Json` columns as a *mirror* of
+   the disk JSON written by
+   [`StreamingPipelineGateway.SaveStepOutput`](../FikaFinans.Infrastructure/Pipeline/StreamingPipelineGateway.cs).
+   The mirror is populated at four boundaries (Claim / Block / Step 9 /
+   Release); the canonical source remains disk JSON. Concretely:
+   `LoadStep1Output` and `LoadStep3Output` still read from disk;
+   `WriteIsinProgressStep9Async` itself reads Step 9 off disk to
+   populate the SQLite column; the WPF
+   [`Step{N}ViewModel.LoadOutputAsync`](../FikaFinans.Wpf/ViewModels/Steps/)
+   per-step tabs read from disk; the gate
+   [`StreamingPipelineOptions.WriteDiskJsonArtifacts`](../FikaFinans.Application/Pipeline/StreamingPipelineOptions.cs)
+   exists but defaults to `true` and nothing flips it.
+
+   Phase 8 flips the canonical-source relationship: SQLite columns
+   become the source of truth; disk JSON survives only as opt-in
+   dev-debugging output (default `false`). Step 9 and Step 10 read
+   their upstream inputs from `Step{N-1}Json` columns assembled
+   into in-memory `DataLoaderOutput`. WPF per-step VMs read from
+   the `IsinProgress` partition. The gate flips and the disk-write
+   code eventually retires.
+
+   Sub-step sequence (refined per-step before each lands):
+
+   - **8a.** Thread Step 9's in-memory output into
+     `WriteIsinProgressStep9Async` so the gateway stops reading the
+     Step 9 file off disk.
+   - **8b.** Retarget Step 9 + Step 10's universe-wide reads to
+     assemble `DataLoaderOutput` from `Step08Json` / `Step09Json`
+     columns.
+   - **8c.** Retarget WPF per-step `LoadOutputAsync` to the
+     `IIsinProgressRepository` partition scan.
+   - **8d.** Flip `WriteDiskJsonArtifacts` default to `false`.
+     Smoke run confirms zero disk artifacts in the runtime path.
+   - **8e.** Delete the dead disk-write/-read paths
+     (`SaveStepOutput` body, `LoadStep1Output`, `LoadStep3Output`,
+     unused `IPathsService` per-step paths).
+
+   Open question (added to §10): **per-ISIN row inspector UI** as
+   a *separate* WPF view vs. retargeting the existing per-step
+   tabs. This plan assumes retargeting the existing tabs (8c)
+   covers the inspection use case; a dedicated inspector view is
+   out of scope.
+
+   Out of scope: tests' use of disk JSON as fixtures;
+   `docs/inputs/` and `docs/examples/` folders. Only the runtime
+   path retires.
 
 ## Test strategy
 
