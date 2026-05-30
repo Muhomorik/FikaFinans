@@ -47,7 +47,17 @@
     aggregated status from the VMs to set the closing
     `RunStatusText`/`StatusBarText`.
 
-  PER-ISIN STREAMING — SLICES 1 + 2 SHIPPED 2026-05-25.
+  PHASE 1 COMPLETE 2026-05-27. Slices 1–5 shipped 2026-05-24..26 —
+  per-ISIN streaming end-to-end (see in-body summary at the end of this
+  block). Open Questions #4 (disk-JSON gate), #5 (concurrency cap),
+  #6 (per-fund failure isolation), #7 (cancellation) all resolved
+  2026-05-27 — see §"Open Questions" below for the closure prose +
+  code links. Phase 2 (queue-driven backend) follows in
+  [backend-nav-sync-plan.md](./backend-nav-sync-plan.md); this plan
+  now hands off.
+
+  PER-ISIN STREAMING — SLICES 1–5 SHIPPED 2026-05-24..26 (slice-by-slice
+  history follows).
 
   Slice 1 (2026-05-24): `StepEvent` gained an optional `Isin? Isin`
   field, and Step 2 (`MetricsCalculator`) got the per-fund
@@ -233,14 +243,24 @@
   primitive + universe-wide wiring + WPF UI + disk-path integration
   test all shipped.
 
+  Phase 1 closed 2026-05-27 once Open Questions #4..#7 resolved
+  (cancellation plumbed + mid-stream test; per-fund failure isolation
+  via `failedIsins` + `MarkFundFailedAsync`; concurrency cap lifted into
+  `StreamingPipelineOptions`; disk-JSON write gated by
+  `WriteDiskJsonArtifacts`). Phase 2 (queue-driven backend) is owned by
+  [backend-nav-sync-plan.md](./backend-nav-sync-plan.md); this plan
+  now hands off.
+
   Phase numbering in this doc mirrors the Phase 1 / Phase 2 split
   that previously lived in
   [backend-nav-sync-plan.md](./backend-nav-sync-plan.md).
 
-  AGREED SEQUENCE (2026-05-24): local-first. Phase 1 (Rx in-process
-  stream) lands NEXT — ahead of Storage Phase 7 (IsinProgress + step
-  JSON columns) and Storage Phase 4 (SendToBank out of WPF). Azure
-  Tables (Storage Phase 6) is the last step before the cloud deploy.
+  AGREED SEQUENCE (2026-05-24): local-first. ✅ Phase 1 (Rx in-process
+  stream) shipped 2026-05-24..27. ✅ Storage Phase 7 (IsinProgress +
+  step JSON columns) shipped 2026-05-26. ✅ Storage Phase 4a (SendToBank
+  out of WPF, Application-layer slice) shipped 2026-05-27. Azure
+  Tables (Storage Phase 6) remains the last step before the cloud
+  deploy.
   See [storage-migration-plan.md §8 "Recommended sequence"](./storage-migration-plan.md#recommended-sequence--local-first-tables-last).
 
   AUDIT DONE (2026-05-24): per-ISIN vs cross-fund classification of
