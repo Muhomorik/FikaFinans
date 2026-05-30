@@ -6,6 +6,7 @@ using System.Windows.Media;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
@@ -26,6 +27,7 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
     private readonly IPathsService? _paths;
     private readonly IUniverseEnricherAgent? _agent;
     private readonly IFundDetailDialogService? _fundDetailDialog;
+    private readonly IIsinProgressRepository? _isinProgress;
 
     private IEnumerable<ISeries>? _signalsSeries;
     private IEnumerable<SignalsLegendItem>? _signalsLegend;
@@ -56,13 +58,15 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
     public Step9UniverseEnricherViewModel(ILogger logger, IScheduler uiScheduler,
         IPathsService paths, IUniverseEnricherAgent agent,
         IConfigEditorDialogService configEditor,
-        IFundDetailDialogService fundDetailDialog)
+        IFundDetailDialogService fundDetailDialog,
+        IIsinProgressRepository isinProgress)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
         _configEditorService = configEditor;
         _fundDetailDialog = fundDetailDialog;
+        _isinProgress = isinProgress;
         FundClickedCommand = new DelegateCommand<string>(OnFundClicked);
     }
 
@@ -93,6 +97,20 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
 
     public override async Task LoadOutputAsync()
     {
+        // 8c: prefer SQLite Step09Json columns; disk fallback for per-step button flow.
+        if (_isinProgress is not null)
+        {
+            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
+                _isinProgress, RunId, row => row.Step09Json);
+            if (sqliteResult is not null)
+            {
+                OutputJson = sqliteResult.Json;
+                BuildSignalsChart(sqliteResult.Funds);
+                OutputSummaryText = $"{sqliteResult.Funds.Count} funds — universe enriched";
+                return;
+            }
+        }
+
         if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.UniverseEnricherOutput(IsoWeek, RunId);
@@ -112,17 +130,17 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
             return;
         }
 
-        BuildSignalsChart(output);
+        BuildSignalsChart(output.Funds);
         OutputSummaryText = $"{output.Funds.Count} funds — universe enriched";
     }
 
-    private void BuildSignalsChart(DataLoaderOutput output)
+    private void BuildSignalsChart(IReadOnlyList<FundRecord> funds)
     {
         var series = new List<ISeries>();
         var legendItems = new List<SignalsLegendItem>();
         var seenSignals = new HashSet<string>();
 
-        foreach (var fund in output.Funds)
+        foreach (var fund in funds)
         {
             var navPoints = BuildNavPoints(fund);
             if (navPoints.Count == 0) continue;

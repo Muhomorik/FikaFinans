@@ -3,8 +3,10 @@ using System.Reactive.Concurrency;
 using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Wpf.Services;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
@@ -13,6 +15,7 @@ public sealed class Step5MacroAlignerViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly IMacroAlignerAgent? _agent;
+    private readonly IIsinProgressRepository? _isinProgress;
 
     public override int StepNumber => 5;
     public override string AgentName => "Macro aligner";
@@ -21,11 +24,13 @@ public sealed class Step5MacroAlignerViewModel : StepViewModel
     public Step5MacroAlignerViewModel() { }
 
     public Step5MacroAlignerViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IMacroAlignerAgent agent)
+        IPathsService paths, IMacroAlignerAgent agent,
+        IIsinProgressRepository isinProgress)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
+        _isinProgress = isinProgress;
     }
 
     protected override async Task RunStepCoreAsync()
@@ -47,6 +52,19 @@ public sealed class Step5MacroAlignerViewModel : StepViewModel
 
     public override async Task LoadOutputAsync()
     {
+        // 8c: prefer SQLite Step05Json columns; disk fallback for per-step button flow.
+        if (_isinProgress is not null)
+        {
+            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
+                _isinProgress, RunId, row => row.Step05Json);
+            if (sqliteResult is not null)
+            {
+                OutputJson = sqliteResult.Json;
+                OutputSummaryText = $"{sqliteResult.Funds.Count} funds — macro aligned";
+                return;
+            }
+        }
+
         if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.MacroAlignerOutput(IsoWeek, RunId);

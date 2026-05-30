@@ -666,7 +666,29 @@ them.
      "Step 10 throws" mock from `Run` to `RunFromInput`.
      Application.Tests 44/44; InfrastructureV2.Tests 239/239.
    - **8c.** Retarget WPF per-step `LoadOutputAsync` to the
-     `IIsinProgressRepository` partition scan.
+     `IIsinProgressRepository` partition scan. ✅ **Done —
+     2026-05-30.** Steps 1, 2, 4, 5, 6, 7, 8, 9 now query the
+     `IsinProgress` partition for rows matching the current
+     `RunId`, deserialize the matching `Step{N}Json` column per
+     fund, and bind the assembled list to `OutputJson` /
+     `OutputSummaryText`. A small
+     [`IsinProgressOutputLoader`](../FikaFinans.Wpf/Services/IsinProgressOutputLoader.cs)
+     helper in
+     [`FikaFinans.Wpf/Services`](../FikaFinans.Wpf/Services/)
+     handles the partition scan + per-row deserialization so each
+     VM stays a 3-line `LoadOutputAsync` body. The legacy disk
+     read stays as a fallback when the SQLite load returns null —
+     necessary because the per-step "Run this step" buttons still
+     write to disk only (the SQLite columns are only populated by
+     `RunAllStreamingAsync`); the fallback retires in 8e. Step 9
+     refactored its `BuildSignalsChart` helper to take
+     `IReadOnlyList<FundRecord>` instead of `DataLoaderOutput` so
+     it works for both data paths. Step 3 (universe-wide
+     `MacroContext`) and Step 10 (`TradesOutput`) stay disk-bound
+     for now — different output shapes, separate retirement
+     plan. No new tests (WPF has no test fixtures); manual smoke
+     is the verification path. Application.Tests 44/44;
+     InfrastructureV2.Tests 239/239 (no regression).
    - **8d.** Flip `WriteDiskJsonArtifacts` default to `false`.
      Smoke run confirms zero disk artifacts in the runtime path.
    - **8e.** Delete the dead disk-write/-read paths

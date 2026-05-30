@@ -3,6 +3,7 @@ using System.Reactive.Concurrency;
 using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Wpf.Services;
@@ -14,6 +15,7 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly ISignalScorerAgent? _agent;
+    private readonly IIsinProgressRepository? _isinProgress;
 
     public override int StepNumber => 4;
     public override string AgentName => "Signal scorer";
@@ -22,12 +24,14 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
     public Step4SignalScorerViewModel() { }
 
     public Step4SignalScorerViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, ISignalScorerAgent agent, IConfigEditorDialogService configEditor)
+        IPathsService paths, ISignalScorerAgent agent, IConfigEditorDialogService configEditor,
+        IIsinProgressRepository isinProgress)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
         _configEditorService = configEditor;
+        _isinProgress = isinProgress;
     }
 
     protected override string? GetConfigPath() => _paths?.Config04SignalsJson;
@@ -51,6 +55,19 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
 
     public override async Task LoadOutputAsync()
     {
+        // 8c: prefer SQLite Step04Json columns; disk fallback for per-step button flow.
+        if (_isinProgress is not null)
+        {
+            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
+                _isinProgress, RunId, row => row.Step04Json);
+            if (sqliteResult is not null)
+            {
+                OutputJson = sqliteResult.Json;
+                OutputSummaryText = $"{sqliteResult.Funds.Count} funds — signals scored";
+                return;
+            }
+        }
+
         if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.SignalScorerOutput(IsoWeek, RunId);

@@ -3,8 +3,10 @@ using System.Reactive.Concurrency;
 using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Wpf.Services;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
@@ -13,6 +15,7 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly IDataLoaderAgent? _agent;
+    private readonly IIsinProgressRepository? _isinProgress;
 
     public override int StepNumber => 1;
     public override string AgentName => "Data loader";
@@ -21,11 +24,13 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
     public Step1DataLoaderViewModel() { }
 
     public Step1DataLoaderViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IDataLoaderAgent agent)
+        IPathsService paths, IDataLoaderAgent agent,
+        IIsinProgressRepository isinProgress)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
+        _isinProgress = isinProgress;
     }
 
     protected override async Task RunStepCoreAsync()
@@ -47,6 +52,21 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 
     public override async Task LoadOutputAsync()
     {
+        // 8c: prefer SQLite Step01Json columns; fall back to disk if no row has
+        // a populated column for this RunId (per-step "Run this step" buttons
+        // don't write SQLite, only "Run All" does).
+        if (_isinProgress is not null)
+        {
+            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
+                _isinProgress, RunId, row => row.Step01Json);
+            if (sqliteResult is not null)
+            {
+                OutputJson = sqliteResult.Json;
+                OutputSummaryText = $"{sqliteResult.Funds.Count} funds loaded";
+                return;
+            }
+        }
+
         if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
 
         var outPath = _paths.DataLoaderOutput(IsoWeek, RunId);
