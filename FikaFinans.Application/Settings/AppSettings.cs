@@ -30,6 +30,17 @@ public sealed record PipelineSettings
     /// reverse.
     /// </summary>
     public int MaxConcurrentFunds { get; init; } = 5;
+
+    /// <summary>
+    /// When <c>true</c> (default), the streaming runner writes per-ISIN
+    /// boundary JSON files to disk alongside the SQLite checkpoint columns
+    /// so the per-tab "Run this step" buttons keep working. Flag installed
+    /// 2026-05-27 per Open Question #4 in
+    /// <c>Docs/pipeline-step-flow-plan.md</c>; default flips to <c>false</c>
+    /// once the canonical-SQLite migration retires the disk readers
+    /// (future plan).
+    /// </summary>
+    public bool WriteDiskJsonArtifacts { get; init; } = true;
 }
 
 public sealed record DatabaseSettings

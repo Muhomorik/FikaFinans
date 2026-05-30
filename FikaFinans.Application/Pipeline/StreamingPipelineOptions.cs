@@ -25,4 +25,20 @@ public sealed record StreamingPipelineOptions
     /// LLM-bound).
     /// </summary>
     public int MaxConcurrentFunds { get; init; } = DefaultMaxConcurrentFunds;
+
+    /// <summary>
+    /// When <c>true</c> (default), <see cref="IStreamingPipelineGateway.SaveStepOutput"/>
+    /// writes the six per-ISIN boundary JSON files to disk so the per-tab
+    /// "Run this step" buttons and the WPF
+    /// <c>StepViewModel.LoadOutputAsync</c> paths keep working after a
+    /// streaming run. Per Open Question #4 in
+    /// <c>Docs/pipeline-step-flow-plan.md</c> the disk JSON is dev-debugging
+    /// scaffolding: once the per-ISIN row inspector UI replaces what disk
+    /// JSON gave engineers, this flag flips to <c>false</c> by default and
+    /// the canonical-SQLite migration retires the disk readers (separate
+    /// future plan). IsinProgress column writes are unaffected — the
+    /// gateway always populates Step01Json..Step09Json regardless of this
+    /// flag.
+    /// </summary>
+    public bool WriteDiskJsonArtifacts { get; init; } = true;
 }

@@ -96,6 +96,39 @@ public sealed class StreamingPipelineGatewayIntegrationTests
     }
 
     [Test]
+    public void SaveStepOutput_WhenWriteDiskJsonArtifactsIsFalse_SkipsDiskWrite()
+    {
+        // Open Q #4 gate: with the flag flipped off the gateway must NOT
+        // write the boundary JSON, even for a valid per-ISIN step. Failing
+        // to honour the flag would defeat the canonical-SQLite migration's
+        // future "disk readers retired" default.
+        _fixture.Inject(new StreamingPipelineOptions { WriteDiskJsonArtifacts = false });
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var output = MakeOutput(_runId, "LU0000000001");
+        var paths = new TestPathsService();
+        var step2Path = paths.MetricsCalculatorOutput(IsoWeek, _runId);
+        _filesToCleanup.Add(step2Path);
+
+        sut.SaveStepOutput(StepId.MetricsCalculator, IsoWeek, _runId, output);
+
+        Assert.That(File.Exists(step2Path), Is.False,
+            "WriteDiskJsonArtifacts=false should skip the disk write");
+    }
+
+    [Test]
+    public void SaveStepOutput_WhenWriteDiskJsonArtifactsIsFalse_StillThrowsForUniverseWideStep()
+    {
+        // The gate skips IO but does NOT silence input-validation errors —
+        // callers passing the wrong step are buggy regardless of the flag.
+        _fixture.Inject(new StreamingPipelineOptions { WriteDiskJsonArtifacts = false });
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var output = MakeOutput(_runId, "LU0000000001");
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => sut.SaveStepOutput(StepId.DataLoader, IsoWeek, _runId, output));
+    }
+
+    [Test]
     public void LoadStep1Output_ReadsBackWhatWasWritten()
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();

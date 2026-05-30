@@ -569,11 +569,42 @@ first.
   wants per-(step, ISIN) ticks. Extend the record with an optional
   `Isin` field, or add a sibling event type? Decide before wiring
   the WPF subscription.
-- **Disk-JSON fallback during Phase 1.** Keep
-  `stepOutputs/{NN}-...json` written alongside the per-ISIN row
-  writes for developer-side debugging, or retire it the moment the
-  Rx path lands? Lean: keep, gated behind a setting; retire once the
-  per-ISIN row inspector UI is good enough.
+- **Disk-JSON fallback during Phase 1.** ✅ **Gate installed 2026-05-27;
+  retirement half deferred.** New flag
+  [`StreamingPipelineOptions.WriteDiskJsonArtifacts`](../FikaFinans.Application/Pipeline/StreamingPipelineOptions.cs)
+  (default `true`) bound from
+  [`AppSettings.Pipeline.WriteDiskJsonArtifacts`](../FikaFinans.Application/Settings/AppSettings.cs)
+  is honoured by
+  [`StreamingPipelineGateway.SaveStepOutput`](../FikaFinans.Infrastructure/Pipeline/StreamingPipelineGateway.cs)
+  — when `false`, the six per-ISIN boundary JSON writes are skipped
+  while `IsinProgress` column writes continue unaffected. The flag
+  stays `true` until the dependencies in the retirement bullet below
+  are satisfied. Coverage:
+  [`SaveStepOutput_WhenWriteDiskJsonArtifactsIsFalse_SkipsDiskWrite`,
+  `SaveStepOutput_WhenWriteDiskJsonArtifactsIsFalse_StillThrowsForUniverseWideStep`](../FikaFinans.InfrastructureV2.Tests/Pipeline/StreamingPipelineGatewayIntegrationTests.cs).
+
+  **Retirement seam — out of scope here, hand-off to a canonical-SQLite
+  plan.** Flipping the default to `false` requires:
+
+  - A per-ISIN row inspector UI in WPF (replaces what disk JSON gave
+    devs for debugging — the dev affordance the flag was protecting).
+  - [`StepViewModel.LoadOutputAsync`](../FikaFinans.Wpf/ViewModels/Steps/)
+    overrides (Steps 1–10) re-pointed at `IsinProgress.StepNNJson` or a
+    new repository read API instead of `File.ReadAllText`.
+  - The gateway's own
+    [`LoadStep1Output` / `LoadStep3Output` / `WriteIsinProgressStep9Async`](../FikaFinans.Infrastructure/Pipeline/StreamingPipelineGateway.cs)
+    disk reads retargeted at the same source.
+  - Adding `Step10Json` to
+    [`IsinProgressRow`](../FikaFinans.Infrastructure/Storage/Sqlite/Entities/IsinProgressRow.cs)
+    and `Step03Json` semantics decision (universe-wide steps don't fit
+    the per-ISIN column model cleanly).
+  - Append-only-audit-trail invariant from
+    [pipeline-plan.md](../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md)
+    re-stated in terms of row history rather than file-on-disk.
+
+  None of that is Phase 1 work. The flag is the explicit seam the
+  follow-up plan picks up; today its default keeps the existing disk
+  contract honest.
 - **Concurrency cap value.** ✅ **Resolved 2026-05-27** (knob + log
   shipped; measurement deferred to first real run). The Slice 4
   hardcoded `5` is now a configurable knob: new

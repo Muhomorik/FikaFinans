@@ -33,13 +33,19 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
 
     private readonly IPathsService _paths;
     private readonly IIsinProgressRepository _isinProgress;
+    private readonly StreamingPipelineOptions _options;
 
-    public StreamingPipelineGateway(IPathsService paths, IIsinProgressRepository isinProgress)
+    public StreamingPipelineGateway(
+        IPathsService paths,
+        IIsinProgressRepository isinProgress,
+        StreamingPipelineOptions options)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(isinProgress);
+        ArgumentNullException.ThrowIfNull(options);
         _paths = paths;
         _isinProgress = isinProgress;
+        _options = options;
     }
 
     public DataLoaderOutput LoadStep1Output(string isoWeek, string runId)
@@ -76,6 +82,9 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
 
     public void SaveStepOutput(StepId step, string isoWeek, string runId, DataLoaderOutput output)
     {
+        // Validate first so universe-wide steps still throw even when the
+        // disk gate is closed — callers passing the wrong step are buggy
+        // regardless of the artifact flag.
         var path = step.Value switch
         {
             2 => _paths.MetricsCalculatorOutput(isoWeek, runId),
@@ -87,6 +96,11 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
             _ => throw new ArgumentOutOfRangeException(nameof(step), step,
                 "SaveStepOutput only supports per-ISIN steps (2, 4, 5, 6, 7, 8)."),
         };
+
+        // Open Q #4 gate: disk JSON is dev-debugging scaffolding. When the
+        // option flips to false (after the per-ISIN row inspector UI lands),
+        // the IsinProgress columns become the only on-the-wire artifact.
+        if (!_options.WriteDiskJsonArtifacts) return;
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions.Default));
