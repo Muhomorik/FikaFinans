@@ -643,7 +643,28 @@ them.
      InfrastructureV2.Tests gateway 18/18.
    - **8b.** Retarget Step 9 + Step 10's universe-wide reads to
      assemble `DataLoaderOutput` from `Step08Json` / `Step09Json`
-     columns.
+     columns. ✅ **Done — 2026-05-30.** New
+     `LoadUniverseFromIsinProgressAsync(template, perFundSource)` on
+     [`IStreamingPipelineGateway`](../FikaFinans.Application/Pipeline/IStreamingPipelineGateway.cs)
+     partition-scans the `IsinProgress` rows and deserializes either
+     `Step08Json` (when source = Recommender) or `Step09Json` (source
+     = UniverseEnricher) per fund; universe-wide fields (IsoWeek,
+     Family, RunId, etc.) come from the template. The Step 9 and
+     Step 10 agents grew `RunFromInputAsync` / `RunFromInput`
+     companions on
+     [`IUniverseEnricherAgent`](../FikaFinans.Application/Pipeline/Agents/IUniverseEnricherAgent.cs)
+     and
+     [`IPortfolioConstructorAgent`](../FikaFinans.Application/Pipeline/Agents/IPortfolioConstructorAgent.cs)
+     that take the input as a parameter (no disk read) while still
+     writing their disk output (until 8c retargets the WPF readers).
+     [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+     now inlines Step 10 the same way it inlined Step 9 in 8a:
+     gateway loads the universe from SQLite columns; the agent runs
+     against the in-memory input. Five new gateway integration tests
+     cover Step 8 / Step 9 source columns, missing-fund drop, null
+     template, and unsupported step. One runner test moved its
+     "Step 10 throws" mock from `Run` to `RunFromInput`.
+     Application.Tests 44/44; InfrastructureV2.Tests 239/239.
    - **8c.** Retarget WPF per-step `LoadOutputAsync` to the
      `IIsinProgressRepository` partition scan.
    - **8d.** Flip `WriteDiskJsonArtifacts` default to `false`.

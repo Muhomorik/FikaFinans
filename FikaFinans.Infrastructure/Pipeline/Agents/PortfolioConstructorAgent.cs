@@ -56,6 +56,19 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         return output;
     }
 
+    public TradesOutput RunFromInput(
+        DataLoaderOutput step9Input,
+        string isoWeek,
+        string runId,
+        string? macroRegime = null)
+    {
+        ArgumentNullException.ThrowIfNull(step9Input);
+
+        var output = RunInMemory(step9Input, macroRegime);
+        WriteJson(_paths.PortfolioConstructorOutput(isoWeek, runId), output);
+        return output;
+    }
+
     public TradesOutput RunInMemory(DataLoaderOutput enriched, string? macroRegime = null)
     {
         ArgumentNullException.ThrowIfNull(enriched);

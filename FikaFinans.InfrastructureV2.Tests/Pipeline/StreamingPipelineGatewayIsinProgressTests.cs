@@ -254,6 +254,104 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     }
 
     [Test]
+    public async Task LoadUniverseFromIsinProgressAsync_Step8Source_AssemblesFromStep08JsonColumns()
+    {
+        // 8b: seed two funds through Claim + Block (which populates Step08Json
+        // per fund), then verify the gateway reassembles a DataLoaderOutput
+        // whose universe-wide fields come from the template and whose Funds
+        // come from the Step08Json column round-trip.
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001", "LU0000000002");
+        await sut.ClaimIsinProgressAsync(step1, _runId);
+
+        var block = new PerIsinBlockResult(
+            Step2Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            Step4Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            Step5Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            Step6Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            Step7Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            Step8Output: MakeStep1Output("LU0000000001", "LU0000000002"),
+            FailedFunds: new Dictionary<string, string>());
+        await sut.WriteIsinProgressBlockAsync(block, _runId);
+
+        var assembled = await sut.LoadUniverseFromIsinProgressAsync(step1, StepId.Recommender);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(assembled, Is.Not.Null);
+            Assert.That(assembled.IsoWeek, Is.EqualTo(step1.IsoWeek), "universe-wide IsoWeek comes from template");
+            Assert.That(assembled.RunId, Is.EqualTo(step1.RunId), "universe-wide RunId comes from template");
+            Assert.That(assembled.Family, Is.EqualTo(step1.Family));
+            Assert.That(assembled.Funds, Has.Count.EqualTo(2));
+            Assert.That(assembled.Funds.Select(f => f.Isin.Value),
+                Is.EqualTo(new[] { "LU0000000001", "LU0000000002" }),
+                "fund order matches template order");
+        });
+    }
+
+    [Test]
+    public async Task LoadUniverseFromIsinProgressAsync_Step9Source_AssemblesFromStep09JsonColumns()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001");
+        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.WriteIsinProgressStep9Async(MakeStep1Output("LU0000000001"), _runId);
+
+        var assembled = await sut.LoadUniverseFromIsinProgressAsync(step1, StepId.UniverseEnricher);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(assembled.Funds, Has.Count.EqualTo(1));
+            Assert.That(assembled.Funds[0].Isin.Value, Is.EqualTo("LU0000000001"));
+        });
+    }
+
+    [Test]
+    public async Task LoadUniverseFromIsinProgressAsync_FundMissingFromPartition_IsDropped()
+    {
+        // Template has two funds but only one was claimed → only one row exists
+        // in SQLite. The assembled output should contain just the surviving fund.
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), _runId);
+        var block = new PerIsinBlockResult(
+            Step2Output: MakeStep1Output("LU0000000001"),
+            Step4Output: MakeStep1Output("LU0000000001"),
+            Step5Output: MakeStep1Output("LU0000000001"),
+            Step6Output: MakeStep1Output("LU0000000001"),
+            Step7Output: MakeStep1Output("LU0000000001"),
+            Step8Output: MakeStep1Output("LU0000000001"),
+            FailedFunds: new Dictionary<string, string>());
+        await sut.WriteIsinProgressBlockAsync(block, _runId);
+
+        var templateWithMissingFund = MakeStep1Output("LU0000000001", "LU0000000099");
+        var assembled = await sut.LoadUniverseFromIsinProgressAsync(templateWithMissingFund, StepId.Recommender);
+
+        Assert.That(assembled.Funds, Has.Count.EqualTo(1));
+        Assert.That(assembled.Funds[0].Isin.Value, Is.EqualTo("LU0000000001"));
+    }
+
+    [Test]
+    public void LoadUniverseFromIsinProgressAsync_NullTemplate_ThrowsArgumentNullException()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+
+        Assert.ThrowsAsync<ArgumentNullException>(
+            () => sut.LoadUniverseFromIsinProgressAsync(null!, StepId.Recommender));
+    }
+
+    [Test]
+    public void LoadUniverseFromIsinProgressAsync_UnsupportedStep_ThrowsArgumentOutOfRangeException()
+    {
+        // Only Step 8 / Step 9 are legal sources. Asking for Step 2 should fail
+        // loudly rather than return an empty universe.
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001");
+
+        Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => sut.LoadUniverseFromIsinProgressAsync(step1, StepId.MetricsCalculator));
+    }
+
+    [Test]
     public async Task MarkFundFailedAsync_MissingRow_IsNoOp()
     {
         // Standalone RunPerIsinBlockAsync callers (tests) never Claim, so the

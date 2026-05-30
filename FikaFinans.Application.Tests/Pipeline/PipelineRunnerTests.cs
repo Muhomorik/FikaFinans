@@ -80,6 +80,13 @@ public sealed class PipelineRunnerTests
         _enricher
             .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => MakeStep1Output());
+        _enricher
+            .Setup(x => x.RunFromInputAsync(
+                It.IsAny<DataLoaderOutput>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => MakeStep1Output());
 
         // The three sync per-ISIN agents — AutoMoq returns null for ProcessFund
         // (FundRecord is a class), which would break the per-fund chain. Stub
@@ -109,6 +116,18 @@ public sealed class PipelineRunnerTests
         _gateway
             .Setup(x => x.LoadSignalConfig())
             .Returns(SignalScorerConfig.Default);
+        // 8b: gateway assembles Step 9's Step 8 input + Step 10's Step 9
+        // input from the SQLite IsinProgress columns. Default mock returns
+        // the template (i.e. Step 1's universe-wide shape) unchanged —
+        // sufficient for tests that don't exercise per-column round-trip
+        // behaviour. The gateway integration test verifies the real
+        // assembly path.
+        _gateway
+            .Setup(x => x.LoadUniverseFromIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(),
+                It.IsAny<StepId>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataLoaderOutput template, StepId _, CancellationToken _) => template);
 
         // Pin StreamingPipelineOptions to its production default so tests that
         // don't pass an explicit maxConcurrent still get deterministic
@@ -867,7 +886,11 @@ public sealed class PipelineRunnerTests
 
         var portfolio = _fixture.Freeze<Mock<IPortfolioConstructorAgent>>();
         portfolio
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+            .Setup(x => x.RunFromInput(
+                It.IsAny<DataLoaderOutput>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>()))
             .Throws(new InvalidOperationException("step 10 boom"));
         _sut.Dispose();
         _sut = _fixture.Create<PipelineRunner>();

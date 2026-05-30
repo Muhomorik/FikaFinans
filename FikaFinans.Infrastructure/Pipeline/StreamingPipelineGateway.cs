@@ -62,6 +62,62 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
             ?? throw new InvalidDataException($"Failed to deserialize Step 3 output at {path}");
     }
 
+    public async Task<DataLoaderOutput> LoadUniverseFromIsinProgressAsync(
+        DataLoaderOutput universeTemplate,
+        StepId perFundSource,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(universeTemplate);
+
+        // Column selection — only Step08Json (Recommender) and Step09Json
+        // (UniverseEnricher) are addressable today; other steps' per-ISIN
+        // columns aren't legal upstream sources for the universe-wide
+        // re-assembly path.
+        Func<IsinProgressEntity, string?> columnSelector = perFundSource.Value switch
+        {
+            8 => row => row.Step08Json,
+            9 => row => row.Step09Json,
+            _ => throw new ArgumentOutOfRangeException(nameof(perFundSource), perFundSource,
+                "LoadUniverseFromIsinProgressAsync only supports Step 8 or Step 9 as the per-fund source."),
+        };
+
+        var rows = await _isinProgress.QueryPartitionAsync(IsinProgressPartition, ct).ConfigureAwait(false);
+        var byIsin = rows.ToDictionary(r => r.Isin, r => r);
+
+        // Preserve template ordering — the streaming runner's
+        // BuildUniverse already keeps Step 1's order; we mirror that
+        // so downstream agents see the same fund sequence whether the
+        // upstream came from disk JSON or SQLite columns.
+        var assembled = new List<FundRecord>(universeTemplate.Funds.Count);
+        foreach (var templateFund in universeTemplate.Funds)
+        {
+            if (!byIsin.TryGetValue(templateFund.Isin.Value, out var row))
+                continue; // fund missing from SQLite (failed-fund case) — drop it
+
+            var json = columnSelector(row);
+            if (string.IsNullOrEmpty(json))
+                continue; // column not populated for this fund (failed earlier in the chain)
+
+            var fund = JsonSerializer.Deserialize<FundRecord>(json, JsonOptions.Default)
+                ?? throw new InvalidDataException(
+                    $"Failed to deserialize {perFundSource} column for ISIN {templateFund.Isin.Value}.");
+            assembled.Add(fund);
+        }
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = universeTemplate.IsoWeek,
+            Family          = universeTemplate.Family,
+            RunId           = universeTemplate.RunId,
+            ConfigVersion   = universeTemplate.ConfigVersion,
+            Funds           = assembled,
+            FrozenPositions = universeTemplate.FrozenPositions,
+            CashAvailableKr = universeTemplate.CashAvailableKr,
+            DataQuality     = universeTemplate.DataQuality,
+        };
+    }
+
     public MetricsCalculatorConfig LoadMetricsConfig()
     {
         var path = _paths.Config02MetricsJson;

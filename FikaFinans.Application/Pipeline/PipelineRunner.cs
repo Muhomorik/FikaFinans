@@ -211,16 +211,23 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         foreach (var step in PerIsinSteps)
             Emit(new StepEvent(step, StepEventKind.Succeeded, Duration: blockSw.Elapsed));
 
-        // Universe-wide Step 9 barrier. Phase 8 sub-step 8a: capture the
-        // in-memory output here so the gateway's Step09Json write doesn't
-        // round-trip through disk. Step 9 event-emit duplicates RunStepAsync's
-        // pattern because RunStepAsync drops the agent's return value.
+        // Universe-wide Step 9 barrier. Phase 8 sub-step 8b: load the Step 8
+        // universe from the SQLite Step08Json columns (instead of the agent
+        // reading the Step 8 disk file), then run Step 9 with the in-memory
+        // input. 8a already keeps Step 9's output in memory for the gateway
+        // write. Step 9 event-emit duplicates RunStepAsync's pattern because
+        // RunStepAsync drops the agent's return value.
         DataLoaderOutput step9Output;
         var step9Sw = Stopwatch.StartNew();
         Emit(new StepEvent(StepId.UniverseEnricher, StepEventKind.Started));
         try
         {
-            step9Output = await _enricher.RunAsync(isoWeek, runId, ct).ConfigureAwait(false);
+            var step8Universe = await _gateway
+                .LoadUniverseFromIsinProgressAsync(step1Output, StepId.Recommender, ct)
+                .ConfigureAwait(false);
+            step9Output = await _enricher
+                .RunFromInputAsync(step8Universe, isoWeek, runId, ct)
+                .ConfigureAwait(false);
             step9Sw.Stop();
             Emit(new StepEvent(StepId.UniverseEnricher, StepEventKind.Succeeded, Duration: step9Sw.Elapsed));
         }
@@ -240,8 +247,31 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
 
         await _gateway.WriteIsinProgressStep9Async(step9Output, runId, ct).ConfigureAwait(false);
 
-        if (!await RunStepAsync(StepId.PortfolioConstructor, family, isoWeek, runId, ct).ConfigureAwait(false))
+        // Universe-wide Step 10 barrier. Phase 8 sub-step 8b: same shape as
+        // Step 9 — load the Step 9 universe from SQLite Step09Json columns
+        // instead of reading the Step 9 disk file.
+        var step10Sw = Stopwatch.StartNew();
+        Emit(new StepEvent(StepId.PortfolioConstructor, StepEventKind.Started));
+        try
         {
+            var step9Universe = await _gateway
+                .LoadUniverseFromIsinProgressAsync(step1Output, StepId.UniverseEnricher, ct)
+                .ConfigureAwait(false);
+            await Task.Run(() => _portfolio.RunFromInput(step9Universe, isoWeek, runId, null), ct)
+                .ConfigureAwait(false);
+            step10Sw.Stop();
+            Emit(new StepEvent(StepId.PortfolioConstructor, StepEventKind.Succeeded, Duration: step10Sw.Elapsed));
+        }
+        catch (OperationCanceledException)
+        {
+            step10Sw.Stop();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            step10Sw.Stop();
+            _logger.Error(ex, "{Step} failed", StepId.PortfolioConstructor);
+            Emit(new StepEvent(StepId.PortfolioConstructor, StepEventKind.Failed, Message: ex.Message, Duration: step10Sw.Elapsed));
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.PortfolioConstructor);
             return false;
         }

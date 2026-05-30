@@ -20,6 +20,23 @@ public interface IStreamingPipelineGateway
     /// <summary>Read Step 3 (MacroAnalyst) output JSON from disk.</summary>
     MacroContext LoadStep3Output(string isoWeek, string runId);
 
+    /// <summary>
+    /// Assemble a universe-wide <see cref="DataLoaderOutput"/> from the per-ISIN
+    /// SQLite columns. <paramref name="perFundSource"/> selects which
+    /// <c>Step{N}Json</c> column to read (currently
+    /// <see cref="StepId.Recommender"/> → <c>Step08Json</c> or
+    /// <see cref="StepId.UniverseEnricher"/> → <c>Step09Json</c>); the
+    /// universe-wide fields (<c>IsoWeek</c>, <c>Family</c>, <c>RunId</c>,
+    /// <c>ConfigVersion</c>, <c>FrozenPositions</c>, <c>CashAvailableKr</c>,
+    /// <c>DataQuality</c>) come from <paramref name="universeTemplate"/>.
+    /// Phase 8 sub-step 8b: lets Step 9 + Step 10 read their inputs from
+    /// SQLite instead of disk JSON.
+    /// </summary>
+    Task<DataLoaderOutput> LoadUniverseFromIsinProgressAsync(
+        DataLoaderOutput universeTemplate,
+        StepId perFundSource,
+        CancellationToken ct = default);
+
     /// <summary>Read the Step 2 (MetricsCalculator) config; default if missing.</summary>
     MetricsCalculatorConfig LoadMetricsConfig();
 

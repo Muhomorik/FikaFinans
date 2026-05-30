@@ -64,6 +64,19 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         return output;
     }
 
+    public async Task<DataLoaderOutput> RunFromInputAsync(
+        DataLoaderOutput step8Input,
+        string isoWeek,
+        string runId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(step8Input);
+
+        var output = await RunInMemoryAsync(step8Input, ct);
+        WriteJson(_paths.UniverseEnricherOutput(isoWeek, runId), output);
+        return output;
+    }
+
     public async Task<DataLoaderOutput> RunInMemoryAsync(
         DataLoaderOutput recommended,
         CancellationToken ct = default)
