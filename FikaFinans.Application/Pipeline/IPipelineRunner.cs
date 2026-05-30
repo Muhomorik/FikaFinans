@@ -18,11 +18,14 @@ public interface IPipelineRunner
     /// then run universe-wide. Per-fund <see cref="StepEvent"/>s emit with
     /// <see cref="StepEvent.Isin"/> populated during the block; universe-wide
     /// Started/Succeeded events for the six per-ISIN steps frame the block.
+    /// When <paramref name="maxConcurrent"/> is <c>null</c> the implementation
+    /// falls back to <see cref="StreamingPipelineOptions.MaxConcurrentFunds"/>
+    /// from DI — the production path.
     /// </summary>
     Task<bool> RunAllStreamingAsync(
         string family,
         string isoWeek,
         string runId,
-        int maxConcurrent = 5,
+        int? maxConcurrent = null,
         CancellationToken ct = default);
 }

@@ -110,6 +110,11 @@ public sealed class PipelineRunnerTests
             .Setup(x => x.LoadSignalConfig())
             .Returns(SignalScorerConfig.Default);
 
+        // Pin StreamingPipelineOptions to its production default so tests that
+        // don't pass an explicit maxConcurrent still get deterministic
+        // behaviour. AutoFixture would otherwise inject anonymous ints.
+        _fixture.Inject(new StreamingPipelineOptions());
+
         _sut = _fixture.Create<PipelineRunner>();
     }
 

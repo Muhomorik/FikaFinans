@@ -380,10 +380,26 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<IStreamingPipelineGateway>()
             .SingleInstance();
 
+        // StreamingPipelineOptions — built once at composition from
+        // AppSettings.Pipeline so per-environment overrides (dev / CI / cloud)
+        // share one knob. Re-resolves on each PipelineRunner construction
+        // (which is singleton, so once per app lifetime).
+        builder.Register(ctx =>
+            {
+                var settings = ctx.Resolve<IAppSettingsStore>().Load();
+                return new StreamingPipelineOptions
+                {
+                    MaxConcurrentFunds = settings.Pipeline.MaxConcurrentFunds,
+                };
+            })
+            .As<StreamingPipelineOptions>()
+            .SingleInstance();
+
         // The pipeline orchestrator. Today RunAllAsync calls each step
         // universe-wide in sequence; RunAllStreamingAsync runs Steps 1+3
         // universe-wide, fan-outs the per-ISIN block (Steps 2, 4, 5, 6, 7, 8)
-        // through Merge(maxConcurrent: 5), then runs Steps 9+10 universe-wide.
+        // through Merge(maxConcurrent: StreamingPipelineOptions.MaxConcurrentFunds),
+        // then runs Steps 9+10 universe-wide.
         // See Docs/pipeline-step-flow-plan.md for the full design.
         builder.Register(ctx => new PipelineRunner(
                 logger: LogManager.GetLogger(nameof(PipelineRunner)),
@@ -397,7 +413,8 @@ public sealed class InfrastructureModule : Autofac.Module
                 recommender: ctx.Resolve<IRecommenderAgent>(),
                 enricher: ctx.Resolve<IUniverseEnricherAgent>(),
                 portfolio: ctx.Resolve<IPortfolioConstructorAgent>(),
-                gateway: ctx.Resolve<IStreamingPipelineGateway>()))
+                gateway: ctx.Resolve<IStreamingPipelineGateway>(),
+                streamingOptions: ctx.Resolve<StreamingPipelineOptions>()))
             .As<IPipelineRunner>()
             .SingleInstance();
     }

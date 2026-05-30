@@ -37,6 +37,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
     private readonly IUniverseEnricherAgent _enricher;
     private readonly IPortfolioConstructorAgent _portfolio;
     private readonly IStreamingPipelineGateway _gateway;
+    private readonly StreamingPipelineOptions _streamingOptions;
 
     private readonly Subject<StepEvent> _eventsCore = new();
     private readonly object _eventsGate = new();
@@ -59,7 +60,8 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         IRecommenderAgent recommender,
         IUniverseEnricherAgent enricher,
         IPortfolioConstructorAgent portfolio,
-        IStreamingPipelineGateway gateway)
+        IStreamingPipelineGateway gateway,
+        StreamingPipelineOptions streamingOptions)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(dataLoader);
@@ -73,6 +75,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         ArgumentNullException.ThrowIfNull(enricher);
         ArgumentNullException.ThrowIfNull(portfolio);
         ArgumentNullException.ThrowIfNull(gateway);
+        ArgumentNullException.ThrowIfNull(streamingOptions);
 
         _logger = logger;
         _dataLoader = dataLoader;
@@ -86,6 +89,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         _enricher = enricher;
         _portfolio = portfolio;
         _gateway = gateway;
+        _streamingOptions = streamingOptions;
     }
 
     public IObservable<StepEvent> Events => _eventsCore;
@@ -113,14 +117,16 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         string family,
         string isoWeek,
         string runId,
-        int maxConcurrent = 5,
+        int? maxConcurrent = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
+        var effectiveMaxConcurrent = maxConcurrent ?? _streamingOptions.MaxConcurrentFunds;
+
         _logger.Info(
             "Streaming pipeline run started: family={Family} isoWeek={IsoWeek} runId={RunId} maxConcurrent={MaxConcurrent}",
-            family, isoWeek, runId, maxConcurrent);
+            family, isoWeek, runId, effectiveMaxConcurrent);
 
         // Universe-wide barriers before the per-ISIN block.
         if (!await RunStepAsync(StepId.DataLoader, family, isoWeek, runId, ct).ConfigureAwait(false))
@@ -172,7 +178,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         try
         {
             var result = await RunPerIsinBlockAsync(
-                step1Output, macroContext, metricsConfig, signalConfig, maxConcurrent, ct)
+                step1Output, macroContext, metricsConfig, signalConfig, effectiveMaxConcurrent, ct)
                 .ConfigureAwait(false);
 
             _gateway.SaveStepOutput(StepId.MetricsCalculator, isoWeek, runId, result.Step2Output);
@@ -372,6 +378,10 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
     {
         var fund = input;
         var isin = fund.Isin.Value;
+        // Per-fund wall-time tracking (Open Q #5): emitted at Info on every
+        // fund — feeds the measurement that picks the production
+        // StreamingPipelineOptions.MaxConcurrentFunds value.
+        var sw = Stopwatch.StartNew();
 
         try
         {
@@ -398,6 +408,8 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             fund = RunSyncResultStep(StepId.Recommender, fund, warnings, f => _recommender.ProcessFund(f));
             captures.Step8[isin] = fund;
 
+            sw.Stop();
+            _logger.Info("Fund {Isin} streamed through per-ISIN chain in {ElapsedMs}ms", isin, sw.ElapsedMilliseconds);
             return fund;
         }
         catch (OperationCanceledException)
@@ -411,6 +423,9 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             // outer Merge keeps draining siblings, BuildUniverse drops the fund
             // from every boundary snapshot, and the runner stamps LastError on
             // the IsinProgress row via MarkFundFailedAsync.
+            sw.Stop();
+            _logger.Info("Fund {Isin} per-ISIN chain failed after {ElapsedMs}ms: {Message}",
+                isin, sw.ElapsedMilliseconds, ex.Message);
             failedIsins[isin] = ex.Message;
             return null;
         }

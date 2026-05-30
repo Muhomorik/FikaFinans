@@ -574,9 +574,25 @@ first.
   writes for developer-side debugging, or retire it the moment the
   Rx path lands? Lean: keep, gated behind a setting; retire once the
   per-ISIN row inspector UI is good enough.
-- **Concurrency cap value.** Pick once per-fund wall time is
-  measured. Same number the Phase 2 Function host will use — see
-  the equivalent open question in
+- **Concurrency cap value.** ✅ **Resolved 2026-05-27** (knob + log
+  shipped; measurement deferred to first real run). The Slice 4
+  hardcoded `5` is now a configurable knob: new
+  [`StreamingPipelineOptions`](../FikaFinans.Application/Pipeline/StreamingPipelineOptions.cs)
+  carries `MaxConcurrentFunds` (default 5); it's bound from
+  [`AppSettings.Pipeline.MaxConcurrentFunds`](../FikaFinans.Application/Settings/AppSettings.cs)
+  at DI composition in
+  [`InfrastructureModule.RegisterPipelineServices`](../FikaFinans.Infrastructure/DependencyInjection/InfrastructureModule.cs)
+  and consumed in
+  [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+  — the public method's `maxConcurrent` parameter is now nullable;
+  `null` falls back to the options value (production path). Per-fund
+  wall-time is logged at Info on every fund through
+  [`PipelineRunner.RunFundAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+  (`"Fund {Isin} streamed through per-ISIN chain in {ElapsedMs}ms"`).
+  The numeric default stays at 5 — actual tuning is deferred to the
+  first real-data streaming run (target: measure median ms/fund at
+  cap=5, cap=10, cap=20; pick the knee). Same value will land on the
+  Phase 2 Function host's `maxConcurrentCalls` per
   [backend-nav-sync-plan.md §Open Questions](./backend-nav-sync-plan.md#open-questions).
 - **Error routing.** ✅ **Resolved 2026-05-27.** Per-fund failures are
   isolated: when a fund throws inside any per-ISIN step, the helper

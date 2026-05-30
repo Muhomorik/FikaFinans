@@ -14,9 +14,22 @@ public sealed record AppSettings
     public FolderSettings Folders { get; init; } = new();
     public ScheduleSettings Schedules { get; init; } = new();
     public SyncSettings Sync { get; init; } = new();
+    public PipelineSettings Pipeline { get; init; } = new();
 
     /// <summary>Backward-compat accessor — maps to <see cref="FolderSettings.YieldRaccoonInputs"/>.</summary>
     public string DataFolder => Folders.YieldRaccoonInputs;
+}
+
+public sealed record PipelineSettings
+{
+    /// <summary>
+    /// Concurrency cap for the streaming runner's per-ISIN block. Lifted out
+    /// of the hardcoded Slice 4 default on 2026-05-27 per Open Question #5 in
+    /// <c>Docs/pipeline-step-flow-plan.md</c>. Lower values reduce per-fund
+    /// Foundry pressure at the cost of wall-clock; higher values do the
+    /// reverse.
+    /// </summary>
+    public int MaxConcurrentFunds { get; init; } = 5;
 }
 
 public sealed record DatabaseSettings
