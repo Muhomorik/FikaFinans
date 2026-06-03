@@ -48,20 +48,6 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         _options = options;
     }
 
-    public DataLoaderOutput LoadStep1Output(string isoWeek, string runId)
-    {
-        var path = _paths.DataLoaderOutput(isoWeek, runId);
-        return JsonSerializer.Deserialize<DataLoaderOutput>(File.ReadAllText(path), JsonOptions.Default)
-            ?? throw new InvalidDataException($"Failed to deserialize Step 1 output at {path}");
-    }
-
-    public MacroContext LoadStep3Output(string isoWeek, string runId)
-    {
-        var path = _paths.MacroAnalystOutput(isoWeek, runId);
-        return JsonSerializer.Deserialize<MacroContext>(File.ReadAllText(path), JsonOptions.Default)
-            ?? throw new InvalidDataException($"Failed to deserialize Step 3 output at {path}");
-    }
-
     public async Task<DataLoaderOutput> LoadUniverseFromIsinProgressAsync(
         DataLoaderOutput universeTemplate,
         StepId perFundSource,

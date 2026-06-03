@@ -144,54 +144,6 @@ public sealed class StreamingPipelineGatewayIntegrationTests
     }
 
     [Test]
-    public void LoadStep1Output_ReadsBackWhatWasWritten()
-    {
-        var sut = _fixture.Create<StreamingPipelineGateway>();
-        var paths = new TestPathsService();
-
-        var step1Path = paths.DataLoaderOutput(IsoWeek, _runId);
-        _filesToCleanup.Add(step1Path);
-
-        var written = MakeOutput(_runId, "LU0000000001", "LU0000000002", "LU0000000003");
-        Directory.CreateDirectory(Path.GetDirectoryName(step1Path)!);
-        File.WriteAllText(step1Path, JsonSerializer.Serialize(written, JsonOptions.Default));
-
-        var loaded = sut.LoadStep1Output(IsoWeek, _runId);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(loaded, Is.Not.Null);
-            Assert.That(loaded.Funds, Has.Count.EqualTo(3));
-            Assert.That(loaded.Funds.Select(f => f.Isin.Value),
-                Is.EqualTo(new[] { "LU0000000001", "LU0000000002", "LU0000000003" }));
-            Assert.That(loaded.RunId, Is.EqualTo(_runId));
-        });
-    }
-
-    [Test]
-    public void LoadStep3Output_ReadsBackWhatWasWritten()
-    {
-        var sut = _fixture.Create<StreamingPipelineGateway>();
-        var paths = new TestPathsService();
-
-        var step3Path = paths.MacroAnalystOutput(IsoWeek, _runId);
-        _filesToCleanup.Add(step3Path);
-
-        var written = MakeMacroContext();
-        Directory.CreateDirectory(Path.GetDirectoryName(step3Path)!);
-        File.WriteAllText(step3Path, JsonSerializer.Serialize(written, JsonOptions.Default));
-
-        var loaded = sut.LoadStep3Output(IsoWeek, _runId);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(loaded, Is.Not.Null);
-            Assert.That(loaded.IsoWeek, Is.EqualTo(IsoWeek));
-            Assert.That(loaded.MacroRegime, Is.EqualTo(MacroRegime.Mixed));
-        });
-    }
-
-    [Test]
     public void LoadMetricsConfig_RealFixturePresent_DeserializesSuccessfully()
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();
@@ -210,15 +162,6 @@ public sealed class StreamingPipelineGatewayIntegrationTests
 
         Assert.That(config, Is.Not.Null);
         Assert.That(config.SellWeaknessAnyOf, Is.Not.Null);
-    }
-
-    [Test]
-    public void LoadStep1Output_FileMissing_Throws()
-    {
-        var sut = _fixture.Create<StreamingPipelineGateway>();
-
-        Assert.Throws<FileNotFoundException>(
-            () => sut.LoadStep1Output(IsoWeek, $"missing-{Guid.NewGuid():N}"));
     }
 
     private static DataLoaderOutput MakeOutput(string runId, params string[] isins) => new()
@@ -266,22 +209,4 @@ public sealed class StreamingPipelineGatewayIntegrationTests
         Metrics        = null,
     };
 
-    private static MacroContext MakeMacroContext() => new()
-    {
-        GeneratedAt   = DateTimeOffset.UtcNow.ToString("o"),
-        IsoWeek       = IsoWeek,
-        ConfigVersion = "1.0.0",
-        SourceRunIds  = new SourceRunIds
-        {
-            WeeklySummaryRunId     = "synthetic-ws",
-            SubstitutionChainRunId = "synthetic-sc",
-            RotationTargetsRunId   = "synthetic-rt",
-        },
-        MacroRegime      = MacroRegime.Mixed,
-        RegimeConfidence = 0.5m,
-        NetMoodInput     = MarketSentiment.Mixed,
-        Catalysts        = Array.Empty<Catalyst>(),
-        RotationThemes   = Array.Empty<RotationTheme>(),
-        Warnings         = null,
-    };
 }

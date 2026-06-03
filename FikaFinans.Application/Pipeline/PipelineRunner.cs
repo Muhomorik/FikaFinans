@@ -128,15 +128,52 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             "Streaming pipeline run started: family={Family} isoWeek={IsoWeek} runId={RunId} maxConcurrent={MaxConcurrent}",
             family, isoWeek, runId, effectiveMaxConcurrent);
 
-        // Universe-wide barriers before the per-ISIN block.
-        if (!await RunStepAsync(StepId.DataLoader, family, isoWeek, runId, ct).ConfigureAwait(false))
+        // Universe-wide Step 1 barrier. Phase 8 sub-step 8e-prep: capture
+        // the agent's in-memory output here so the runner no longer
+        // re-reads the Step 1 disk file via the gateway.
+        DataLoaderOutput step1Output;
+        var step1Sw = Stopwatch.StartNew();
+        Emit(new StepEvent(StepId.DataLoader, StepEventKind.Started));
+        try
         {
+            step1Output = await Task.Run(() => _dataLoader.Run(family, isoWeek, runId), ct).ConfigureAwait(false);
+            step1Sw.Stop();
+            Emit(new StepEvent(StepId.DataLoader, StepEventKind.Succeeded, Duration: step1Sw.Elapsed));
+        }
+        catch (OperationCanceledException)
+        {
+            step1Sw.Stop();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            step1Sw.Stop();
+            _logger.Error(ex, "{Step} failed", StepId.DataLoader);
+            Emit(new StepEvent(StepId.DataLoader, StepEventKind.Failed, Message: ex.Message, Duration: step1Sw.Elapsed));
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.DataLoader);
             return false;
         }
 
-        if (!await RunStepAsync(StepId.MacroAnalyst, family, isoWeek, runId, ct).ConfigureAwait(false))
+        // Universe-wide Step 3 barrier. Same 8e-prep pattern as Step 1.
+        MacroContext macroContext;
+        var step3Sw = Stopwatch.StartNew();
+        Emit(new StepEvent(StepId.MacroAnalyst, StepEventKind.Started));
+        try
         {
+            macroContext = await _macroAnalyst.RunAsync(isoWeek, runId, ct).ConfigureAwait(false);
+            step3Sw.Stop();
+            Emit(new StepEvent(StepId.MacroAnalyst, StepEventKind.Succeeded, Duration: step3Sw.Elapsed));
+        }
+        catch (OperationCanceledException)
+        {
+            step3Sw.Stop();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            step3Sw.Stop();
+            _logger.Error(ex, "{Step} failed", StepId.MacroAnalyst);
+            Emit(new StepEvent(StepId.MacroAnalyst, StepEventKind.Failed, Message: ex.Message, Duration: step3Sw.Elapsed));
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.MacroAnalyst);
             return false;
         }
@@ -146,20 +183,16 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         // Started/Succeeded events with Isin populated stream during
         // execution; universe-wide Succeeded events for all six steps fire
         // once the boundary files are written.
-        DataLoaderOutput step1Output;
-        MacroContext macroContext;
         MetricsCalculatorConfig metricsConfig;
         SignalScorerConfig signalConfig;
         try
         {
-            step1Output = _gateway.LoadStep1Output(isoWeek, runId);
-            macroContext = _gateway.LoadStep3Output(isoWeek, runId);
             metricsConfig = _gateway.LoadMetricsConfig();
             signalConfig = _gateway.LoadSignalConfig();
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, "Failed to load streaming pipeline inputs from gateway");
+            _logger.Error(ex, "Failed to load streaming pipeline configs from gateway");
             foreach (var step in PerIsinSteps)
                 Emit(new StepEvent(step, StepEventKind.Failed, Message: ex.Message));
             return false;

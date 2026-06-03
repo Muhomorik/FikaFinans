@@ -17,6 +17,7 @@ namespace FikaFinans.Application.Tests.Pipeline;
 public sealed class PipelineRunnerTests
 {
     private IFixture _fixture = null!;
+    private Mock<IDataLoaderAgent> _dataLoader = null!;
     private Mock<IMetricsCalculatorAgent> _metrics = null!;
     private Mock<IMacroAnalystAgent> _macroAnalyst = null!;
     private Mock<ISignalScorerAgent> _signal = null!;
@@ -33,13 +34,19 @@ public sealed class PipelineRunnerTests
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
 
-        // The five async agents need their RunAsync set up to return real
-        // completed Tasks — AutoMoq's default leaves Task<T> returns as null,
-        // which would NRE when the runner awaits them.
+        // Step 1 (DataLoader.Run) and Step 3 (MacroAnalyst.RunAsync) are
+        // captured directly by the streaming runner since 8e-prep —
+        // mocks return real fixtures so the downstream per-ISIN block has
+        // something to chew on.
+        _dataLoader = _fixture.Freeze<Mock<IDataLoaderAgent>>();
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(() => MakeStep1Output());
+
         _macroAnalyst = _fixture.Freeze<Mock<IMacroAnalystAgent>>();
         _macroAnalyst
             .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(default(MacroContext)!);
+            .ReturnsAsync(() => MakeMacroContext());
 
         _macroAligner = _fixture.Freeze<Mock<IMacroAlignerAgent>>();
         _macroAligner
@@ -576,12 +583,12 @@ public sealed class PipelineRunnerTests
     [Test]
     public async Task RunAllStreamingAsync_AllStepsSucceed_ReturnsTrue()
     {
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-1");
 
@@ -591,12 +598,12 @@ public sealed class PipelineRunnerTests
     [Test]
     public async Task RunAllStreamingAsync_HappyPath_WritesAllSixPerIsinBoundaryFiles()
     {
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-2", maxConcurrent: 2);
 
@@ -620,12 +627,12 @@ public sealed class PipelineRunnerTests
     [Test]
     public async Task RunAllStreamingAsync_HappyPath_EmitsUniverseSucceededForAllTenSteps()
     {
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
@@ -655,7 +662,10 @@ public sealed class PipelineRunnerTests
 
         Assert.That(result, Is.False);
         _gateway.Verify(
-            x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()),
+            x => x.ClaimIsinProgressAsync(
+                It.IsAny<DataLoaderOutput>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never,
             "gateway should not be touched if Step 1 fails");
     }
@@ -667,12 +677,12 @@ public sealed class PipelineRunnerTests
         // Failed events. The run succeeds and surviving funds complete the
         // full per-ISIN chain. The failing fund still emits its per-fund
         // Failed event.
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099"), MakeFund("LU0002")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
         _thesis
             .Setup(x => x.ProcessFundAsync(
                 It.Is<FundRecord>(f => f.Isin.Value == "LU0099"),
@@ -728,12 +738,12 @@ public sealed class PipelineRunnerTests
         var step1 = MakeStep1Output(
             MakeFund("LU0001"), MakeFund("LU0002"),
             MakeFund("LU0003"), MakeFund("LU0004"));
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(step1);
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         // With maxConcurrent: 1 funds process sequentially in input order.
         // Cancel during the 2nd fund's Step 7 so LU0001 completes the chain,
@@ -790,12 +800,12 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_HappyPath_DrivesIsinProgressClaimBlockStep9Release()
     {
         var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"));
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(step1);
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-1");
 
@@ -842,12 +852,12 @@ public sealed class PipelineRunnerTests
         // Per Open Q #6: per-fund failures are isolated, so the block
         // "succeeds" with the surviving funds; all four IsinProgress lifecycle
         // methods still fire, plus MarkFundFailedAsync once per failed fund.
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
         _thesis
             .Setup(x => x.ProcessFundAsync(
                 It.Is<FundRecord>(f => f.Isin.Value == "LU0099"),
@@ -877,12 +887,12 @@ public sealed class PipelineRunnerTests
     [Test]
     public async Task RunAllStreamingAsync_Step10Fails_DoesNotRelease()
     {
-        _gateway
-            .Setup(x => x.LoadStep1Output(It.IsAny<string>(), It.IsAny<string>()))
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
-        _gateway
-            .Setup(x => x.LoadStep3Output(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(MakeMacroContext());
+        _macroAnalyst
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeMacroContext());
 
         var portfolio = _fixture.Freeze<Mock<IPortfolioConstructorAgent>>();
         portfolio

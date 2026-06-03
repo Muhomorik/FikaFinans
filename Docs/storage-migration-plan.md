@@ -711,7 +711,37 @@ them.
      entirely.
    - **8e.** Delete the dead disk-write/-read paths
      (`SaveStepOutput` body, `LoadStep1Output`, `LoadStep3Output`,
-     unused `IPathsService` per-step paths).
+     unused `IPathsService` per-step paths). 🟡 **In progress —
+     2026-05-30 partial.** Split into three rounds once the actual
+     scope surfaced. **8e-prep ✅** —
+     [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
+     no longer round-trips Step 1 and Step 3 through disk: it
+     inlines the agent calls (same event-emit pattern as Step 9 / 10
+     since 8a/8b), captures `DataLoaderOutput` and `MacroContext`
+     directly in memory. The gateway-load block now only loads the
+     two configs. **8e-1 ✅** — `LoadStep1Output` and
+     `LoadStep3Output` deleted from
+     [`IStreamingPipelineGateway`](../FikaFinans.Application/Pipeline/IStreamingPipelineGateway.cs)
+     and
+     [`StreamingPipelineGateway`](../FikaFinans.Infrastructure/Pipeline/StreamingPipelineGateway.cs);
+     three corresponding dead integration tests
+     (`LoadStep1Output_ReadsBackWhatWasWritten`,
+     `LoadStep3Output_ReadsBackWhatWasWritten`,
+     `LoadStep1Output_FileMissing_Throws`) removed. Eight runner
+     test setups now mock `_dataLoader.Run` /
+     `_macroAnalyst.RunAsync` instead of the deleted gateway loads;
+     one `Verify(LoadStep1Output, Times.Never)` becomes
+     `Verify(ClaimIsinProgressAsync, Times.Never)`.
+     Application.Tests 44/44; InfrastructureV2.Tests gateway 21/21
+     (was 24, -3 dead tests).
+     **8e-2 deferred** — the legacy disk-write paths inside the
+     agents (`UniverseEnricherAgent.RunAsync`'s WriteJson,
+     `PortfolioConstructorAgent.Run`'s WriteJson, etc.),
+     `SaveStepOutput`'s body when the gate is true, the WPF
+     per-step "Run this step" buttons that still rely on disk,
+     and the disk fallback in WPF VMs remain. Retiring them is
+     a UX decision about whether the per-step buttons stay —
+     scope for a follow-up round.
 
    Open question (added to §10): **per-ISIN row inspector UI** as
    a *separate* WPF view vs. retargeting the existing per-step

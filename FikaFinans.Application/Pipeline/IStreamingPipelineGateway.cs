@@ -14,12 +14,6 @@ namespace FikaFinans.Application.Pipeline;
 /// </summary>
 public interface IStreamingPipelineGateway
 {
-    /// <summary>Read Step 1 (DataLoader) output JSON from disk.</summary>
-    DataLoaderOutput LoadStep1Output(string isoWeek, string runId);
-
-    /// <summary>Read Step 3 (MacroAnalyst) output JSON from disk.</summary>
-    MacroContext LoadStep3Output(string isoWeek, string runId);
-
     /// <summary>
     /// Assemble a universe-wide <see cref="DataLoaderOutput"/> from the per-ISIN
     /// SQLite columns. <paramref name="perFundSource"/> selects which
