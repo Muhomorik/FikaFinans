@@ -8,9 +8,14 @@
   cloud-hosted half (daily timer + reconciliation trigger
   decision) is blocked on Pipeline Phase 2. Phase 8 (disk-JSON
   retirement — SQLite becomes the canonical step-output source)
-  scoped 2026-05-30; not yet started. Phase 6 (Azure Tables) still
-  open and remains last per the agreed sequence. Per-phase status
-  is annotated inline in §8 (Migration phases).
+  shipped 2026-05-30: SQLite IsinProgress columns are now the
+  canonical step-output store for the streaming runner; the WPF
+  per-step "Run this step" buttons are intentionally kept as a
+  dev/debug convenience, so the per-step agent `Run`/`RunAsync`
+  disk-write paths and the WPF disk-read fallback survive as
+  designed. Phase 6 (Azure Tables) still open and remains last per
+  the agreed sequence. Per-phase status is annotated inline in §8
+  (Migration phases).
 
   AGREED SEQUENCE (2026-05-24): local-first. Tables (Phase 6) is the LAST
   step before the cloud deploy. The intent is to land Pipeline-flow Phase 1
@@ -392,7 +397,7 @@ flowchart LR
   rx --> p7a["✅ Phase 7a<br/>IsinProgress repo<br/>foundation"]
   p7a --> p7b["✅ Phase 7b<br/>streaming runner<br/>writes IsinProgress<br/>+ Step01Json..Step09Json"]
   p7b --> p4local["✅ Phase 4 local-first<br/>SendToBank lifted into<br/>ISendToBankService"]
-  p4local --> p8["⏳ Phase 8<br/>Disk-JSON retirement<br/>SQLite canonical"]
+  p4local --> p8["✅ Phase 8<br/>Disk-JSON retirement<br/>SQLite canonical"]
   p8 --> p6["⏳ Phase 6<br/>Azure Tables<br/>(drop-in swap)"]
   p6 --> p2["⏳ Pipeline-flow Phase 2<br/>Queue-triggered Functions<br/>(hosts Step 10 service)"]
 ```
@@ -711,9 +716,9 @@ them.
      entirely.
    - **8e.** Delete the dead disk-write/-read paths
      (`SaveStepOutput` body, `LoadStep1Output`, `LoadStep3Output`,
-     unused `IPathsService` per-step paths). 🟡 **In progress —
-     2026-05-30 partial.** Split into three rounds once the actual
-     scope surfaced. **8e-prep ✅** —
+     unused `IPathsService` per-step paths). ✅ **Done —
+     2026-05-30.** Split into three rounds once the actual scope
+     surfaced. **8e-prep ✅** —
      [`PipelineRunner.RunAllStreamingAsync`](../FikaFinans.Application/Pipeline/PipelineRunner.cs)
      no longer round-trips Step 1 and Step 3 through disk: it
      inlines the agent calls (same event-emit pattern as Step 9 / 10
@@ -734,14 +739,22 @@ them.
      `Verify(ClaimIsinProgressAsync, Times.Never)`.
      Application.Tests 44/44; InfrastructureV2.Tests gateway 21/21
      (was 24, -3 dead tests).
-     **8e-2 deferred** — the legacy disk-write paths inside the
-     agents (`UniverseEnricherAgent.RunAsync`'s WriteJson,
-     `PortfolioConstructorAgent.Run`'s WriteJson, etc.),
-     `SaveStepOutput`'s body when the gate is true, the WPF
-     per-step "Run this step" buttons that still rely on disk,
-     and the disk fallback in WPF VMs remain. Retiring them is
-     a UX decision about whether the per-step buttons stay —
-     scope for a follow-up round.
+     **8e-2 ✅ — decided: keep the per-step buttons.** The WPF
+     per-step "Run this step" buttons stay as a dev/debug
+     convenience for inspecting a single step in isolation. By
+     consequence the legacy disk-write paths inside the agents
+     (`UniverseEnricherAgent.RunAsync`'s `WriteJson`,
+     `PortfolioConstructorAgent.Run`'s `WriteJson`, the per-step
+     agents' boundary writes), `SaveStepOutput`'s body when the
+     gate is `true`, and the disk-read fallback in WPF
+     `Step{N}ViewModel.LoadOutputAsync` are retained intentionally
+     — not dead code, but the dev-mode fallback surface. The
+     canonical-source flip still stands: `RunAllStreamingAsync`
+     reads zero step output from disk and the
+     `WriteDiskJsonArtifacts` gate defaults to `false` (8d), so
+     the runtime path is SQLite-only. Phase 8 closes here. Any
+     future retirement of the per-step UX is a separate WPF-side
+     decision.
 
    Open question (added to §10): **per-ISIN row inspector UI** as
    a *separate* WPF view vs. retargeting the existing per-step
