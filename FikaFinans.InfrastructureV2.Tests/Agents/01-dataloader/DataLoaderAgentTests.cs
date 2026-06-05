@@ -8,6 +8,7 @@ using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.DataLoader;
 
@@ -45,7 +46,7 @@ public class DataLoaderAgentTests
         var sut = _fixture.Create<DataLoaderAgent>();
         const string runId = "test-happypath";
 
-        var result = sut.Run("schroder", "2026-W18", runId);
+        var result = sut.Run("schroder", "2026-W18", new PipelineRunId(runId));
 
         var outPath = Paths.DataLoaderOutput("2026-W18", runId);
         Assert.That(File.Exists(outPath), Is.True, $"Expected output file at {outPath}");
@@ -59,7 +60,7 @@ public class DataLoaderAgentTests
         {
             Assert.That(result.Family, Is.EqualTo("schroder"));
             Assert.That(result.IsoWeek, Is.EqualTo("2026-W18"));
-            Assert.That(result.RunId, Is.EqualTo(runId));
+            Assert.That(result.RunId.Value, Is.EqualTo(runId));
             Assert.That(result.DataQuality.MetadataRows, Is.EqualTo(16));
             Assert.That(result.Funds, Has.Count.EqualTo(16));
             Assert.That(result.Funds.All(f => f.NavBuckets.Count > 0), Is.True);
@@ -79,7 +80,7 @@ public class DataLoaderAgentTests
     {
         var sut = _fixture.Create<DataLoaderAgent>();
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-cashonly",
+            "schroder", "2026-W18", new PipelineRunId("test-cashonly"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
@@ -101,7 +102,7 @@ public class DataLoaderAgentTests
     {
         var sut = _fixture.Create<DataLoaderAgent>();
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-missing-snap",
+            "schroder", "2026-W18", new PipelineRunId("test-missing-snap"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo") + "\n" + RowMeta("LU0000000002", "Bar")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")), // LU0000000002 missing
@@ -132,7 +133,7 @@ public class DataLoaderAgentTests
     {
         var sut = _fixture.Create<DataLoaderAgent>();
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-empty-pos",
+            "schroder", "2026-W18", new PipelineRunId("test-empty-pos"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
@@ -159,7 +160,7 @@ public class DataLoaderAgentTests
             |      | Bar  | core  | anchor |
             """;
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-core",
+            "schroder", "2026-W18", new PipelineRunId("test-core"),
             new StringReader(MetadataHeader + "\n" +
                              RowMeta("LU0000000001", "Foo") + "\n" +
                              RowMeta("LU0000000002", "Bar") + "\n" +
@@ -195,7 +196,7 @@ public class DataLoaderAgentTests
             |      | Bar  | writeoff | frozen |
             """;
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-writeoff-held",
+            "schroder", "2026-W18", new PipelineRunId("test-writeoff-held"),
             new StringReader(MetadataHeader + "\n" +
                              RowMeta("LU0000000001", "Foo") + "\n" +
                              RowMeta("LU0000000002", "Bar")),
@@ -230,7 +231,7 @@ public class DataLoaderAgentTests
             |      | Bar  | writeoff | frozen |
             """;
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-writeoff-notheld",
+            "schroder", "2026-W18", new PipelineRunId("test-writeoff-notheld"),
             new StringReader(MetadataHeader + "\n" +
                              RowMeta("LU0000000001", "Foo") + "\n" +
                              RowMeta("LU0000000002", "Bar")),
@@ -262,7 +263,7 @@ public class DataLoaderAgentTests
             |      | Typo Name X | core  | anchor |
             """;
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-typo",
+            "schroder", "2026-W18", new PipelineRunId("test-typo"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
@@ -284,7 +285,7 @@ public class DataLoaderAgentTests
         var summary = SummaryHeader + "\n" +
             "LU0000000001,Foo,2025-04-01,2025-04-14,100,100,100,100,0.0,0.001,0.0,0.0,NaN,0.0,0.0,50.0,0.0";
         var result = sut.RunInMemory(
-            "schroder", "2026-W18", "test-nan",
+            "schroder", "2026-W18", new PipelineRunId("test-nan"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(summary),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),
@@ -304,7 +305,7 @@ public class DataLoaderAgentTests
     {
         var sut = _fixture.Create<DataLoaderAgent>();
         Assert.Throws<DataLoaderHaltException>(() => sut.RunInMemory(
-            "schroder", "2026-W18", "test-orphan",
+            "schroder", "2026-W18", new PipelineRunId("test-orphan"),
             new StringReader(MetadataHeader + "\n" + RowMeta("LU0000000001", "Foo")),
             new StringReader(SummaryHeader + "\n" + RowSummary("LU0000000001", "2025-04-01", "2025-04-14")),
             new StringReader(SnapshotHeader + "\n" + RowSnap("LU0000000001")),

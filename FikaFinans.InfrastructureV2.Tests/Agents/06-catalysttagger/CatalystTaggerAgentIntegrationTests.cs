@@ -7,6 +7,7 @@ using Azure.AI.Projects;
 using Azure.Identity;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Microsoft.Extensions.Configuration;
@@ -82,7 +83,7 @@ public sealed class CatalystTaggerAgentIntegrationTests
             GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
             IsoWeek         = "2026-W18",
             Family          = "synthetic",
-            RunId           = "catalyst-tagger-integration",
+            RunId           = new PipelineRunId("catalyst-tagger-integration"),
             ConfigVersion   = "1.0.0",
             Funds           = [energyFund, bondFund],
             FrozenPositions = Array.Empty<FrozenPosition>(),

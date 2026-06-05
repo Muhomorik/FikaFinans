@@ -1,11 +1,13 @@
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Portfolio;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline.Agents;
 
 public interface IPortfolioConstructorAgent
 {
-    TradesOutput Run(string isoWeek, string runId, string? macroRegime = null);
+    TradesOutput Run(string isoWeek, PipelineRunId runId, string? macroRegime = null);
 
     /// <summary>
     /// Same processing as <see cref="Run"/> but the Step 9 input is supplied
@@ -17,6 +19,6 @@ public interface IPortfolioConstructorAgent
     TradesOutput RunFromInput(
         DataLoaderOutput step9Input,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         string? macroRegime = null);
 }

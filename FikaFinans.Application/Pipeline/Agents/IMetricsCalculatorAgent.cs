@@ -1,6 +1,8 @@
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline.Agents;
 
 public interface IMetricsCalculatorAgent
@@ -11,7 +13,7 @@ public interface IMetricsCalculatorAgent
     /// from the prior step's JSON file, processes every fund, writes the
     /// output file, and returns the in-memory result.
     /// </summary>
-    DataLoaderOutput Run(string isoWeek, string runId);
+    DataLoaderOutput Run(string isoWeek, PipelineRunId runId);
 
     /// <summary>
     /// Per-fund compute. Pure function over a single

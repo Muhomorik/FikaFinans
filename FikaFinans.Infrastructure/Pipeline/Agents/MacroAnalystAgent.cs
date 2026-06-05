@@ -9,6 +9,8 @@ using System.Text;
 using System.Text.Json;
 using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOptions;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class MacroAnalystAgent : IMacroAnalystAgent
@@ -49,7 +51,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         }
     }
 
-    public async Task<MacroContext> RunAsync(string isoWeek, string runId, CancellationToken ct = default)
+    public async Task<MacroContext> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         var dataLoaderPath = _paths.DataLoaderOutput(isoWeek, runId);
         var dataLoader = JsonSerializer.Deserialize<DataLoaderOutput>(
@@ -336,7 +338,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         File.WriteAllText(path, JsonSerializer.Serialize(output, DataLoaderJsonOptions.Default));
     }
 
-    private static void WriteError(string path, string isoWeek, string runId, string message)
+    private static void WriteError(string path, string isoWeek, PipelineRunId runId, string message)
     {
         var dir = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(dir);

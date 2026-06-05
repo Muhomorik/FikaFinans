@@ -7,6 +7,8 @@ using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class RecommenderAgent : IRecommenderAgent
@@ -19,7 +21,7 @@ public sealed class RecommenderAgent : IRecommenderAgent
         _paths = paths;
     }
 
-    public DataLoaderOutput Run(string isoWeek, string runId)
+    public DataLoaderOutput Run(string isoWeek, PipelineRunId runId)
     {
         var inputPath = _paths.ThesisValidatorOutput(isoWeek, runId);
 

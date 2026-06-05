@@ -9,6 +9,8 @@ using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
@@ -52,7 +54,7 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         _config = config;
     }
 
-    public async Task<DataLoaderOutput> RunAsync(string isoWeek, string runId, CancellationToken ct = default)
+    public async Task<DataLoaderOutput> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         var inputPath = _paths.RecommenderOutput(isoWeek, runId);
         var input = JsonSerializer.Deserialize<DataLoaderOutput>(
@@ -67,7 +69,7 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
     public async Task<DataLoaderOutput> RunFromInputAsync(
         DataLoaderOutput step8Input,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step8Input);

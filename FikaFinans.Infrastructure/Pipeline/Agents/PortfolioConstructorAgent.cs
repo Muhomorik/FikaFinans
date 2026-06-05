@@ -8,6 +8,8 @@ using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Globalization;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
@@ -44,7 +46,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         _config = config;
     }
 
-    public TradesOutput Run(string isoWeek, string runId, string? macroRegime = null)
+    public TradesOutput Run(string isoWeek, PipelineRunId runId, string? macroRegime = null)
     {
         var inputPath = _paths.UniverseEnricherOutput(isoWeek, runId);
         var input = JsonSerializer.Deserialize<DataLoaderOutput>(
@@ -59,7 +61,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
     public TradesOutput RunFromInput(
         DataLoaderOutput step9Input,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         string? macroRegime = null)
     {
         ArgumentNullException.ThrowIfNull(step9Input);

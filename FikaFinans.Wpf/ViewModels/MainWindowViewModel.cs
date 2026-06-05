@@ -6,6 +6,7 @@ using System.Windows.Input;
 using Autofac;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.ViewModels.Steps;
 using FikaFinans.Wpf.Views;
@@ -203,7 +204,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Step6Tab, Step7Tab, Step8Tab, Step9Tab, Step10Tab
         };
         foreach (var vm in steps.OfType<StepViewModel>())
-            vm.SetContext(SelectedFamily, SelectedWeek, RunId);
+            vm.SetContext(SelectedFamily, SelectedWeek, new PipelineRunId(RunId));
     }
 
     private async Task OnRunAllAsync()
@@ -235,7 +236,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // when LoadOutputAsync is called from the event handler.
         foreach (var vm in steps.OfType<StepViewModel>())
         {
-            vm.SetContext(SelectedFamily, SelectedWeek, RunId);
+            vm.SetContext(SelectedFamily, SelectedWeek, new PipelineRunId(RunId));
             vm.Status = StepStatus.Pending;
             vm.HasError = false;
             vm.ErrorText = string.Empty;
@@ -246,7 +247,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         bool allOk;
         try
         {
-            allOk = await _runner.RunAllStreamingAsync(SelectedFamily, SelectedWeek, RunId, ct: ct);
+            allOk = await _runner.RunAllStreamingAsync(SelectedFamily, SelectedWeek, new PipelineRunId(RunId), ct: ct);
         }
         catch (OperationCanceledException)
         {

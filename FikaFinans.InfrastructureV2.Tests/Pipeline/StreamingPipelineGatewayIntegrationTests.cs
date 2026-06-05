@@ -6,6 +6,7 @@ using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
@@ -55,18 +56,18 @@ public sealed class StreamingPipelineGatewayIntegrationTests
 
         var perIsinSteps = new (StepId step, string path)[]
         {
-            (StepId.MetricsCalculator, paths.MetricsCalculatorOutput(IsoWeek, _runId)),
-            (StepId.SignalScorer,      paths.SignalScorerOutput(IsoWeek, _runId)),
-            (StepId.MacroAligner,      paths.MacroAlignerOutput(IsoWeek, _runId)),
-            (StepId.CatalystTagger,    paths.CatalystTaggerOutput(IsoWeek, _runId)),
-            (StepId.ThesisValidator,   paths.ThesisValidatorOutput(IsoWeek, _runId)),
-            (StepId.Recommender,       paths.RecommenderOutput(IsoWeek, _runId)),
+            (StepId.MetricsCalculator, paths.MetricsCalculatorOutput(IsoWeek, new PipelineRunId(_runId))),
+            (StepId.SignalScorer,      paths.SignalScorerOutput(IsoWeek, new PipelineRunId(_runId))),
+            (StepId.MacroAligner,      paths.MacroAlignerOutput(IsoWeek, new PipelineRunId(_runId))),
+            (StepId.CatalystTagger,    paths.CatalystTaggerOutput(IsoWeek, new PipelineRunId(_runId))),
+            (StepId.ThesisValidator,   paths.ThesisValidatorOutput(IsoWeek, new PipelineRunId(_runId))),
+            (StepId.Recommender,       paths.RecommenderOutput(IsoWeek, new PipelineRunId(_runId))),
         };
 
         foreach (var (step, path) in perIsinSteps)
         {
             _filesToCleanup.Add(path);
-            sut.SaveStepOutput(step, IsoWeek, _runId, output);
+            sut.SaveStepOutput(step, IsoWeek, new PipelineRunId(_runId), output);
 
             Assert.That(File.Exists(path), Is.True, $"{step}: expected output file at {path}");
 
@@ -75,7 +76,7 @@ public sealed class StreamingPipelineGatewayIntegrationTests
             Assert.That(roundTripped, Is.Not.Null, $"{step}: deserialized output should not be null");
             Assert.That(roundTripped!.Funds, Has.Count.EqualTo(2), $"{step}: fund count preserved");
             Assert.That(roundTripped.IsoWeek, Is.EqualTo(IsoWeek), $"{step}: isoWeek preserved");
-            Assert.That(roundTripped.RunId, Is.EqualTo(_runId), $"{step}: runId preserved");
+            Assert.That(roundTripped.RunId.Value, Is.EqualTo(_runId), $"{step}: runId preserved");
         }
     }
 
@@ -88,13 +89,13 @@ public sealed class StreamingPipelineGatewayIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => sut.SaveStepOutput(StepId.DataLoader, IsoWeek, _runId, output));
+                () => sut.SaveStepOutput(StepId.DataLoader, IsoWeek, new PipelineRunId(_runId), output));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => sut.SaveStepOutput(StepId.MacroAnalyst, IsoWeek, _runId, output));
+                () => sut.SaveStepOutput(StepId.MacroAnalyst, IsoWeek, new PipelineRunId(_runId), output));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => sut.SaveStepOutput(StepId.UniverseEnricher, IsoWeek, _runId, output));
+                () => sut.SaveStepOutput(StepId.UniverseEnricher, IsoWeek, new PipelineRunId(_runId), output));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => sut.SaveStepOutput(StepId.PortfolioConstructor, IsoWeek, _runId, output));
+                () => sut.SaveStepOutput(StepId.PortfolioConstructor, IsoWeek, new PipelineRunId(_runId), output));
         });
     }
 
@@ -121,10 +122,10 @@ public sealed class StreamingPipelineGatewayIntegrationTests
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var output = MakeOutput(_runId, "LU0000000001");
         var paths = new TestPathsService();
-        var step2Path = paths.MetricsCalculatorOutput(IsoWeek, _runId);
+        var step2Path = paths.MetricsCalculatorOutput(IsoWeek, new PipelineRunId(_runId));
         _filesToCleanup.Add(step2Path);
 
-        sut.SaveStepOutput(StepId.MetricsCalculator, IsoWeek, _runId, output);
+        sut.SaveStepOutput(StepId.MetricsCalculator, IsoWeek, new PipelineRunId(_runId), output);
 
         Assert.That(File.Exists(step2Path), Is.False,
             "WriteDiskJsonArtifacts=false should skip the disk write");
@@ -140,7 +141,7 @@ public sealed class StreamingPipelineGatewayIntegrationTests
         var output = MakeOutput(_runId, "LU0000000001");
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => sut.SaveStepOutput(StepId.DataLoader, IsoWeek, _runId, output));
+            () => sut.SaveStepOutput(StepId.DataLoader, IsoWeek, new PipelineRunId(_runId), output));
     }
 
     [Test]
@@ -169,7 +170,7 @@ public sealed class StreamingPipelineGatewayIntegrationTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = IsoWeek,
         Family          = "schroder",
-        RunId           = runId,
+        RunId           = new PipelineRunId(runId),
         ConfigVersion   = "1.0.0",
         Funds           = isins.Select(MakeFund).ToList(),
         FrozenPositions = Array.Empty<FrozenPosition>(),

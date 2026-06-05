@@ -1,12 +1,14 @@
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline;
 
 public interface IPipelineRunner
 {
     IObservable<StepEvent> Events { get; }
 
-    Task<bool> RunAllAsync(string family, string isoWeek, string runId, CancellationToken ct = default);
+    Task<bool> RunAllAsync(string family, string isoWeek, PipelineRunId runId, CancellationToken ct = default);
 
-    Task<bool> RunStepAsync(StepId step, string family, string isoWeek, string runId, CancellationToken ct = default);
+    Task<bool> RunStepAsync(StepId step, string family, string isoWeek, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Streaming variant of <see cref="RunAllAsync"/>. Runs Steps 1 and 3
@@ -25,7 +27,7 @@ public interface IPipelineRunner
     Task<bool> RunAllStreamingAsync(
         string family,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         int? maxConcurrent = null,
         CancellationToken ct = default);
 }

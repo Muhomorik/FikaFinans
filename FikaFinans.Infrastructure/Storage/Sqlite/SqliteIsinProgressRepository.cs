@@ -1,5 +1,6 @@
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Storage.Sqlite.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -83,7 +84,7 @@ public sealed class SqliteIsinProgressRepository : IIsinProgressRepository
     {
         row.Isin = e.Isin;
         row.State = e.State.ToString();
-        row.RunId = e.RunId;
+        row.RunId = e.RunId?.Value;
         row.NavDate = e.NavDate;
         row.CurrentStep = e.CurrentStep;
         row.LatestProcessedNavDate = e.LatestProcessedNavDate;
@@ -107,7 +108,7 @@ public sealed class SqliteIsinProgressRepository : IIsinProgressRepository
         RowKey = r.RowKey,
         Isin = r.Isin,
         State = ParseState(r.State),
-        RunId = r.RunId,
+        RunId = r.RunId is null ? null : new PipelineRunId(r.RunId),
         NavDate = r.NavDate,
         CurrentStep = r.CurrentStep,
         LatestProcessedNavDate = r.LatestProcessedNavDate,

@@ -1,4 +1,5 @@
 using Autofac;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.ViewModels;
 using FikaFinans.Wpf.Views.Dialogs;
 
@@ -13,7 +14,7 @@ public sealed class FundDetailDialogService : IFundDetailDialogService
         _scope = scope ?? throw new ArgumentNullException(nameof(scope));
     }
 
-    public void Show(string fundIsin, string isoWeek, string runId, System.Windows.Window? owner = null)
+    public void Show(string fundIsin, string isoWeek, PipelineRunId runId, System.Windows.Window? owner = null)
     {
         var vm = _scope.Resolve<FundDetailViewModel>();
         vm.Load(fundIsin, isoWeek, runId);

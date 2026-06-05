@@ -11,6 +11,7 @@ using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Portfolio;
@@ -551,7 +552,7 @@ public sealed class PortfolioConstructorAgentTests
         EnsureUniverseEnricherFixtureExists(runId);
 
         // Act
-        var result = _sut.Run("2026-W18", runId);
+        var result = _sut.Run("2026-W18", new PipelineRunId(runId));
 
         // Assert
         var outPath = Paths.PortfolioConstructorOutput("2026-W18", runId);
@@ -593,17 +594,17 @@ public sealed class PortfolioConstructorAgentTests
         if (!File.Exists(step1Path))
         {
             new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService(), FikaFinans.InfrastructureV2.Tests.Storage.InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs))
-                .Run("schroder", "2026-W18", runId);
+                .Run("schroder", "2026-W18", new PipelineRunId(runId));
         }
         if (!File.Exists(step2Path))
         {
             new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
-                .Run("2026-W18", runId);
+                .Run("2026-W18", new PipelineRunId(runId));
         }
         if (!File.Exists(step4Path))
         {
             new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
-                .Run("2026-W18", runId);
+                .Run("2026-W18", new PipelineRunId(runId));
         }
         if (!File.Exists(step3Path))
         {
@@ -620,7 +621,7 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<IReadOnlyList<RotationTheme>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ThemeAdjacencyVerdict.NoneVerdict);
-            new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
         }
         if (!File.Exists(step6Path))
         {
@@ -631,7 +632,7 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<IReadOnlyList<Catalyst>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Array.Empty<CatalystExposureClassification>());
-            new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
         }
         if (!File.Exists(step7Path))
         {
@@ -643,11 +644,11 @@ public sealed class PortfolioConstructorAgentTests
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync((FundRecord _, ThesisValidity baseline, CancellationToken _) =>
                     ThesisRefinementVerdict.ConfirmBaseline(baseline, "Cascade-stub LLM confirmation."));
-            new ThesisValidatorAgent(new TestPathsService(), thesisLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+            new ThesisValidatorAgent(new TestPathsService(), thesisLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
         }
         if (!File.Exists(step8Path))
         {
-            new RecommenderAgent(new TestPathsService()).Run("2026-W18", runId);
+            new RecommenderAgent(new TestPathsService()).Run("2026-W18", new PipelineRunId(runId));
         }
 
         var diffLlm = new Mock<IDifferentiatorLlmClient>();
@@ -660,7 +661,7 @@ public sealed class PortfolioConstructorAgentTests
                     Isin           = a.Isin,
                     Differentiator = $"Stub differentiator for {a.Metadata.Name}.",
                 }).ToArray());
-        new UniverseEnricherAgent(new TestPathsService(), diffLlm.Object).RunAsync("2026-W18", runId).GetAwaiter().GetResult();
+        new UniverseEnricherAgent(new TestPathsService(), diffLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
     }
 
     private static MacroContext MakeSyntheticMacroContext(string isoWeek) => new()
@@ -785,7 +786,7 @@ public sealed class PortfolioConstructorAgentTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = "2026-W18",
         Family          = "synthetic",
-        RunId           = "test-run",
+        RunId           = new PipelineRunId("test-run"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = frozen,

@@ -7,6 +7,7 @@ using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Domain.Macro;
 using Moq;
@@ -542,7 +543,7 @@ public sealed class MacroAnalystAgentTests
             GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
             IsoWeek         = isoWeek,
             Family          = "schroder",
-            RunId           = "test-run",
+            RunId           = new PipelineRunId("test-run"),
             ConfigVersion   = "1.0.0",
             Funds           = funds,
             FrozenPositions = new List<FrozenPosition>(),

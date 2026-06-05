@@ -5,6 +5,8 @@ using FikaFinans.Domain.Funds;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
@@ -17,7 +19,7 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
         _paths = paths;
     }
 
-    public DataLoaderOutput Run(string isoWeek, string runId)
+    public DataLoaderOutput Run(string isoWeek, PipelineRunId runId)
     {
         var inputPath  = _paths.DataLoaderOutput(isoWeek, runId);
         var configPath = _paths.Config02MetricsJson;

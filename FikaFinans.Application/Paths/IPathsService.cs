@@ -1,3 +1,5 @@
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Paths;
 
 // Contract used by every pipeline agent for resolving the absolute paths of
@@ -21,26 +23,26 @@ public interface IPathsService
     string AnalyticsSubstitutionChainJson { get; }
     string AnalyticsRotationTargetsJson { get; }
 
-    string DataLoaderOutput(string isoWeek, string runId);
-    string DataLoaderError(string isoWeek, string runId);
-    string MetricsCalculatorOutput(string isoWeek, string runId);
-    string MetricsCalculatorError(string isoWeek, string runId);
-    string MacroAnalystOutput(string isoWeek, string runId);
-    string MacroAnalystError(string isoWeek, string runId);
-    string SignalScorerOutput(string isoWeek, string runId);
-    string SignalScorerError(string isoWeek, string runId);
-    string MacroAlignerOutput(string isoWeek, string runId);
-    string MacroAlignerError(string isoWeek, string runId);
-    string CatalystTaggerOutput(string isoWeek, string runId);
-    string CatalystTaggerError(string isoWeek, string runId);
-    string ThesisValidatorOutput(string isoWeek, string runId);
-    string ThesisValidatorError(string isoWeek, string runId);
-    string RecommenderOutput(string isoWeek, string runId);
-    string RecommenderError(string isoWeek, string runId);
-    string UniverseEnricherOutput(string isoWeek, string runId);
-    string UniverseEnricherError(string isoWeek, string runId);
-    string PortfolioConstructorOutput(string isoWeek, string runId);
-    string PortfolioConstructorError(string isoWeek, string runId);
+    string DataLoaderOutput(string isoWeek, PipelineRunId runId);
+    string DataLoaderError(string isoWeek, PipelineRunId runId);
+    string MetricsCalculatorOutput(string isoWeek, PipelineRunId runId);
+    string MetricsCalculatorError(string isoWeek, PipelineRunId runId);
+    string MacroAnalystOutput(string isoWeek, PipelineRunId runId);
+    string MacroAnalystError(string isoWeek, PipelineRunId runId);
+    string SignalScorerOutput(string isoWeek, PipelineRunId runId);
+    string SignalScorerError(string isoWeek, PipelineRunId runId);
+    string MacroAlignerOutput(string isoWeek, PipelineRunId runId);
+    string MacroAlignerError(string isoWeek, PipelineRunId runId);
+    string CatalystTaggerOutput(string isoWeek, PipelineRunId runId);
+    string CatalystTaggerError(string isoWeek, PipelineRunId runId);
+    string ThesisValidatorOutput(string isoWeek, PipelineRunId runId);
+    string ThesisValidatorError(string isoWeek, PipelineRunId runId);
+    string RecommenderOutput(string isoWeek, PipelineRunId runId);
+    string RecommenderError(string isoWeek, PipelineRunId runId);
+    string UniverseEnricherOutput(string isoWeek, PipelineRunId runId);
+    string UniverseEnricherError(string isoWeek, PipelineRunId runId);
+    string PortfolioConstructorOutput(string isoWeek, PipelineRunId runId);
+    string PortfolioConstructorError(string isoWeek, PipelineRunId runId);
 
     string MacroAnalystPromptsDir { get; }
 }

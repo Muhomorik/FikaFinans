@@ -1,3 +1,5 @@
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Storage.Bank.Entities;
 
 /// <summary>
@@ -19,7 +21,7 @@ public sealed class IsinProgressEntity : TableEntity
 {
     public string Isin { get; init; } = string.Empty;
     public IsinProgressState State { get; init; }
-    public string? RunId { get; init; }
+    public PipelineRunId? RunId { get; init; }
     public DateTimeOffset? NavDate { get; init; }
     public int CurrentStep { get; init; }
     public DateTimeOffset? LatestProcessedNavDate { get; init; }

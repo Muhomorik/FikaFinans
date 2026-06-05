@@ -8,6 +8,7 @@ using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Moq;
@@ -540,7 +541,7 @@ public sealed class ThesisValidatorAgentTests
         var sut = _fixture.Create<ThesisValidatorAgent>();
 
         // Act
-        var result = await sut.RunAsync("2026-W18", runId);
+        var result = await sut.RunAsync("2026-W18", new PipelineRunId(runId));
 
         // Assert
         var outPath = Paths.ThesisValidatorOutput("2026-W18", runId);
@@ -588,13 +589,13 @@ public sealed class ThesisValidatorAgentTests
                 if (!File.Exists(step1Path))
                 {
                     new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService(), FikaFinans.InfrastructureV2.Tests.Storage.InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs))
-                        .Run("schroder", "2026-W18", runId);
+                        .Run("schroder", "2026-W18", new PipelineRunId(runId));
                 }
                 new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
-                    .Run("2026-W18", runId);
+                    .Run("2026-W18", new PipelineRunId(runId));
             }
             new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
-                .Run("2026-W18", runId);
+                .Run("2026-W18", new PipelineRunId(runId));
         }
 
         if (!File.Exists(step3Path))
@@ -614,7 +615,7 @@ public sealed class ThesisValidatorAgentTests
                     It.IsAny<IReadOnlyList<RotationTheme>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ThemeAdjacencyVerdict.NoneVerdict);
-            await new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", runId);
+            await new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId));
         }
 
         if (!File.Exists(step6Path))
@@ -626,7 +627,7 @@ public sealed class ThesisValidatorAgentTests
                     It.IsAny<IReadOnlyList<Catalyst>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Array.Empty<CatalystExposureClassification>());
-            await new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", runId);
+            await new CatalystTaggerAgent(new TestPathsService(), taggerLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId));
         }
     }
 
@@ -757,7 +758,7 @@ public sealed class ThesisValidatorAgentTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = "2026-W18",
         Family          = "synthetic",
-        RunId           = "test-run",
+        RunId           = new PipelineRunId("test-run"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = Array.Empty<FrozenPosition>(),

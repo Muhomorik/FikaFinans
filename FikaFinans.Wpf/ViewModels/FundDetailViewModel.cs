@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Paths;
+using FikaFinans.Domain.Pipeline;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels;
@@ -62,11 +63,11 @@ public sealed class FundDetailViewModel : ViewModelBase
 
     public FundDetailViewModel() { }
 
-    public void Load(string fundIsin, string isoWeek, string runId)
+    public void Load(string fundIsin, string isoWeek, PipelineRunId runId)
     {
         FundIsin = fundIsin;
         IsoWeek  = isoWeek;
-        RunId    = runId;
+        RunId    = runId.Value;
 
         var sections = new FundStepSection[10];
 

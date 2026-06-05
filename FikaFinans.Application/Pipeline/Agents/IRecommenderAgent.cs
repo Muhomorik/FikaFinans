@@ -1,5 +1,7 @@
 using FikaFinans.Domain.Funds;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline.Agents;
 
 public interface IRecommenderAgent
@@ -10,7 +12,7 @@ public interface IRecommenderAgent
     /// file, processes every fund, writes the output file, and returns the
     /// in-memory result.
     /// </summary>
-    DataLoaderOutput Run(string isoWeek, string runId);
+    DataLoaderOutput Run(string isoWeek, PipelineRunId runId);
 
     /// <summary>
     /// Per-fund compute. Deterministic mapping from

@@ -7,6 +7,7 @@ using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 using NLog;
 
 namespace FikaFinans.Application.Pipeline;
@@ -94,7 +95,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
 
     public IObservable<StepEvent> Events => _eventsCore;
 
-    public async Task<bool> RunAllAsync(string family, string isoWeek, string runId, CancellationToken ct = default)
+    public async Task<bool> RunAllAsync(string family, string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         _logger.Info("Pipeline run started: family={Family} isoWeek={IsoWeek} runId={RunId}", family, isoWeek, runId);
 
@@ -116,7 +117,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
     public async Task<bool> RunAllStreamingAsync(
         string family,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         int? maxConcurrent = null,
         CancellationToken ct = default)
     {
@@ -315,7 +316,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         return true;
     }
 
-    public async Task<bool> RunStepAsync(StepId step, string family, string isoWeek, string runId, CancellationToken ct = default)
+    public async Task<bool> RunStepAsync(StepId step, string family, string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         Emit(new StepEvent(step, StepEventKind.Started));
@@ -587,7 +588,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         }
     }
 
-    private async Task InvokeAgentAsync(StepId step, string family, string isoWeek, string runId, CancellationToken ct)
+    private async Task InvokeAgentAsync(StepId step, string family, string isoWeek, PipelineRunId runId, CancellationToken ct)
     {
         switch (step.Value)
         {

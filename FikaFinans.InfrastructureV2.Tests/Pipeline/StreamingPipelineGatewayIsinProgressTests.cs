@@ -5,6 +5,7 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
@@ -67,7 +68,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001", "LU0000000002");
 
-        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var rows = await _repo.QueryPartitionAsync(Partition);
         Assert.Multiple(() =>
@@ -76,7 +77,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             foreach (var row in rows)
             {
                 Assert.That(row.State, Is.EqualTo(IsinProgressState.Processing));
-                Assert.That(row.RunId, Is.EqualTo(_runId));
+                Assert.That(row.RunId, Is.EqualTo(new PipelineRunId(_runId)));
                 Assert.That(row.CurrentStep, Is.EqualTo(1));
                 Assert.That(row.ProcessingStartedAt, Is.Not.Null);
                 Assert.That(row.Step01Json, Is.Not.Null.And.Not.Empty);
@@ -99,7 +100,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             RowKey = "LU0000000001",
             Isin = "LU0000000001",
             State = IsinProgressState.Free,
-            RunId = "old-run",
+            RunId = new PipelineRunId("old-run"),
             CurrentStep = 9,
             Step01Json = "old1",
             Step02Json = "old2",
@@ -111,12 +112,12 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Step09Json = "old9",
         });
 
-        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), _runId);
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), new PipelineRunId(_runId));
 
         var row = await _repo.GetAsync(Partition, "LU0000000001");
         Assert.Multiple(() =>
         {
-            Assert.That(row!.RunId, Is.EqualTo(_runId));
+            Assert.That(row!.RunId, Is.EqualTo(new PipelineRunId(_runId)));
             Assert.That(row.State, Is.EqualTo(IsinProgressState.Processing));
             Assert.That(row.CurrentStep, Is.EqualTo(1));
             Assert.That(row.Step01Json, Is.Not.Null.And.Not.EqualTo("old1"));
@@ -135,7 +136,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001");
-        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var block = new PerIsinBlockResult(
             Step2Output: MakeStep1Output("LU0000000001"),
@@ -146,7 +147,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Step8Output: MakeStep1Output("LU0000000001"),
             FailedFunds: new Dictionary<string, string>());
 
-        await sut.WriteIsinProgressBlockAsync(block, _runId);
+        await sut.WriteIsinProgressBlockAsync(block, new PipelineRunId(_runId));
 
         var row = await _repo.GetAsync(Partition, "LU0000000001");
         Assert.Multiple(() =>
@@ -172,11 +173,11 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         // DataLoaderOutput through; no disk round-trip.
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001");
-        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var step9Output = MakeStep1Output("LU0000000001");
 
-        await sut.WriteIsinProgressStep9Async(step9Output, _runId);
+        await sut.WriteIsinProgressStep9Async(step9Output, new PipelineRunId(_runId));
 
         var row = await _repo.GetAsync(Partition, "LU0000000001");
         Assert.Multiple(() =>
@@ -193,7 +194,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         var sut = _fixture.Create<StreamingPipelineGateway>();
 
         Assert.ThrowsAsync<ArgumentNullException>(
-            () => sut.WriteIsinProgressStep9Async(null!, _runId));
+            () => sut.WriteIsinProgressStep9Async(null!, new PipelineRunId(_runId)));
     }
 
     [Test]
@@ -201,9 +202,9 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001", "LU0000000002");
-        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
 
-        await sut.ReleaseIsinProgressAsync(step1, _runId);
+        await sut.ReleaseIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var rows = await _repo.QueryPartitionAsync(Partition);
         Assert.Multiple(() =>
@@ -212,7 +213,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             {
                 Assert.That(row.State, Is.EqualTo(IsinProgressState.Free));
                 Assert.That(row.ProcessingStartedAt, Is.Null);
-                Assert.That(row.RunId, Is.EqualTo(_runId), "RunId is preserved as the latest-run record");
+                Assert.That(row.RunId, Is.EqualTo(new PipelineRunId(_runId)), "RunId is preserved as the latest-run record");
                 Assert.That(row.Step01Json, Is.Not.Null, "step columns survive the release");
             }
         });
@@ -226,7 +227,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001");
 
-        await sut.ReleaseIsinProgressAsync(step1, _runId);
+        await sut.ReleaseIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var rows = await _repo.QueryPartitionAsync(Partition);
         Assert.That(rows, Is.Empty);
@@ -236,9 +237,9 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     public async Task MarkFundFailedAsync_SetsLastErrorBumpsAttemptCountAndPreservesColumns()
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();
-        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), _runId);
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), new PipelineRunId(_runId));
 
-        await sut.MarkFundFailedAsync("LU0000000001", _runId, "Step 7 exploded");
+        await sut.MarkFundFailedAsync("LU0000000001", new PipelineRunId(_runId), "Step 7 exploded");
 
         var row = await _repo.GetAsync(Partition, "LU0000000001");
         Assert.Multiple(() =>
@@ -246,7 +247,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Assert.That(row, Is.Not.Null);
             Assert.That(row!.LastError, Is.EqualTo("Step 7 exploded"));
             Assert.That(row.AttemptCount, Is.EqualTo(1), "AttemptCount bumps on each MarkFundFailed call");
-            Assert.That(row.RunId, Is.EqualTo(_runId));
+            Assert.That(row.RunId, Is.EqualTo(new PipelineRunId(_runId)));
             Assert.That(row.State, Is.EqualTo(IsinProgressState.Processing),
                 "State is left Processing — Release flips it to Free at end of run");
             Assert.That(row.Step01Json, Is.Not.Null, "Step01Json from Claim is preserved");
@@ -262,7 +263,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         // come from the Step08Json column round-trip.
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001", "LU0000000002");
-        await sut.ClaimIsinProgressAsync(step1, _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
 
         var block = new PerIsinBlockResult(
             Step2Output: MakeStep1Output("LU0000000001", "LU0000000002"),
@@ -272,7 +273,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Step7Output: MakeStep1Output("LU0000000001", "LU0000000002"),
             Step8Output: MakeStep1Output("LU0000000001", "LU0000000002"),
             FailedFunds: new Dictionary<string, string>());
-        await sut.WriteIsinProgressBlockAsync(block, _runId);
+        await sut.WriteIsinProgressBlockAsync(block, new PipelineRunId(_runId));
 
         var assembled = await sut.LoadUniverseFromIsinProgressAsync(step1, StepId.Recommender);
 
@@ -294,8 +295,8 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();
         var step1 = MakeStep1Output("LU0000000001");
-        await sut.ClaimIsinProgressAsync(step1, _runId);
-        await sut.WriteIsinProgressStep9Async(MakeStep1Output("LU0000000001"), _runId);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId));
+        await sut.WriteIsinProgressStep9Async(MakeStep1Output("LU0000000001"), new PipelineRunId(_runId));
 
         var assembled = await sut.LoadUniverseFromIsinProgressAsync(step1, StepId.UniverseEnricher);
 
@@ -312,7 +313,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         // Template has two funds but only one was claimed → only one row exists
         // in SQLite. The assembled output should contain just the surviving fund.
         var sut = _fixture.Create<StreamingPipelineGateway>();
-        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), _runId);
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), new PipelineRunId(_runId));
         var block = new PerIsinBlockResult(
             Step2Output: MakeStep1Output("LU0000000001"),
             Step4Output: MakeStep1Output("LU0000000001"),
@@ -321,7 +322,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
             Step7Output: MakeStep1Output("LU0000000001"),
             Step8Output: MakeStep1Output("LU0000000001"),
             FailedFunds: new Dictionary<string, string>());
-        await sut.WriteIsinProgressBlockAsync(block, _runId);
+        await sut.WriteIsinProgressBlockAsync(block, new PipelineRunId(_runId));
 
         var templateWithMissingFund = MakeStep1Output("LU0000000001", "LU0000000099");
         var assembled = await sut.LoadUniverseFromIsinProgressAsync(templateWithMissingFund, StepId.Recommender);
@@ -359,7 +360,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         // surfacing a KeyNotFound / NullReference equivalent.
         var sut = _fixture.Create<StreamingPipelineGateway>();
 
-        await sut.MarkFundFailedAsync("LU0000000099", _runId, "anything");
+        await sut.MarkFundFailedAsync("LU0000000099", new PipelineRunId(_runId), "anything");
 
         var rows = await _repo.QueryPartitionAsync(Partition);
         Assert.That(rows, Is.Empty);
@@ -370,7 +371,7 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = IsoWeek,
         Family          = "synthetic",
-        RunId           = "test-run",
+        RunId           = new PipelineRunId("test-run"),
         ConfigVersion   = "1.0.0",
         Funds           = isins.Select(MakeFund).ToList(),
         FrozenPositions = Array.Empty<FrozenPosition>(),

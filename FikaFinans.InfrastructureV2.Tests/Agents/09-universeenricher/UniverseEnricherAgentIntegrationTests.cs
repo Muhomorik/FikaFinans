@@ -6,6 +6,7 @@ using Azure.AI.Projects;
 using Azure.Identity;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Portfolio;
 using FikaFinans.Application.Pipeline.Llm;
 using Microsoft.Extensions.Configuration;
@@ -228,7 +229,7 @@ public sealed class UniverseEnricherAgentIntegrationTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = isoWeek,
         Family          = "synthetic",
-        RunId           = "integration",
+        RunId           = new PipelineRunId("integration"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = Array.Empty<FrozenPosition>(),

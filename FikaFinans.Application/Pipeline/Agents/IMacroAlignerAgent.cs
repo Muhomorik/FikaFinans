@@ -1,6 +1,8 @@
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline.Agents;
 
 public interface IMacroAlignerAgent
@@ -11,7 +13,7 @@ public interface IMacroAlignerAgent
     /// output files, processes every fund, writes the output file, and
     /// returns the in-memory result.
     /// </summary>
-    Task<DataLoaderOutput> RunAsync(string isoWeek, string runId, CancellationToken ct = default);
+    Task<DataLoaderOutput> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Per-fund compute. Hybrid: direct category match (deterministic) plus a

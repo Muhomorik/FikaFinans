@@ -7,6 +7,7 @@ using AutoFixture.AutoMoq;
 using FikaFinans.Infrastructure.Pipeline.Agents;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Moq;
@@ -464,7 +465,7 @@ public sealed class CatalystTaggerAgentTests
         var sut = _fixture.Create<CatalystTaggerAgent>();
 
         // Act
-        var result = await sut.RunAsync("2026-W18", runId);
+        var result = await sut.RunAsync("2026-W18", new PipelineRunId(runId));
 
         // Assert
         var outPath = Paths.CatalystTaggerOutput("2026-W18", runId);
@@ -505,13 +506,13 @@ public sealed class CatalystTaggerAgentTests
                 if (!File.Exists(step1Path))
                 {
                     new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService(), FikaFinans.InfrastructureV2.Tests.Storage.InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs))
-                        .Run("schroder", "2026-W18", runId);
+                        .Run("schroder", "2026-W18", new PipelineRunId(runId));
                 }
                 new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService())
-                    .Run("2026-W18", runId);
+                    .Run("2026-W18", new PipelineRunId(runId));
             }
             new FikaFinans.Infrastructure.Pipeline.Agents.SignalScorerAgent(new TestPathsService())
-                .Run("2026-W18", runId);
+                .Run("2026-W18", new PipelineRunId(runId));
         }
 
         // Step 03 (LLM-only): fabricate a synthetic MacroContext on disk so step 05/06 can read it.
@@ -534,7 +535,7 @@ public sealed class CatalystTaggerAgentTests
                     It.IsAny<IReadOnlyList<RotationTheme>>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ThemeAdjacencyVerdict.NoneVerdict);
-            await new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", runId);
+            await new MacroAlignerAgent(new TestPathsService(), alignLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId));
         }
     }
 
@@ -682,7 +683,7 @@ public sealed class CatalystTaggerAgentTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = "2026-W18",
         Family          = "synthetic",
-        RunId           = "test-run",
+        RunId           = new PipelineRunId("test-run"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = Array.Empty<FrozenPosition>(),

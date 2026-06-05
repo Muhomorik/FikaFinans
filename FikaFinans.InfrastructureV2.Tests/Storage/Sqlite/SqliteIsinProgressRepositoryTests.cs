@@ -1,6 +1,7 @@
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Infrastructure.Bank.Persistence;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Storage.Sqlite;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -110,7 +111,7 @@ public sealed class SqliteIsinProgressRepositoryTests
             Isin = "LU0000000001",
             State = IsinProgressState.Free,
             CurrentStep = 9,
-            RunId = "run-2",
+            RunId = new PipelineRunId("run-2"),
             Step02Json = null,
             Step09Json = "new",
             LatestProcessedNavDate = new DateTimeOffset(2026, 5, 25, 0, 0, 0, TimeSpan.Zero),
@@ -122,7 +123,7 @@ public sealed class SqliteIsinProgressRepositoryTests
         {
             Assert.That(roundTripped!.State, Is.EqualTo(IsinProgressState.Free));
             Assert.That(roundTripped.CurrentStep, Is.EqualTo(9));
-            Assert.That(roundTripped.RunId, Is.EqualTo("run-2"));
+            Assert.That(roundTripped.RunId, Is.EqualTo(new PipelineRunId("run-2")));
             Assert.That(roundTripped.Step02Json, Is.Null);
             Assert.That(roundTripped.Step09Json, Is.EqualTo("new"));
             Assert.That(roundTripped.LatestProcessedNavDate,

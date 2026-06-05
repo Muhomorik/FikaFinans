@@ -7,6 +7,7 @@ using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Portfolio;
 using Moq;
 
@@ -40,17 +41,17 @@ public sealed class PipelineRunnerTests
         // something to chew on.
         _dataLoader = _fixture.Freeze<Mock<IDataLoaderAgent>>();
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(() => MakeStep1Output());
 
         _macroAnalyst = _fixture.Freeze<Mock<IMacroAnalystAgent>>();
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => MakeMacroContext());
 
         _macroAligner = _fixture.Freeze<Mock<IMacroAlignerAgent>>();
         _macroAligner
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(DataLoaderOutput)!);
         _macroAligner
             .Setup(x => x.ProcessFundAsync(
@@ -62,7 +63,7 @@ public sealed class PipelineRunnerTests
 
         _catalyst = _fixture.Freeze<Mock<ICatalystTaggerAgent>>();
         _catalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(DataLoaderOutput)!);
         _catalyst
             .Setup(x => x.ProcessFundAsync(
@@ -74,7 +75,7 @@ public sealed class PipelineRunnerTests
 
         _thesis = _fixture.Freeze<Mock<IThesisValidatorAgent>>();
         _thesis
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(default(DataLoaderOutput)!);
         _thesis
             .Setup(x => x.ProcessFundAsync(
@@ -85,13 +86,13 @@ public sealed class PipelineRunnerTests
 
         _enricher = _fixture.Freeze<Mock<IUniverseEnricherAgent>>();
         _enricher
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => MakeStep1Output());
         _enricher
             .Setup(x => x.RunFromInputAsync(
                 It.IsAny<DataLoaderOutput>(),
                 It.IsAny<string>(),
-                It.IsAny<string>(),
+                It.IsAny<PipelineRunId>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => MakeStep1Output());
 
@@ -153,7 +154,7 @@ public sealed class PipelineRunnerTests
     [Test]
     public async Task RunAllAsync_AllStepsSucceed_ReturnsTrue()
     {
-        var result = await _sut.RunAllAsync("OPM", "2026-W21", "20260524-1200");
+        var result = await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("20260524-1200"));
 
         Assert.That(result, Is.True);
     }
@@ -164,7 +165,7 @@ public sealed class PipelineRunnerTests
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        await _sut.RunAllAsync("OPM", "2026-W21", "run-1");
+        await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("run-1"));
 
         var succeededSteps = observed
             .Where(e => e.Kind == StepEventKind.Succeeded)
@@ -177,13 +178,13 @@ public sealed class PipelineRunnerTests
     public async Task RunAllAsync_StepThrows_EmitsFailedAndReturnsFalse()
     {
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("upstream JSON unreadable"));
 
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        var result = await _sut.RunAllAsync("OPM", "2026-W21", "run-2");
+        var result = await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("run-2"));
 
         Assert.Multiple(() =>
         {
@@ -199,18 +200,18 @@ public sealed class PipelineRunnerTests
     public async Task RunAllAsync_Step3Throws_DoesNotInvokeStep4OrLater()
     {
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("kaboom"));
         var signal = _fixture.Freeze<Mock<ISignalScorerAgent>>();
 
-        await _sut.RunAllAsync("OPM", "2026-W21", "run-3");
+        await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("run-3"));
 
         signal.Verify(
-            x => x.Run(It.IsAny<string>(), It.IsAny<string>()),
+            x => x.Run(It.IsAny<string>(), It.IsAny<PipelineRunId>()),
             Times.Never,
             "signal scorer should not run after Step 3 failed");
         _macroAligner.Verify(
-            x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "macro aligner should not run after Step 3 failed");
     }
@@ -222,7 +223,7 @@ public sealed class PipelineRunnerTests
         cts.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(
-            async () => await _sut.RunAllAsync("OPM", "2026-W21", "run-4", cts.Token));
+            async () => await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("run-4"), cts.Token));
     }
 
     [Test]
@@ -231,7 +232,7 @@ public sealed class PipelineRunnerTests
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        var result = await _sut.RunStepAsync(StepId.MacroAnalyst, "OPM", "2026-W21", "run-5");
+        var result = await _sut.RunStepAsync(StepId.MacroAnalyst, "OPM", "2026-W21", new PipelineRunId("run-5"));
 
         Assert.Multiple(() =>
         {
@@ -249,13 +250,13 @@ public sealed class PipelineRunnerTests
     public async Task RunStepAsync_AgentThrows_EmitsFailedWithExceptionMessage()
     {
         _enricher
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidDataException("step 8 output missing"));
 
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        var result = await _sut.RunStepAsync(StepId.UniverseEnricher, "OPM", "2026-W21", "run-6");
+        var result = await _sut.RunStepAsync(StepId.UniverseEnricher, "OPM", "2026-W21", new PipelineRunId("run-6"));
 
         Assert.Multiple(() =>
         {
@@ -309,7 +310,7 @@ public sealed class PipelineRunnerTests
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        await _sut.RunAllAsync("OPM", "2026-W21", "isin-check");
+        await _sut.RunAllAsync("OPM", "2026-W21", new PipelineRunId("isin-check"));
 
         Assert.That(observed, Is.Not.Empty);
         Assert.That(observed.All(e => e.Isin is null), Is.True,
@@ -584,13 +585,13 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_AllStepsSucceed_ReturnsTrue()
     {
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
-        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-1");
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-1"));
 
         Assert.That(result, Is.True);
     }
@@ -599,28 +600,28 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_HappyPath_WritesAllSixPerIsinBoundaryFiles()
     {
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-2", maxConcurrent: 2);
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-2"), maxConcurrent: 2);
 
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.MetricsCalculator, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.MetricsCalculator, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.SignalScorer, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.SignalScorer, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.MacroAligner, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.MacroAligner, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.CatalystTagger, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.CatalystTagger, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.ThesisValidator, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.ThesisValidator, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
             _gateway.Verify(x => x.SaveStepOutput(
-                StepId.Recommender, "2026-W21", "stream-2", It.IsAny<DataLoaderOutput>()), Times.Once);
+                StepId.Recommender, "2026-W21", new PipelineRunId("stream-2"), It.IsAny<DataLoaderOutput>()), Times.Once);
         });
     }
 
@@ -628,16 +629,16 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_HappyPath_EmitsUniverseSucceededForAllTenSteps()
     {
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-3");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-3"));
 
         var universeSucceededSteps = observed
             .Where(e => e.Kind == StepEventKind.Succeeded && e.Isin is null)
@@ -652,19 +653,19 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_Step1Fails_DoesNotInvokeGatewayOrLaterSteps()
     {
         _fixture.Freeze<Mock<IDataLoaderAgent>>()
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Throws(new InvalidOperationException("boom"));
         // Re-create SUT so the freshly-frozen DataLoader mock takes effect.
         _sut.Dispose();
         _sut = _fixture.Create<PipelineRunner>();
 
-        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-4");
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-4"));
 
         Assert.That(result, Is.False);
         _gateway.Verify(
             x => x.ClaimIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(),
-                It.IsAny<string>(),
+                It.IsAny<PipelineRunId>(),
                 It.IsAny<CancellationToken>()),
             Times.Never,
             "gateway should not be touched if Step 1 fails");
@@ -678,10 +679,10 @@ public sealed class PipelineRunnerTests
         // full per-ISIN chain. The failing fund still emits its per-fund
         // Failed event.
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099"), MakeFund("LU0002")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
         _thesis
             .Setup(x => x.ProcessFundAsync(
@@ -692,7 +693,7 @@ public sealed class PipelineRunnerTests
         var observed = new List<StepEvent>();
         using var sub = _sut.Events.Subscribe(observed.Add);
 
-        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-isolate-1");
+        var result = await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-isolate-1"));
 
         var perIsinSteps = new[]
         {
@@ -724,7 +725,7 @@ public sealed class PipelineRunnerTests
         cts.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(
-            async () => await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-6", ct: cts.Token));
+            async () => await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-6"), ct: cts.Token));
     }
 
     [Test]
@@ -739,10 +740,10 @@ public sealed class PipelineRunnerTests
             MakeFund("LU0001"), MakeFund("LU0002"),
             MakeFund("LU0003"), MakeFund("LU0004"));
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(step1);
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
         // With maxConcurrent: 1 funds process sequentially in input order.
@@ -771,7 +772,7 @@ public sealed class PipelineRunnerTests
         // ToTask(ct) surfaces a TaskCanceledException (subclass of OCE) when
         // the outer token cancels mid-stream — accept either exact type.
         Assert.That(async () => await _sut.RunAllStreamingAsync(
-                "OPM", "2026-W21", "stream-cancel-mid",
+                "OPM", "2026-W21", new PipelineRunId("stream-cancel-mid"),
                 maxConcurrent: 1, ct: cts.Token),
             Throws.InstanceOf<OperationCanceledException>());
 
@@ -801,24 +802,24 @@ public sealed class PipelineRunnerTests
     {
         var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"));
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(step1);
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-1");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-progress-1"));
 
         Assert.Multiple(() =>
         {
-            _gateway.Verify(x => x.ClaimIsinProgressAsync(step1, "stream-progress-1", It.IsAny<CancellationToken>()),
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(step1, new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()),
                 Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
-                It.IsAny<PerIsinBlockResult>(), "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<PerIsinBlockResult>(), new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<DataLoaderOutput>(), "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                step1, "stream-progress-1", It.IsAny<CancellationToken>()), Times.Once);
+                step1, new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
         });
     }
 
@@ -826,23 +827,23 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_Step1Fails_DoesNotInvokeIsinProgressMethods()
     {
         _fixture.Freeze<Mock<IDataLoaderAgent>>()
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Throws(new InvalidOperationException("boom"));
         _sut.Dispose();
         _sut = _fixture.Create<PipelineRunner>();
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-2");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-progress-2"));
 
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
-                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
         });
     }
 
@@ -853,10 +854,10 @@ public sealed class PipelineRunnerTests
         // "succeeds" with the surviving funds; all four IsinProgress lifecycle
         // methods still fire, plus MarkFundFailedAsync once per failed fund.
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
         _thesis
             .Setup(x => x.ProcessFundAsync(
@@ -864,22 +865,22 @@ public sealed class PipelineRunnerTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM exploded"));
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-isolate-2");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-isolate-2"));
 
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
-                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.MarkFundFailedAsync(
-                "LU0099", "stream-isolate-2", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                "LU0099", new PipelineRunId("stream-isolate-2"), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.MarkFundFailedAsync(
-                "LU0001", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "LU0001", It.IsAny<PipelineRunId>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
                 "surviving funds must not be marked failed");
         });
     }
@@ -888,10 +889,10 @@ public sealed class PipelineRunnerTests
     public async Task RunAllStreamingAsync_Step10Fails_DoesNotRelease()
     {
         _dataLoader
-            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
             .Returns(MakeStep1Output(MakeFund("LU0001")));
         _macroAnalyst
-            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RunAsync(It.IsAny<string>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeMacroContext());
 
         var portfolio = _fixture.Freeze<Mock<IPortfolioConstructorAgent>>();
@@ -899,24 +900,24 @@ public sealed class PipelineRunnerTests
             .Setup(x => x.RunFromInput(
                 It.IsAny<DataLoaderOutput>(),
                 It.IsAny<string>(),
-                It.IsAny<string>(),
+                It.IsAny<PipelineRunId>(),
                 It.IsAny<string?>()))
             .Throws(new InvalidOperationException("step 10 boom"));
         _sut.Dispose();
         _sut = _fixture.Create<PipelineRunner>();
 
-        await _sut.RunAllStreamingAsync("OPM", "2026-W21", "stream-progress-4");
+        await _sut.RunAllStreamingAsync("OPM", "2026-W21", new PipelineRunId("stream-progress-4"));
 
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
-                It.IsAny<PerIsinBlockResult>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
         });
     }
 
@@ -927,7 +928,7 @@ public sealed class PipelineRunnerTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = "2026-W21",
         Family          = "synthetic",
-        RunId           = "test-run",
+        RunId           = new PipelineRunId("test-run"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = Array.Empty<FrozenPosition>(),

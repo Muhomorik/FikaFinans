@@ -1,4 +1,5 @@
 using FikaFinans.Application.Paths;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.InfrastructureV2.Tests;
 
@@ -21,26 +22,26 @@ public sealed class TestPathsService : IPathsService
     public string AnalyticsSubstitutionChainJson => Paths.AnalyticsSubstitutionChainJsonAbs;
     public string AnalyticsRotationTargetsJson   => Paths.AnalyticsRotationTargetsJsonAbs;
 
-    public string DataLoaderOutput(string isoWeek, string runId)         => Paths.DataLoaderOutput(isoWeek, runId);
-    public string DataLoaderError(string isoWeek, string runId)          => Paths.DataLoaderError(isoWeek, runId);
-    public string MetricsCalculatorOutput(string isoWeek, string runId)  => Paths.MetricsCalculatorOutput(isoWeek, runId);
-    public string MetricsCalculatorError(string isoWeek, string runId)   => Paths.MetricsCalculatorError(isoWeek, runId);
-    public string MacroAnalystOutput(string isoWeek, string runId)       => Paths.MacroAnalystOutput(isoWeek, runId);
-    public string MacroAnalystError(string isoWeek, string runId)        => Paths.MacroAnalystError(isoWeek, runId);
-    public string SignalScorerOutput(string isoWeek, string runId)       => Paths.SignalScorerOutput(isoWeek, runId);
-    public string SignalScorerError(string isoWeek, string runId)        => Paths.SignalScorerError(isoWeek, runId);
-    public string MacroAlignerOutput(string isoWeek, string runId)       => Paths.MacroAlignerOutput(isoWeek, runId);
-    public string MacroAlignerError(string isoWeek, string runId)        => Paths.MacroAlignerError(isoWeek, runId);
-    public string CatalystTaggerOutput(string isoWeek, string runId)     => Paths.CatalystTaggerOutput(isoWeek, runId);
-    public string CatalystTaggerError(string isoWeek, string runId)      => Paths.CatalystTaggerError(isoWeek, runId);
-    public string ThesisValidatorOutput(string isoWeek, string runId)    => Paths.ThesisValidatorOutput(isoWeek, runId);
-    public string ThesisValidatorError(string isoWeek, string runId)     => Paths.ThesisValidatorError(isoWeek, runId);
-    public string RecommenderOutput(string isoWeek, string runId)        => Paths.RecommenderOutput(isoWeek, runId);
-    public string RecommenderError(string isoWeek, string runId)         => Paths.RecommenderError(isoWeek, runId);
-    public string UniverseEnricherOutput(string isoWeek, string runId)   => Paths.UniverseEnricherOutput(isoWeek, runId);
-    public string UniverseEnricherError(string isoWeek, string runId)    => Paths.UniverseEnricherError(isoWeek, runId);
-    public string PortfolioConstructorOutput(string isoWeek, string runId) => Paths.PortfolioConstructorOutput(isoWeek, runId);
-    public string PortfolioConstructorError(string isoWeek, string runId)  => Paths.PortfolioConstructorError(isoWeek, runId);
+    public string DataLoaderOutput(string isoWeek, PipelineRunId runId)         => Paths.DataLoaderOutput(isoWeek, runId.Value);
+    public string DataLoaderError(string isoWeek, PipelineRunId runId)          => Paths.DataLoaderError(isoWeek, runId.Value);
+    public string MetricsCalculatorOutput(string isoWeek, PipelineRunId runId)  => Paths.MetricsCalculatorOutput(isoWeek, runId.Value);
+    public string MetricsCalculatorError(string isoWeek, PipelineRunId runId)   => Paths.MetricsCalculatorError(isoWeek, runId.Value);
+    public string MacroAnalystOutput(string isoWeek, PipelineRunId runId)       => Paths.MacroAnalystOutput(isoWeek, runId.Value);
+    public string MacroAnalystError(string isoWeek, PipelineRunId runId)        => Paths.MacroAnalystError(isoWeek, runId.Value);
+    public string SignalScorerOutput(string isoWeek, PipelineRunId runId)       => Paths.SignalScorerOutput(isoWeek, runId.Value);
+    public string SignalScorerError(string isoWeek, PipelineRunId runId)        => Paths.SignalScorerError(isoWeek, runId.Value);
+    public string MacroAlignerOutput(string isoWeek, PipelineRunId runId)       => Paths.MacroAlignerOutput(isoWeek, runId.Value);
+    public string MacroAlignerError(string isoWeek, PipelineRunId runId)        => Paths.MacroAlignerError(isoWeek, runId.Value);
+    public string CatalystTaggerOutput(string isoWeek, PipelineRunId runId)     => Paths.CatalystTaggerOutput(isoWeek, runId.Value);
+    public string CatalystTaggerError(string isoWeek, PipelineRunId runId)      => Paths.CatalystTaggerError(isoWeek, runId.Value);
+    public string ThesisValidatorOutput(string isoWeek, PipelineRunId runId)    => Paths.ThesisValidatorOutput(isoWeek, runId.Value);
+    public string ThesisValidatorError(string isoWeek, PipelineRunId runId)     => Paths.ThesisValidatorError(isoWeek, runId.Value);
+    public string RecommenderOutput(string isoWeek, PipelineRunId runId)        => Paths.RecommenderOutput(isoWeek, runId.Value);
+    public string RecommenderError(string isoWeek, PipelineRunId runId)         => Paths.RecommenderError(isoWeek, runId.Value);
+    public string UniverseEnricherOutput(string isoWeek, PipelineRunId runId)   => Paths.UniverseEnricherOutput(isoWeek, runId.Value);
+    public string UniverseEnricherError(string isoWeek, PipelineRunId runId)    => Paths.UniverseEnricherError(isoWeek, runId.Value);
+    public string PortfolioConstructorOutput(string isoWeek, PipelineRunId runId) => Paths.PortfolioConstructorOutput(isoWeek, runId.Value);
+    public string PortfolioConstructorError(string isoWeek, PipelineRunId runId)  => Paths.PortfolioConstructorError(isoWeek, runId.Value);
 
     public string MacroAnalystPromptsDir => Paths.MacroAnalystPromptsAbs;
 }

@@ -6,6 +6,7 @@ using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.Identity;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Domain.Macro;
 using Microsoft.Extensions.Configuration;
@@ -137,7 +138,7 @@ public sealed class MacroAnalystAgentIntegrationTests
             GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
             IsoWeek         = isoWeek,
             Family          = "synthetic",
-            RunId           = "macro-integration",
+            RunId           = new PipelineRunId("macro-integration"),
             ConfigVersion   = "1.0.0",
             Funds           = funds,
             FrozenPositions = new List<FrozenPosition>(),

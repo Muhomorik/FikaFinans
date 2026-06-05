@@ -8,6 +8,8 @@ using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class DataLoaderAgent : IDataLoaderAgent
@@ -30,7 +32,7 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         _positions = positions;
     }
 
-    public DataLoaderOutput Run(string family, string isoWeek, string runId)
+    public DataLoaderOutput Run(string family, string isoWeek, PipelineRunId runId)
     {
         var metadataPath  = _paths.MetadataCsv(family, isoWeek);
         var summaryPath   = _paths.SummaryCsv(family, isoWeek);
@@ -63,7 +65,7 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
     }
 
     public DataLoaderOutput RunInMemory(
-        string family, string isoWeek, string runId,
+        string family, string isoWeek, PipelineRunId runId,
         TextReader metadataCsv, TextReader summaryCsv, TextReader snapshotCsv,
         PositionsParseResult positions, TextReader portfolioStructureMd)
     {
@@ -126,7 +128,7 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
     }
 
     private static DataLoaderOutput Join(
-        string family, string isoWeek, string runId,
+        string family, string isoWeek, PipelineRunId runId,
         IReadOnlyList<FundMetadata> metadata,
         IReadOnlyDictionary<Isin, IReadOnlyList<NavBucket>> summary,
         IReadOnlyDictionary<Isin, FundSnapshot> snapshots,
@@ -261,7 +263,7 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions.Default));
     }
 
-    private static void WriteErrorFile(string path, DataLoaderHaltException halt, string family, string isoWeek, string runId)
+    private static void WriteErrorFile(string path, DataLoaderHaltException halt, string family, string isoWeek, PipelineRunId runId)
     {
         var dir = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(dir);

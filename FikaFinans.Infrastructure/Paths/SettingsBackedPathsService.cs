@@ -1,5 +1,6 @@
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Settings;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Infrastructure.Paths;
 
@@ -85,63 +86,63 @@ public sealed class SettingsBackedPathsService : IPathsService
         Path.Combine(DefaultBase, "Agents", "03-macroanalyst", "Prompts");
 
     // ── Step outputs ───────────────────────────────────────────────────────
-    public string DataLoaderOutput(string isoWeek, string runId) =>
+    public string DataLoaderOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"01-dataloader-{isoWeek}-{runId}.json");
 
-    public string DataLoaderError(string isoWeek, string runId) =>
+    public string DataLoaderError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"01-error-{isoWeek}-{runId}.json");
 
-    public string MetricsCalculatorOutput(string isoWeek, string runId) =>
+    public string MetricsCalculatorOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"02-metrics-{isoWeek}-{runId}.json");
 
-    public string MetricsCalculatorError(string isoWeek, string runId) =>
+    public string MetricsCalculatorError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"02-error-{isoWeek}-{runId}.json");
 
-    public string MacroAnalystOutput(string isoWeek, string runId) =>
+    public string MacroAnalystOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"03-macro-{isoWeek}-{runId}.json");
 
-    public string MacroAnalystError(string isoWeek, string runId) =>
+    public string MacroAnalystError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"03-error-{isoWeek}-{runId}.json");
 
-    public string SignalScorerOutput(string isoWeek, string runId) =>
+    public string SignalScorerOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"04-signal-{isoWeek}-{runId}.json");
 
-    public string SignalScorerError(string isoWeek, string runId) =>
+    public string SignalScorerError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"04-error-{isoWeek}-{runId}.json");
 
-    public string MacroAlignerOutput(string isoWeek, string runId) =>
+    public string MacroAlignerOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"05-macro-align-{isoWeek}-{runId}.json");
 
-    public string MacroAlignerError(string isoWeek, string runId) =>
+    public string MacroAlignerError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"05-error-{isoWeek}-{runId}.json");
 
-    public string CatalystTaggerOutput(string isoWeek, string runId) =>
+    public string CatalystTaggerOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"06-catalyst-{isoWeek}-{runId}.json");
 
-    public string CatalystTaggerError(string isoWeek, string runId) =>
+    public string CatalystTaggerError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"06-error-{isoWeek}-{runId}.json");
 
-    public string ThesisValidatorOutput(string isoWeek, string runId) =>
+    public string ThesisValidatorOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"07-thesis-{isoWeek}-{runId}.json");
 
-    public string ThesisValidatorError(string isoWeek, string runId) =>
+    public string ThesisValidatorError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"07-error-{isoWeek}-{runId}.json");
 
-    public string RecommenderOutput(string isoWeek, string runId) =>
+    public string RecommenderOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"08-recommendation-{isoWeek}-{runId}.json");
 
-    public string RecommenderError(string isoWeek, string runId) =>
+    public string RecommenderError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"08-error-{isoWeek}-{runId}.json");
 
-    public string UniverseEnricherOutput(string isoWeek, string runId) =>
+    public string UniverseEnricherOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"09-enrichment-{isoWeek}-{runId}.json");
 
-    public string UniverseEnricherError(string isoWeek, string runId) =>
+    public string UniverseEnricherError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"09-error-{isoWeek}-{runId}.json");
 
-    public string PortfolioConstructorOutput(string isoWeek, string runId) =>
+    public string PortfolioConstructorOutput(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"10-trades-{isoWeek}-{runId}.json");
 
-    public string PortfolioConstructorError(string isoWeek, string runId) =>
+    public string PortfolioConstructorError(string isoWeek, PipelineRunId runId) =>
         Path.Combine(OutputBase, $"10-error-{isoWeek}-{runId}.json");
 }

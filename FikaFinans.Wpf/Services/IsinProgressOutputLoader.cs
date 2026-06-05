@@ -2,6 +2,7 @@ using System.Text.Json;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 
 namespace FikaFinans.Wpf.Services;
@@ -19,15 +20,15 @@ internal static class IsinProgressOutputLoader
 
     public static async Task<StepLoadResult?> LoadStepFundsAsync(
         IIsinProgressRepository repo,
-        string runId,
+        PipelineRunId runId,
         Func<IsinProgressEntity, string?> columnSelector,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(runId)) return null;
+        if (string.IsNullOrEmpty(runId.Value)) return null;
 
         var rows = await repo.QueryPartitionAsync(Partition, ct).ConfigureAwait(false);
         var funds = rows
-            .Where(r => string.Equals(r.RunId, runId, StringComparison.Ordinal))
+            .Where(r => string.Equals(r.RunId?.Value, runId.Value, StringComparison.Ordinal))
             .Select(columnSelector)
             .Where(json => !string.IsNullOrEmpty(json))
             .Select(json => JsonSerializer.Deserialize<FundRecord>(json!, JsonOptions.Default))

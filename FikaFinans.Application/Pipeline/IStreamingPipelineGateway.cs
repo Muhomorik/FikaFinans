@@ -1,6 +1,7 @@
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Application.Pipeline;
 
@@ -42,7 +43,7 @@ public interface IStreamingPipelineGateway
     /// disk. Calling with a universe-wide step throws — those are written by
     /// their own agents.
     /// </summary>
-    void SaveStepOutput(StepId step, string isoWeek, string runId, DataLoaderOutput output);
+    void SaveStepOutput(StepId step, string isoWeek, PipelineRunId runId, DataLoaderOutput output);
 
     /// <summary>
     /// Claim per-ISIN progress rows at the start of a streaming run. For each
@@ -54,7 +55,7 @@ public interface IStreamingPipelineGateway
     /// coexist with the in-flight run — see backend-nav-sync-plan.md §"Run
     /// boundary").
     /// </summary>
-    Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default);
+    Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Write the per-ISIN step columns produced by the per-ISIN block (Steps
@@ -63,7 +64,7 @@ public interface IStreamingPipelineGateway
     /// <see cref="PerIsinBlockResult"/> snapshot and <c>CurrentStep = 8</c>.
     /// <c>Step03Json</c> stays null because Step 3 is universe-wide.
     /// </summary>
-    Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, string runId, CancellationToken ct = default);
+    Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Write <c>Step09Json</c> + <c>CurrentStep = 9</c> for every fund in
@@ -72,7 +73,7 @@ public interface IStreamingPipelineGateway
     /// in-memory <see cref="DataLoaderOutput"/> through so the gateway no
     /// longer round-trips it via disk JSON (Phase 8 sub-step 8a).
     /// </summary>
-    Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, string runId, CancellationToken ct = default);
+    Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Stamp a per-fund failure into the IsinProgress row: sets
@@ -85,7 +86,7 @@ public interface IStreamingPipelineGateway
     /// row doesn't exist (e.g. standalone <see cref="PipelineRunner.RunPerIsinBlockAsync"/>
     /// callers that never claimed).
     /// </summary>
-    Task MarkFundFailedAsync(string isin, string runId, string errorMessage, CancellationToken ct = default);
+    Task MarkFundFailedAsync(string isin, PipelineRunId runId, string errorMessage, CancellationToken ct = default);
 
     /// <summary>
     /// Release per-ISIN progress rows at the end of a successful streaming
@@ -94,5 +95,5 @@ public interface IStreamingPipelineGateway
     /// step columns + <c>RunId</c> are preserved as a record of the latest
     /// run.
     /// </summary>
-    Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default);
+    Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default);
 }

@@ -7,6 +7,8 @@ using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
@@ -22,7 +24,7 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
         _llm = llm;
     }
 
-    public async Task<DataLoaderOutput> RunAsync(string isoWeek, string runId, CancellationToken ct = default)
+    public async Task<DataLoaderOutput> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         var alignedPath = _paths.MacroAlignerOutput(isoWeek, runId);
         var macroPath   = _paths.MacroAnalystOutput(isoWeek, runId);

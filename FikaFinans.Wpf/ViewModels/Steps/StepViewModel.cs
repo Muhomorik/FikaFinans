@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using System.Windows.Input;
 using DevExpress.Mvvm;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Services;
 using NLog;
 
@@ -143,10 +144,10 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
     // ── Run context (set by MainWindowViewModel before each run) ──────────
     public string Family  { get; set; } = string.Empty;
     public string IsoWeek { get; set; } = string.Empty;
-    public string RunId   { get; set; } = string.Empty;
+    public PipelineRunId RunId { get; set; } = new(string.Empty);
 
     /// <summary>Pushes week/family/runId context before triggering Run step or Run all.</summary>
-    public void SetContext(string family, string isoWeek, string runId)
+    public void SetContext(string family, string isoWeek, PipelineRunId runId)
     {
         Family  = family;
         IsoWeek = isoWeek;

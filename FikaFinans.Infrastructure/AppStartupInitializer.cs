@@ -1,5 +1,6 @@
 using System.Reflection;
 using FikaFinans.Application.Paths;
+using FikaFinans.Domain.Pipeline;
 using NLog;
 
 namespace FikaFinans.Infrastructure;
@@ -30,7 +31,7 @@ public sealed class AppStartupInitializer
         // inputs/ and stepOutputs/ are also created pre-DI in App.EnsureDefaultDirectories,
         // but we do it here too so settings-backed overrides take effect.
         Directory.CreateDirectory(Path.GetDirectoryName(_paths.Config02MetricsJson)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(_paths.DataLoaderOutput("placeholder", "placeholder"))!);
+        Directory.CreateDirectory(Path.GetDirectoryName(_paths.DataLoaderOutput("placeholder", new PipelineRunId("placeholder")))!);
 
         // MacroAnalyst prompt files — MacroAnalystAgent also creates this in its ctor,
         // but creating it here ensures it exists even before the agent is first resolved.

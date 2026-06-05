@@ -6,6 +6,7 @@ using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 
 namespace FikaFinans.Infrastructure.Pipeline;
@@ -122,7 +123,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
             ?? throw new InvalidDataException($"Failed to deserialize Step 4 config at {path}");
     }
 
-    public void SaveStepOutput(StepId step, string isoWeek, string runId, DataLoaderOutput output)
+    public void SaveStepOutput(StepId step, string isoWeek, PipelineRunId runId, DataLoaderOutput output)
     {
         // Validate first so universe-wide steps still throw even when the
         // disk gate is closed — callers passing the wrong step are buggy
@@ -148,10 +149,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions.Default));
     }
 
-    public async Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default)
+    public async Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step1Output);
-        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
 
         var now = DateTimeOffset.UtcNow;
 
@@ -183,10 +184,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, string runId, CancellationToken ct = default)
+    public async Task WriteIsinProgressBlockAsync(PerIsinBlockResult block, PipelineRunId runId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(block);
-        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
 
         var step2By = block.Step2Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
         var step4By = block.Step4Output.Funds.ToDictionary(f => f.Isin.Value, f => f);
@@ -239,10 +240,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, string runId, CancellationToken ct = default)
+    public async Task WriteIsinProgressStep9Async(DataLoaderOutput step9Output, PipelineRunId runId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step9Output);
-        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
 
         var entities = new List<IsinProgressEntity>(step9Output.Funds.Count);
         foreach (var fund in step9Output.Funds)
@@ -286,10 +287,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, string runId, CancellationToken ct = default)
+    public async Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step1Output);
-        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
 
         var entities = new List<IsinProgressEntity>(step1Output.Funds.Count);
         foreach (var fund in step1Output.Funds)
@@ -326,10 +327,10 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task MarkFundFailedAsync(string isin, string runId, string errorMessage, CancellationToken ct = default)
+    public async Task MarkFundFailedAsync(string isin, PipelineRunId runId, string errorMessage, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(isin);
-        ArgumentException.ThrowIfNullOrEmpty(runId);
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
         ArgumentNullException.ThrowIfNull(errorMessage);
 
         var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false);

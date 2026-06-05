@@ -6,6 +6,7 @@ using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Application.Pipeline.Configs;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.SignalScorer;
@@ -300,7 +301,7 @@ public class SignalScorerAgentTests
         var sut = _fixture.Create<SignalScorerAgent>();
 
         // Act
-        var result = sut.Run("2026-W18", runId);
+        var result = sut.Run("2026-W18", new PipelineRunId(runId));
 
         // Assert
         var outPath = Paths.SignalScorerOutput("2026-W18", runId);
@@ -330,7 +331,7 @@ public class SignalScorerAgentTests
         const string runId = "test-happypath";
         EnsureMetricsFixtureExists(runId);
         var sut = _fixture.Create<SignalScorerAgent>();
-        sut.Run("2026-W18", runId);
+        sut.Run("2026-W18", new PipelineRunId(runId));
 
         // Act
         var json = File.ReadAllText(Paths.SignalScorerOutput("2026-W18", runId));
@@ -443,9 +444,9 @@ public class SignalScorerAgentTests
         if (!File.Exists(step1Path))
         {
             new FikaFinans.Infrastructure.Pipeline.Agents.DataLoaderAgent(new TestPathsService(), FikaFinans.InfrastructureV2.Tests.Storage.InMemoryPositionsRepository.SeededFromCsv(Paths.PositionsCsvAbs)).Run(
-                "schroder", "2026-W18", runId);
+                "schroder", "2026-W18", new PipelineRunId(runId));
         }
-        new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService()).Run("2026-W18", runId);
+        new FikaFinans.Infrastructure.Pipeline.Agents.MetricsCalculatorAgent(new TestPathsService()).Run("2026-W18", new PipelineRunId(runId));
     }
 
     private static FundRecord MakeFund(string isin, Metrics metrics) => new()
@@ -522,7 +523,7 @@ public class SignalScorerAgentTests
         GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek         = "2026-W18",
         Family          = "test",
-        RunId           = "unit-test",
+        RunId           = new PipelineRunId("unit-test"),
         ConfigVersion   = "1.0.0",
         Funds           = funds,
         FrozenPositions = Array.Empty<FrozenPosition>(),

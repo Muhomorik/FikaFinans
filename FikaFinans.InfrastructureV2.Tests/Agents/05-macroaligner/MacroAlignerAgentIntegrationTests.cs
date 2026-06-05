@@ -6,6 +6,7 @@ using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.Identity;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
@@ -86,7 +87,7 @@ public sealed class MacroAlignerAgentIntegrationTests
             GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
             IsoWeek         = "2026-W18",
             Family          = "synthetic",
-            RunId           = "macro-align-integration",
+            RunId           = new PipelineRunId("macro-align-integration"),
             ConfigVersion   = "1.0.0",
             Funds           = [directFund, llmFund],
             FrozenPositions = Array.Empty<FrozenPosition>(),

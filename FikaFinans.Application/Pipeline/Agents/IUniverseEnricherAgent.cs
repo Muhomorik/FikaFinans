@@ -1,10 +1,12 @@
 using FikaFinans.Domain.Funds;
 
+using FikaFinans.Domain.Pipeline;
+
 namespace FikaFinans.Application.Pipeline.Agents;
 
 public interface IUniverseEnricherAgent
 {
-    Task<DataLoaderOutput> RunAsync(string isoWeek, string runId, CancellationToken ct = default);
+    Task<DataLoaderOutput> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
     /// Same processing as <see cref="RunAsync"/> but the Step 8 input is
@@ -17,6 +19,6 @@ public interface IUniverseEnricherAgent
     Task<DataLoaderOutput> RunFromInputAsync(
         DataLoaderOutput step8Input,
         string isoWeek,
-        string runId,
+        PipelineRunId runId,
         CancellationToken ct = default);
 }
