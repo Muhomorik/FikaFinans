@@ -14,4 +14,12 @@ public sealed record NavSyncOptions
     /// company filter (all funds considered).
     /// </summary>
     public string CompanyFilter { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Filesystem path to YieldRacoon's local database, opened <b>read-only</b>
+    /// by <c>YieldRaccoonSqliteNavProvider</c> to read the latest NAV date per
+    /// ISIN. Empty until configured in Settings — the provider then returns no
+    /// funds (a no-op), so detection raises nothing.
+    /// </summary>
+    public string YieldRaccoonDbPath { get; init; } = string.Empty;
 }
