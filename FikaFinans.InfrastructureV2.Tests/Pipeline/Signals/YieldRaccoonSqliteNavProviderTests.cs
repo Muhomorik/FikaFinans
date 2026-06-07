@@ -32,6 +32,7 @@ public sealed class YieldRaccoonSqliteNavProviderTests
             new FundProfile
             {
                 Isin = "LU0001",
+                Name = "Acme Global Equity",
                 CompanyName = "Acme",
                 HistoryRecords =
                 {
@@ -42,6 +43,7 @@ public sealed class YieldRaccoonSqliteNavProviderTests
             new FundProfile
             {
                 Isin = "LU0002",
+                Name = "Globex Asian Growth",
                 CompanyName = "Globex",
                 HistoryRecords =
                 {
@@ -69,10 +71,12 @@ public sealed class YieldRaccoonSqliteNavProviderTests
         {
             Assert.That(infos, Has.Count.EqualTo(2));
             Assert.That(infos[0].Isin.Value, Is.EqualTo("LU0001"));
+            Assert.That(infos[0].Name, Is.EqualTo("Acme Global Equity"));
             Assert.That(infos[0].CompanyName, Is.EqualTo("Acme"));
             Assert.That(infos[0].NavDate, Is.EqualTo(new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero)),
                 "latest of LU0001's two snapshots");
             Assert.That(infos[1].Isin.Value, Is.EqualTo("LU0002"));
+            Assert.That(infos[1].Name, Is.EqualTo("Globex Asian Growth"));
             Assert.That(infos[1].CompanyName, Is.EqualTo("Globex"));
             Assert.That(infos[1].NavDate, Is.EqualTo(new DateTimeOffset(2026, 6, 3, 0, 0, 0, TimeSpan.Zero)));
         });

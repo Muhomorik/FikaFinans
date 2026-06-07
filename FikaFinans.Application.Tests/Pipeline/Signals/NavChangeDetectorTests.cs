@@ -45,12 +45,13 @@ public sealed class NavChangeDetectorTests
             .Setup(x => x.QueryPartitionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(rows);
 
-    private static IsinProgressEntity Row(string isin, DateTimeOffset? latest) => new()
+    private static IsinProgressEntity Row(
+        string isin, DateTimeOffset? latest, IsinProgressState state = IsinProgressState.Free) => new()
     {
         PartitionKey = Partition,
         RowKey = isin,
         Isin = isin,
-        State = IsinProgressState.Free,
+        State = state,
         LatestProcessedNavDate = latest,
     };
 
@@ -152,5 +153,89 @@ public sealed class NavChangeDetectorTests
         Assert.That(published, Is.Empty);
         _publisher.Verify(x => x.PublishAsync(
             It.IsAny<IReadOnlyList<NavChangeSignal>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── DescribeAsync: display-side classification (every candidate row) ──────
+
+    [Test]
+    public async Task DescribeAsync_NoProgressRow_ClassifiesNew()
+    {
+        SetupProvider(new FundNavInfo("LU0002", June5, "TestCo", "Acme Global Equity"));
+        // default progress = empty → never processed → first run
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rows, Has.Count.EqualTo(1));
+            Assert.That(rows[0].Kind, Is.EqualTo(NavSyncStatusKind.New));
+            Assert.That(rows[0].Isin.Value, Is.EqualTo("LU0002"));
+            Assert.That(rows[0].Name, Is.EqualTo("Acme Global Equity"));
+            Assert.That(rows[0].CompanyName, Is.EqualTo("TestCo"));
+            Assert.That(rows[0].LatestNavDate, Is.EqualTo(June5));
+            Assert.That(rows[0].LastProcessedNavDate, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task DescribeAsync_NullAnchor_ClassifiesNew()
+    {
+        SetupProvider(new FundNavInfo("LU0002", June5, "TestCo"));
+        SetupProgress(Row("LU0002", latest: null)); // row exists but never completed
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.That(rows[0].Kind, Is.EqualTo(NavSyncStatusKind.New));
+    }
+
+    [Test]
+    public async Task DescribeAsync_NavNewerThanAnchor_ClassifiesChanged()
+    {
+        SetupProvider(new FundNavInfo("LU0001", June5, "TestCo"));
+        SetupProgress(Row("LU0001", June1));
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rows[0].Kind, Is.EqualTo(NavSyncStatusKind.Changed));
+            Assert.That(rows[0].LastProcessedNavDate, Is.EqualTo(June1));
+        });
+    }
+
+    [Test]
+    public async Task DescribeAsync_NavEqualToAnchor_ClassifiesUpToDate()
+    {
+        SetupProvider(new FundNavInfo("LU0001", June5, "TestCo"));
+        SetupProgress(Row("LU0001", June5)); // caught up
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.That(rows[0].Kind, Is.EqualTo(NavSyncStatusKind.UpToDate));
+    }
+
+    [Test]
+    public async Task DescribeAsync_StateProcessing_ClassifiesProcessing()
+    {
+        SetupProvider(new FundNavInfo("LU0001", June5, "TestCo"));
+        // In flight: still Processing, anchor older than YR — Processing wins the label.
+        SetupProgress(Row("LU0001", June1, IsinProgressState.Processing));
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.That(rows[0].Kind, Is.EqualTo(NavSyncStatusKind.Processing));
+    }
+
+    [Test]
+    public async Task DescribeAsync_DifferentCompany_Excluded()
+    {
+        SetupProvider(
+            new FundNavInfo("LU0001", June5, "OtherCo"),
+            new FundNavInfo("LU0003", June5, "TestCo"));
+
+        var rows = await CreateSut().DescribeAsync();
+
+        Assert.That(rows.Select(r => r.Isin.Value), Is.EqualTo(new[] { "LU0003" }),
+            "company filter applies to the display grid too");
     }
 }

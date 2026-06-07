@@ -1,4 +1,5 @@
 using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Storage.Bank.Entities;
 using NLog;
 
 namespace FikaFinans.Application.Pipeline.Signals;
@@ -52,26 +53,17 @@ public sealed class NavChangeDetector
     /// </summary>
     public async Task<IReadOnlyList<NavChangeSignal>> DetectAsync(CancellationToken ct = default)
     {
-        var navInfos = await _provider.GetLatestNavDatesAsync(ct).ConfigureAwait(false);
-
-        var hasFilter = !string.IsNullOrWhiteSpace(_options.CompanyFilter);
-        var candidates = (hasFilter
-                ? navInfos.Where(n => string.Equals(n.CompanyName, _options.CompanyFilter, StringComparison.OrdinalIgnoreCase))
-                : navInfos)
-            .ToList();
-
-        var rows = await _isinProgress.QueryPartitionAsync(IsinProgressPartition, ct).ConfigureAwait(false);
-        var anchorByIsin = rows.ToDictionary(r => r.Isin, r => r.LatestProcessedNavDate);
+        var (candidates, rowByIsin) = await LoadAsync(ct).ConfigureAwait(false);
 
         var signals = new List<NavChangeSignal>();
         foreach (var info in candidates)
         {
             // Skip only when we have a committed anchor that is at or beyond the
             // incoming date. Missing row or null anchor → never processed → emit.
-            var alreadyProcessed =
-                anchorByIsin.TryGetValue(info.Isin.Value, out var anchor)
-                && anchor is { } committed
-                && info.NavDate <= committed;
+            var anchor = rowByIsin.TryGetValue(info.Isin.Value, out var row)
+                ? row.LatestProcessedNavDate
+                : null;
+            var alreadyProcessed = anchor is { } committed && info.NavDate <= committed;
             if (alreadyProcessed)
                 continue;
 
@@ -83,6 +75,60 @@ public sealed class NavChangeDetector
             signals.Count, candidates.Count, _options.CompanyFilter);
 
         return signals;
+    }
+
+    /// <summary>
+    /// Describe — for display only — every candidate fund for the configured
+    /// company, classifying each (<see cref="NavSyncStatusKind"/>) by its latest
+    /// YR NAV date vs the <c>IsinProgressEntity</c> anchor and state. Returns
+    /// <em>all</em> candidates (not just the will-raise ones), so the local
+    /// status grid can show the full picture. Does not publish anything.
+    /// </summary>
+    public async Task<IReadOnlyList<NavSyncStatusRow>> DescribeAsync(CancellationToken ct = default)
+    {
+        var (candidates, rowByIsin) = await LoadAsync(ct).ConfigureAwait(false);
+
+        var result = new List<NavSyncStatusRow>(candidates.Count);
+        foreach (var info in candidates)
+        {
+            rowByIsin.TryGetValue(info.Isin.Value, out var row);
+            var anchor = row?.LatestProcessedNavDate;
+
+            // In-flight wins the label; otherwise no/null anchor → New (first
+            // run), newer-than-anchor → Changed, else caught up → UpToDate.
+            var kind =
+                row is { State: IsinProgressState.Processing } ? NavSyncStatusKind.Processing
+                : anchor is not { } committed ? NavSyncStatusKind.New
+                : info.NavDate > committed ? NavSyncStatusKind.Changed
+                : NavSyncStatusKind.UpToDate;
+
+            result.Add(new NavSyncStatusRow(
+                info.Isin, info.Name, info.CompanyName, info.NavDate, anchor, kind));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Shared read used by both <see cref="DetectAsync"/> and
+    /// <see cref="DescribeAsync"/>: the company-filtered candidate funds and the
+    /// progress rows keyed by ISIN.
+    /// </summary>
+    private async Task<(IReadOnlyList<FundNavInfo> Candidates, IReadOnlyDictionary<string, IsinProgressEntity> RowByIsin)>
+        LoadAsync(CancellationToken ct)
+    {
+        var navInfos = await _provider.GetLatestNavDatesAsync(ct).ConfigureAwait(false);
+
+        var hasFilter = !string.IsNullOrWhiteSpace(_options.CompanyFilter);
+        var candidates = (hasFilter
+                ? navInfos.Where(n => string.Equals(n.CompanyName, _options.CompanyFilter, StringComparison.OrdinalIgnoreCase))
+                : navInfos)
+            .ToList();
+
+        var rows = await _isinProgress.QueryPartitionAsync(IsinProgressPartition, ct).ConfigureAwait(false);
+        var rowByIsin = rows.ToDictionary(r => r.Isin);
+
+        return (candidates, rowByIsin);
     }
 
     /// <summary>

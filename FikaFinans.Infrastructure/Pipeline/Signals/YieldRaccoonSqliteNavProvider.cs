@@ -61,6 +61,7 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
             .Select(fp => new
             {
                 fp.Isin,
+                fp.Name,
                 fp.CompanyName,
                 NavDate = fp.HistoryRecords.Max(h => h.NavDate),
             })
@@ -76,7 +77,8 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
             var navDate = DateTimeOffset.Parse(
                 row.NavDate, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
 
-            results.Add(new FundNavInfo(new Isin(row.Isin), navDate, row.CompanyName ?? string.Empty));
+            results.Add(new FundNavInfo(
+                new Isin(row.Isin), navDate, row.CompanyName ?? string.Empty, row.Name ?? string.Empty));
         }
 
         return results;

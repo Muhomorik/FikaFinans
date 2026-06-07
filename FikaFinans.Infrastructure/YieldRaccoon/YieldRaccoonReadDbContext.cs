@@ -28,6 +28,7 @@ public sealed class YieldRaccoonReadDbContext : DbContext
             entity.ToTable("FundProfiles");
             entity.HasKey(f => f.Isin);
             entity.Property(f => f.Isin).HasColumnName("Isin");
+            entity.Property(f => f.Name).HasColumnName("Name");
             entity.Property(f => f.CompanyName).HasColumnName("CompanyName");
             entity.HasMany(f => f.HistoryRecords)
                 .WithOne(h => h.FundProfile)
