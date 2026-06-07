@@ -234,6 +234,81 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     }
 
     [Test]
+    public async Task ClaimIsinProgressAsync_WithNavDateMap_WritesNavDateOnEachRow()
+    {
+        // The triggering navDate per ISIN is threaded in at claim time and
+        // recorded as the in-flight NavDate (today it was always left null).
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001", "LU0000000002");
+        var navDate1 = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
+        var navDate2 = new DateTimeOffset(2026, 6, 4, 0, 0, 0, TimeSpan.Zero);
+        var navDates = new Dictionary<string, DateTimeOffset>
+        {
+            ["LU0000000001"] = navDate1,
+            ["LU0000000002"] = navDate2,
+        };
+
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId), navDates);
+
+        var row1 = await _repo.GetAsync(Partition, "LU0000000001");
+        var row2 = await _repo.GetAsync(Partition, "LU0000000002");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row1!.NavDate, Is.EqualTo(navDate1));
+            Assert.That(row2!.NavDate, Is.EqualTo(navDate2));
+        });
+    }
+
+    [Test]
+    public async Task ReleaseIsinProgressAsync_SucceededFund_AdvancesLatestProcessedNavDateToNavDate()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001");
+        var navDate = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId),
+            new Dictionary<string, DateTimeOffset> { ["LU0000000001"] = navDate });
+
+        // Empty failed set → the fund succeeded → anchor advances to NavDate.
+        await sut.ReleaseIsinProgressAsync(step1, new PipelineRunId(_runId), failedIsins: new HashSet<string>());
+
+        var row = await _repo.GetAsync(Partition, "LU0000000001");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Free));
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(navDate),
+                "succeeded fund advances the dedup anchor to the run's NavDate");
+        });
+    }
+
+    [Test]
+    public async Task ReleaseIsinProgressAsync_FailedFund_LeavesLatestProcessedNavDateUnchanged()
+    {
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        var step1 = MakeStep1Output("LU0000000001");
+
+        // A first successful run stamps the anchor at date1.
+        var date1 = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId),
+            new Dictionary<string, DateTimeOffset> { ["LU0000000001"] = date1 });
+        await sut.ReleaseIsinProgressAsync(step1, new PipelineRunId(_runId), failedIsins: new HashSet<string>());
+
+        // A later run for a newer date2 fails for this fund.
+        var date2 = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
+        await sut.ClaimIsinProgressAsync(step1, new PipelineRunId(_runId),
+            new Dictionary<string, DateTimeOffset> { ["LU0000000001"] = date2 });
+        await sut.ReleaseIsinProgressAsync(step1, new PipelineRunId(_runId),
+            failedIsins: new HashSet<string> { "LU0000000001" });
+
+        var row = await _repo.GetAsync(Partition, "LU0000000001");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Free), "row is still released to Free");
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(date1),
+                "failed fund keeps the prior anchor so the next signal re-raises it");
+        });
+    }
+
+    [Test]
     public async Task MarkFundFailedAsync_SetsLastErrorBumpsAttemptCountAndPreservesColumns()
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();

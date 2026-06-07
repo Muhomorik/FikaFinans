@@ -24,10 +24,19 @@ public interface IPipelineRunner
     /// falls back to <see cref="StreamingPipelineOptions.MaxConcurrentFunds"/>
     /// from DI — the production path.
     /// </summary>
+    /// <param name="navDateByIsin">
+    /// Optional signal-driven scope: ISIN → triggering trading date. When
+    /// supplied, Step 1's universe is filtered to exactly these ISINs (funds
+    /// not in the map are skipped), the dates are stamped onto each row's
+    /// <c>NavDate</c> at claim, and per-fund success advances
+    /// <c>LatestProcessedNavDate</c> to that date. Null runs the whole
+    /// universe with no NavDate stamping (the legacy "Run all" path).
+    /// </param>
     Task<bool> RunAllStreamingAsync(
         string family,
         string isoWeek,
         PipelineRunId runId,
         int? maxConcurrent = null,
+        IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin = null,
         CancellationToken ct = default);
 }

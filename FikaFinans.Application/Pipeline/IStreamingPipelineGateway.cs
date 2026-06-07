@@ -55,7 +55,17 @@ public interface IStreamingPipelineGateway
     /// coexist with the in-flight run — see backend-nav-sync-plan.md §"Run
     /// boundary").
     /// </summary>
-    Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default);
+    /// <param name="navDateByIsin">
+    /// Optional ISIN → triggering trading date. When provided, each row's
+    /// <c>NavDate</c> (the in-flight "working on" date) is stamped from this
+    /// map; ISINs absent from the map get a null <c>NavDate</c>. Null overall
+    /// preserves the legacy behaviour of leaving <c>NavDate</c> unset.
+    /// </param>
+    Task ClaimIsinProgressAsync(
+        DataLoaderOutput step1Output,
+        PipelineRunId runId,
+        IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Write the per-ISIN step columns produced by the per-ISIN block (Steps
@@ -89,11 +99,22 @@ public interface IStreamingPipelineGateway
     Task MarkFundFailedAsync(string isin, PipelineRunId runId, string errorMessage, CancellationToken ct = default);
 
     /// <summary>
-    /// Release per-ISIN progress rows at the end of a successful streaming
-    /// run. For each fund in <paramref name="step1Output"/> upserts the row
-    /// with state <c>Free</c> and clears <c>ProcessingStartedAt</c>; existing
-    /// step columns + <c>RunId</c> are preserved as a record of the latest
-    /// run.
+    /// Release per-ISIN progress rows at the end of a streaming run. For each
+    /// fund in <paramref name="step1Output"/> upserts the row with state
+    /// <c>Free</c> and clears <c>ProcessingStartedAt</c>; existing step columns
+    /// + <c>RunId</c> are preserved as a record of the latest run.
     /// </summary>
-    Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default);
+    /// <param name="failedIsins">
+    /// Optional set of ISINs whose per-ISIN chain failed this run (typically
+    /// <see cref="PerIsinBlockResult.FailedFunds"/>'s keys). A fund **not** in
+    /// this set is treated as a per-fund success and advances its dedup anchor
+    /// <c>LatestProcessedNavDate</c> to the in-flight <c>NavDate</c>; a fund in
+    /// this set keeps its prior anchor so the next signal re-raises it. Null is
+    /// treated as "no failures" (all funds succeeded).
+    /// </param>
+    Task ReleaseIsinProgressAsync(
+        DataLoaderOutput step1Output,
+        PipelineRunId runId,
+        IReadOnlySet<string>? failedIsins = null,
+        CancellationToken ct = default);
 }

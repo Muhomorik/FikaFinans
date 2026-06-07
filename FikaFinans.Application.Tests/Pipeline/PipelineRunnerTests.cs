@@ -666,6 +666,7 @@ public sealed class PipelineRunnerTests
             x => x.ClaimIsinProgressAsync(
                 It.IsAny<DataLoaderOutput>(),
                 It.IsAny<PipelineRunId>(),
+                It.IsAny<IReadOnlyDictionary<string, DateTimeOffset>>(),
                 It.IsAny<CancellationToken>()),
             Times.Never,
             "gateway should not be touched if Step 1 fails");
@@ -812,14 +813,14 @@ public sealed class PipelineRunnerTests
 
         Assert.Multiple(() =>
         {
-            _gateway.Verify(x => x.ClaimIsinProgressAsync(step1, new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()),
+            _gateway.Verify(x => x.ClaimIsinProgressAsync(step1, new PipelineRunId("stream-progress-1"), It.IsAny<IReadOnlyDictionary<string, DateTimeOffset>>(), It.IsAny<CancellationToken>()),
                 Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
                 It.IsAny<DataLoaderOutput>(), new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                step1, new PipelineRunId("stream-progress-1"), It.IsAny<CancellationToken>()), Times.Once);
+                step1, new PipelineRunId("stream-progress-1"), It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()), Times.Once);
         });
     }
 
@@ -837,13 +838,13 @@ public sealed class PipelineRunnerTests
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlyDictionary<string, DateTimeOffset>>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()), Times.Never);
         });
     }
 
@@ -870,13 +871,13 @@ public sealed class PipelineRunnerTests
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlyDictionary<string, DateTimeOffset>>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.MarkFundFailedAsync(
                 "LU0099", new PipelineRunId("stream-isolate-2"), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.MarkFundFailedAsync(
@@ -911,14 +912,75 @@ public sealed class PipelineRunnerTests
         Assert.Multiple(() =>
         {
             _gateway.Verify(x => x.ClaimIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlyDictionary<string, DateTimeOffset>>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressBlockAsync(
                 It.IsAny<PerIsinBlockResult>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.WriteIsinProgressStep9Async(
                 It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Once);
             _gateway.Verify(x => x.ReleaseIsinProgressAsync(
-                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
+                It.IsAny<DataLoaderOutput>(), It.IsAny<PipelineRunId>(), It.IsAny<IReadOnlySet<string>>(), It.IsAny<CancellationToken>()), Times.Never);
         });
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_WithNavDateMap_ScopesClaimToSignaledIsinsAndPassesMap()
+    {
+        // Signal-driven run: only the ISINs in the map should be claimed +
+        // processed (the rest of Step 1's universe is ignored), and the map is
+        // threaded into the claim so NavDate lands on each row.
+        var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0002"), MakeFund("LU0003"));
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
+            .Returns(step1);
+
+        var navDate = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
+        var navDates = new Dictionary<string, DateTimeOffset> { ["LU0002"] = navDate };
+
+        await _sut.RunAllStreamingAsync(
+            "OPM", "2026-W21", new PipelineRunId("stream-scope-1"), navDateByIsin: navDates);
+
+        _gateway.Verify(x => x.ClaimIsinProgressAsync(
+            It.Is<DataLoaderOutput>(o => o.Funds.Count == 1 && o.Funds[0].Isin.Value == "LU0002"),
+            new PipelineRunId("stream-scope-1"),
+            navDates,
+            It.IsAny<CancellationToken>()),
+            Times.Once,
+            "claim should be scoped to the signaled ISIN and receive the navDate map");
+    }
+
+    [Test]
+    public async Task RunAllStreamingAsync_WithNavDateMap_PassesFailedIsinsToRelease()
+    {
+        // A per-fund failure must surface to release as the failed-ISIN set so
+        // the gateway keeps that fund's dedup anchor unchanged (it retries),
+        // while the surviving fund advances.
+        var step1 = MakeStep1Output(MakeFund("LU0001"), MakeFund("LU0099"));
+        _dataLoader
+            .Setup(x => x.Run(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PipelineRunId>()))
+            .Returns(step1);
+        _thesis
+            .Setup(x => x.ProcessFundAsync(
+                It.Is<FundRecord>(f => f.Isin.Value == "LU0099"),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom LU0099"));
+
+        var date = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
+        var navDates = new Dictionary<string, DateTimeOffset>
+        {
+            ["LU0001"] = date,
+            ["LU0099"] = date,
+        };
+
+        await _sut.RunAllStreamingAsync(
+            "OPM", "2026-W21", new PipelineRunId("stream-scope-fail"), navDateByIsin: navDates);
+
+        _gateway.Verify(x => x.ReleaseIsinProgressAsync(
+            It.IsAny<DataLoaderOutput>(),
+            new PipelineRunId("stream-scope-fail"),
+            It.Is<IReadOnlySet<string>>(s => s.Contains("LU0099") && !s.Contains("LU0001")),
+            It.IsAny<CancellationToken>()),
+            Times.Once,
+            "release should receive the failed ISIN so its anchor is preserved for retry");
     }
 
     // ───────────────────────── fixtures ─────────────────────────

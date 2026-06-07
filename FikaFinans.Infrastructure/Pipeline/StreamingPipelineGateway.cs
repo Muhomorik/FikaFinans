@@ -149,22 +149,45 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions.Default));
     }
 
-    public async Task ClaimIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default)
+    public async Task ClaimIsinProgressAsync(
+        DataLoaderOutput step1Output,
+        PipelineRunId runId,
+        IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step1Output);
         ArgumentException.ThrowIfNullOrEmpty(runId.Value);
 
         var now = DateTimeOffset.UtcNow;
 
-        var entities = step1Output.Funds
-            .Select(fund => new IsinProgressEntity
+        var entities = new List<IsinProgressEntity>(step1Output.Funds.Count);
+        foreach (var fund in step1Output.Funds)
+        {
+            var isin = fund.Isin.Value;
+
+            // Read the prior row so the durable dedup anchor survives the run
+            // boundary: claiming a new run clears the per-step columns but must
+            // NOT wipe LatestProcessedNavDate, or every run would re-process
+            // funds that were already done.
+            var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false);
+
+            entities.Add(new IsinProgressEntity
             {
                 PartitionKey = IsinProgressPartition,
-                RowKey = fund.Isin.Value,
-                Isin = fund.Isin.Value,
+                RowKey = isin,
+                Isin = isin,
                 State = IsinProgressState.Processing,
                 RunId = runId,
+                // The triggering trading date for this run — the optimistic
+                // "working on" date. Advanced into LatestProcessedNavDate only
+                // on per-fund success at release. Null when no map was supplied
+                // or this ISIN is absent from it (legacy path).
+                NavDate = navDateByIsin is not null && navDateByIsin.TryGetValue(isin, out var nd)
+                    ? nd
+                    : null,
                 CurrentStep = 1,
+                // Carried forward across the run boundary (see above).
+                LatestProcessedNavDate = existing?.LatestProcessedNavDate,
                 ProcessingStartedAt = now,
                 Step01Json = SerializeFund(fund),
                 // Clear every later column — see backend-nav-sync-plan.md
@@ -178,8 +201,8 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 Step07Json = null,
                 Step08Json = null,
                 Step09Json = null,
-            })
-            .ToList();
+            });
+        }
 
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
@@ -287,7 +310,11 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
         await UpsertInChunksAsync(entities, ct).ConfigureAwait(false);
     }
 
-    public async Task ReleaseIsinProgressAsync(DataLoaderOutput step1Output, PipelineRunId runId, CancellationToken ct = default)
+    public async Task ReleaseIsinProgressAsync(
+        DataLoaderOutput step1Output,
+        PipelineRunId runId,
+        IReadOnlySet<string>? failedIsins = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step1Output);
         ArgumentException.ThrowIfNullOrEmpty(runId.Value);
@@ -299,6 +326,15 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
             var existing = await _isinProgress.GetAsync(IsinProgressPartition, isin, ct).ConfigureAwait(false);
             if (existing is null) continue;
 
+            // Per-fund success advances the dedup anchor to the in-flight
+            // NavDate; a failed fund keeps its prior anchor so the next signal
+            // re-raises it. When no NavDate was stamped (legacy path), preserve
+            // the existing anchor either way.
+            var failed = failedIsins is not null && failedIsins.Contains(isin);
+            var latestProcessedNavDate = failed
+                ? existing.LatestProcessedNavDate
+                : existing.NavDate ?? existing.LatestProcessedNavDate;
+
             entities.Add(new IsinProgressEntity
             {
                 PartitionKey = existing.PartitionKey,
@@ -308,7 +344,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 RunId = existing.RunId,
                 NavDate = existing.NavDate,
                 CurrentStep = existing.CurrentStep,
-                LatestProcessedNavDate = existing.LatestProcessedNavDate,
+                LatestProcessedNavDate = latestProcessedNavDate,
                 ProcessingStartedAt = null,
                 LastError = existing.LastError,
                 AttemptCount = existing.AttemptCount,

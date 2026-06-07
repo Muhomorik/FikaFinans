@@ -119,6 +119,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         string isoWeek,
         PipelineRunId runId,
         int? maxConcurrent = null,
+        IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -153,6 +154,32 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             Emit(new StepEvent(StepId.DataLoader, StepEventKind.Failed, Message: ex.Message, Duration: step1Sw.Elapsed));
             _logger.Warn("Streaming pipeline halted at {Step}", StepId.DataLoader);
             return false;
+        }
+
+        // Signal-driven scoping: when a navDate map is supplied, narrow the
+        // universe to exactly the signaled ISINs. Everything downstream
+        // (claim, per-ISIN block, Step 9/10 templates, release) then operates
+        // on the scoped set. Null map = legacy whole-universe run.
+        if (navDateByIsin is not null)
+        {
+            var scopedFunds = step1Output.Funds
+                .Where(f => navDateByIsin.ContainsKey(f.Isin.Value))
+                .ToList();
+            _logger.Info(
+                "Scoped streaming run to {Scoped} of {Total} funds via navDate signal map",
+                scopedFunds.Count, step1Output.Funds.Count);
+            step1Output = new DataLoaderOutput
+            {
+                GeneratedAt     = step1Output.GeneratedAt,
+                IsoWeek         = step1Output.IsoWeek,
+                Family          = step1Output.Family,
+                RunId           = step1Output.RunId,
+                ConfigVersion   = step1Output.ConfigVersion,
+                Funds           = scopedFunds,
+                FrozenPositions = step1Output.FrozenPositions,
+                CashAvailableKr = step1Output.CashAvailableKr,
+                DataQuality     = step1Output.DataQuality,
+            };
         }
 
         // Universe-wide Step 3 barrier. Same 8e-prep pattern as Step 1.
@@ -202,18 +229,25 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
         // Claim per-ISIN progress rows: state → Processing, Step01Json filled,
         // every later step column cleared so prior-run columns can never
         // coexist with the in-flight run.
-        await _gateway.ClaimIsinProgressAsync(step1Output, runId, ct).ConfigureAwait(false);
+        await _gateway.ClaimIsinProgressAsync(step1Output, runId, navDateByIsin, ct).ConfigureAwait(false);
 
         var totalFunds = step1Output.Funds.Count;
         var blockSw = Stopwatch.StartNew();
         foreach (var step in PerIsinSteps)
             Emit(new StepEvent(step, StepEventKind.Started, Total: totalFunds));
 
+        // Captured from the per-ISIN block so release can keep the dedup
+        // anchor of failed funds unchanged (they retry) while succeeded funds
+        // advance. Empty until the block completes.
+        IReadOnlySet<string> failedIsins = new HashSet<string>();
+
         try
         {
             var result = await RunPerIsinBlockAsync(
                 step1Output, macroContext, metricsConfig, signalConfig, effectiveMaxConcurrent, ct)
                 .ConfigureAwait(false);
+
+            failedIsins = result.FailedFunds.Keys.ToHashSet();
 
             _gateway.SaveStepOutput(StepId.MetricsCalculator, isoWeek, runId, result.Step2Output);
             _gateway.SaveStepOutput(StepId.SignalScorer,      isoWeek, runId, result.Step4Output);
@@ -310,7 +344,7 @@ public sealed class PipelineRunner : IPipelineRunner, IDisposable
             return false;
         }
 
-        await _gateway.ReleaseIsinProgressAsync(step1Output, runId, ct).ConfigureAwait(false);
+        await _gateway.ReleaseIsinProgressAsync(step1Output, runId, failedIsins, ct).ConfigureAwait(false);
 
         _logger.Info("Streaming pipeline run completed: runId={RunId}", runId);
         return true;
