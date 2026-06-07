@@ -6,6 +6,7 @@ using System.Windows.Input;
 using Autofac;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline;
+using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.ViewModels.Steps;
@@ -22,6 +23,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly CompositeDisposable _disposables = new();
     private IPipelineRunner? _runner;
     private IReadOnlyDictionary<int, StepViewModel>? _stepsByNumber;
+
+    /// <summary>
+    /// Tab index of the NAV Sync tab — placed last (after Step 10) so the
+    /// step-number → tab-index mapping in <see cref="OnStepEvent"/> stays
+    /// 1:1. Bank=0, Steps 1–10 = 1–10, NAV Sync = 11.
+    /// </summary>
+    private const int NavSyncTabIndex = 11;
 
     private string _title = string.Empty;
     private string _selectedWeek = string.Empty;
@@ -72,13 +80,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsRunning
     {
         get => _isRunning;
-        set => SetProperty(ref _isRunning, value, nameof(IsRunning));
+        set
+        {
+            SetProperty(ref _isRunning, value, nameof(IsRunning));
+            // Mirror into the NAV Sync tab so its run button disables mid-run.
+            if (NavSyncTab is not null) NavSyncTab.IsRunning = value;
+        }
     }
 
     public int SelectedTabIndex
     {
         get => _selectedTabIndex;
-        set => SetProperty(ref _selectedTabIndex, value, nameof(SelectedTabIndex));
+        set
+        {
+            SetProperty(ref _selectedTabIndex, value, nameof(SelectedTabIndex));
+            // Load-on-first-open: populate the NAV Sync grid the first time it's
+            // shown; thereafter the user reloads with the Refresh button.
+            if (value == NavSyncTabIndex
+                && NavSyncTab is { HasLoaded: false } tab
+                && tab.RefreshCommand.CanExecute(null))
+            {
+                tab.RefreshCommand.Execute(null);
+            }
+        }
     }
 
     public ObservableCollection<string> AvailableWeeks { get; } = new();
@@ -96,6 +120,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public Step8RecommenderViewModel? Step8Tab { get; private set; }
     public Step9UniverseEnricherViewModel? Step9Tab { get; private set; }
     public Step10PortfolioConstructorViewModel? Step10Tab { get; private set; }
+    public NavSyncViewModel? NavSyncTab { get; private set; }
 
     public ICommand LoadedCommand { get; }
     public ICommand WindowClosingCommand { get; }
@@ -167,6 +192,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Step8Tab = _scope.Resolve<Step8RecommenderViewModel>();
         Step9Tab = _scope.Resolve<Step9UniverseEnricherViewModel>();
         Step10Tab = _scope.Resolve<Step10PortfolioConstructorViewModel>();
+        NavSyncTab = _scope.Resolve<NavSyncViewModel>();
+        NavSyncTab.IsRunning = IsRunning;
 
         RaisePropertyChanged(nameof(BankTab));
         RaisePropertyChanged(nameof(Step1Tab));
@@ -179,6 +206,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(Step8Tab));
         RaisePropertyChanged(nameof(Step9Tab));
         RaisePropertyChanged(nameof(Step10Tab));
+        RaisePropertyChanged(nameof(NavSyncTab));
 
         // Ensure step VMs have current week/family from the moment they're resolved.
         PushContextToAllSteps();
@@ -194,6 +222,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _runner = _scope.Resolve<IPipelineRunner>();
         var sub = _runner.Events.ObserveOn(_uiScheduler!).Subscribe(OnStepEvent);
         _disposables.Add(sub);
+
+        // NAV-change front door: the NAV Sync tab publishes signals through the
+        // detector; here we (the local equivalent of the Azure queue trigger)
+        // collect a batch and kick off a scoped pipeline run for just those
+        // ISINs. Buffer coalesces the per-signal pushes into one run.
+        var navSource = _scope.Resolve<INavSignalSource>();
+        var navSub = navSource.Signals
+            .Buffer(TimeSpan.FromMilliseconds(250))
+            .Where(batch => batch.Count > 0)
+            .ObserveOn(_uiScheduler!)
+            .Subscribe(OnNavSignalsBatch);
+        _disposables.Add(navSub);
     }
 
     private void PushContextToAllSteps()
@@ -207,11 +247,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             vm.SetContext(SelectedFamily, SelectedWeek, new PipelineRunId(RunId));
     }
 
-    private async Task OnRunAllAsync()
+    /// <summary>
+    /// Manual "Run all" — the whole universe (no NAV-change scoping).
+    /// </summary>
+    private Task OnRunAllAsync() => RunPipelineAsync(navDateByIsin: null);
+
+    /// <summary>
+    /// Collects a batch of NAV-change signals (raised by the NAV Sync tab) and
+    /// kicks off a pipeline run scoped to just those ISINs — the local stand-in
+    /// for the Azure queue trigger. Ignored if a run is already in flight.
+    /// Runs on the UI scheduler (see the <c>ObserveOn</c> in <see cref="OnLoaded"/>).
+    /// </summary>
+    private void OnNavSignalsBatch(IList<NavChangeSignal> batch)
+    {
+        if (_runner is null) return;
+        if (IsRunning)
+        {
+            _logger?.Warn("NAV signals arrived while a run is in progress — ignoring {Count} signal(s)", batch.Count);
+            return;
+        }
+
+        // One date per ISIN (newest wins if the batch carried duplicates).
+        var navDateByIsin = batch
+            .GroupBy(s => s.Isin.Value, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Max(s => s.NavDate), StringComparer.Ordinal);
+
+        _logger?.Info("NAV signals → scoped run for {Count} ISIN(s)", navDateByIsin.Count);
+        _ = RunPipelineAsync(navDateByIsin);
+    }
+
+    /// <summary>
+    /// Runs the streaming pipeline. When <paramref name="navDateByIsin"/> is
+    /// supplied, the run is scoped to those ISINs and stamps their NAV dates;
+    /// when null, the full universe runs.
+    /// </summary>
+    private async Task RunPipelineAsync(IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin)
     {
         if (_runner is null)
         {
-            _logger?.Warn("Run all invoked before pipeline runner was resolved");
+            _logger?.Warn("Run invoked before pipeline runner was resolved");
             return;
         }
 
@@ -220,11 +294,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _runCts = new CancellationTokenSource();
         var ct = _runCts.Token;
 
+        var scope = navDateByIsin is { Count: > 0 } ? $"{navDateByIsin.Count} changed ISIN(s)" : "all funds";
         IsRunning = true;
         RunId = DateTime.Now.ToString("yyyyMMdd-HHmm");
         RunStatusText = "Running…";
-        StatusBarText = $"Run {RunId} started";
-        _logger?.Info("Run all started: {RunId}", RunId);
+        StatusBarText = $"Run {RunId} started ({scope})";
+        _logger?.Info("Run started: {RunId} ({Scope})", RunId, scope);
 
         var steps = new StepViewModel?[]
         {
@@ -247,7 +322,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         bool allOk;
         try
         {
-            allOk = await _runner.RunAllStreamingAsync(SelectedFamily, SelectedWeek, new PipelineRunId(RunId), ct: ct);
+            allOk = await _runner.RunAllStreamingAsync(
+                SelectedFamily, SelectedWeek, new PipelineRunId(RunId), navDateByIsin: navDateByIsin, ct: ct);
         }
         catch (OperationCanceledException)
         {

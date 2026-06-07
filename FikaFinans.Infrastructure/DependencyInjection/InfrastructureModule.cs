@@ -7,6 +7,7 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Settings;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.UseCases;
@@ -17,6 +18,7 @@ using FikaFinans.Infrastructure.Foundry;
 using FikaFinans.Infrastructure.Paths;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Signals;
 using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Prompts;
 using FikaFinans.Infrastructure.Schedules;
@@ -416,6 +418,51 @@ public sealed class InfrastructureModule : Autofac.Module
                 gateway: ctx.Resolve<IStreamingPipelineGateway>(),
                 streamingOptions: ctx.Resolve<StreamingPipelineOptions>()))
             .As<IPipelineRunner>()
+            .SingleInstance();
+
+        RegisterNavSyncServices(builder);
+    }
+
+    /// <summary>
+    /// Local NAV-change signal simulation — the WPF stand-in for the Azure Queue
+    /// Storage front door. <see cref="NavSyncOptions"/> is built from
+    /// <c>AppSettings.NavSync</c>; the Rx bus is one instance shared as both
+    /// publisher and source. In Azure the provider becomes an HTTP client and the
+    /// bus a queue publisher + queue trigger — the <see cref="NavChangeDetector"/>
+    /// in between is identical. See Docs/backend-nav-sync-plan.md.
+    /// </summary>
+    private static void RegisterNavSyncServices(ContainerBuilder builder)
+    {
+        builder.Register(ctx =>
+            {
+                var navSync = ctx.Resolve<IAppSettingsStore>().Load().NavSync;
+                return new NavSyncOptions
+                {
+                    CompanyFilter = navSync.CompanyFilter,
+                    YieldRaccoonDbPath = navSync.YieldRaccoonDbPath,
+                };
+            })
+            .As<NavSyncOptions>()
+            .SingleInstance();
+
+        builder.RegisterType<YieldRaccoonSqliteNavProvider>()
+            .As<ILatestNavProvider>()
+            .SingleInstance();
+
+        // One bus instance, two seams (publisher + source) — so the detector's
+        // publish reaches the WPF subscription. SingleInstance is essential.
+        builder.RegisterType<LocalRxNavSignalBus>()
+            .As<INavSignalPublisher>()
+            .As<INavSignalSource>()
+            .SingleInstance();
+
+        builder.Register(ctx => new NavChangeDetector(
+                options: ctx.Resolve<NavSyncOptions>(),
+                provider: ctx.Resolve<ILatestNavProvider>(),
+                isinProgress: ctx.Resolve<IIsinProgressRepository>(),
+                publisher: ctx.Resolve<INavSignalPublisher>(),
+                logger: LogManager.GetLogger(nameof(NavChangeDetector))))
+            .AsSelf()
             .SingleInstance();
     }
 
