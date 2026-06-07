@@ -1,0 +1,136 @@
+<UserControl
+    x:Class="FikaFinans.Wpf.Views.NavSync.NavSyncView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:viewModels="clr-namespace:FikaFinans.Wpf.ViewModels"
+    xmlns:converters="clr-namespace:FikaFinans.Wpf.Views.Converters"
+    xmlns:signals="clr-namespace:FikaFinans.Application.Pipeline.Signals;assembly=FikaFinans.Application"
+    d:DataContext="{d:DesignInstance Type=viewModels:NavSyncViewModel, IsDesignTimeCreatable=True}"
+    d:DesignHeight="600"
+    d:DesignWidth="1048"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <converters:NavSyncStatusToBrushConverter x:Key="navStatusBrush"/>
+    </UserControl.Resources>
+
+    <DockPanel Margin="{StaticResource ff.PanelPaddingThickness}">
+
+        <!-- ── Top bar: filter + status + actions ──────────────────── -->
+        <Border DockPanel.Dock="Top"
+                Style="{StaticResource ff.PanelControlStyle}"
+                Margin="0,0,0,8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="6"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Filter + DB status -->
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="Company filter: " Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding CompanyLabel}" Style="{StaticResource ff.BodyStrongStyle}" VerticalAlignment="Center"/>
+                    <TextBlock Text="    ·    YR DB: " Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding YrDbStatusText}" Style="{StaticResource ff.BodyStrongStyle}" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Summary -->
+                <TextBlock Grid.Row="2" Grid.Column="0"
+                           Text="{Binding SummaryText}"
+                           Style="{StaticResource ff.SmallStyle}"/>
+
+                <!-- Actions -->
+                <StackPanel Grid.Row="0" Grid.Column="1" Grid.RowSpan="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button Command="{Binding RefreshCommand}"
+                            Style="{StaticResource ff.ButtonStyle}"
+                            Padding="12,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBlock Text=" Refresh" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{Binding CheckAndRunCommand}"
+                            Style="{StaticResource ff.ButtonAccentStyle}"
+                            Padding="16,4"
+                            Margin="8,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text=" Check NAV updates &amp; run" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ── Legend strip (shares the status→brush converter) ────── -->
+        <Border DockPanel.Dock="Bottom" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Legend:  " Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                             Fill="{Binding Source={x:Static signals:NavSyncStatusKind.New}, Converter={StaticResource navStatusBrush}}"/>
+                    <TextBlock Text=" New (first run)" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                             Fill="{Binding Source={x:Static signals:NavSyncStatusKind.Changed}, Converter={StaticResource navStatusBrush}}"/>
+                    <TextBlock Text=" Changed (will raise)" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                             Fill="{Binding Source={x:Static signals:NavSyncStatusKind.UpToDate}, Converter={StaticResource navStatusBrush}}"/>
+                    <TextBlock Text=" Up to date" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                             Fill="{Binding Source={x:Static signals:NavSyncStatusKind.Processing}, Converter={StaticResource navStatusBrush}}"/>
+                    <TextBlock Text=" Processing" Style="{StaticResource ff.SmallStyle}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Status grid ─────────────────────────────────────────── -->
+        <Border Style="{StaticResource ff.PanelStyle}" Padding="0">
+            <DataGrid ItemsSource="{Binding Rows}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      BorderThickness="0"
+                      FontSize="12">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="ISIN" Binding="{Binding Isin}" Width="130"/>
+                    <DataGridTextColumn Header="Fund name" Binding="{Binding Name}" Width="2*"/>
+                    <DataGridTextColumn Header="Company" Binding="{Binding CompanyName}" Width="*"/>
+                    <DataGridTextColumn Header="YR NAV date" Binding="{Binding YrNavDateText}" Width="110"/>
+                    <DataGridTextColumn Header="Last processed" Binding="{Binding LastProcessedText}" Width="110"/>
+                    <DataGridTemplateColumn Header="Status" Width="140">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,0,0">
+                                    <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                                             Fill="{Binding Kind, Converter={StaticResource navStatusBrush}}"/>
+                                    <TextBlock Text="{Binding StatusText}"
+                                               Margin="6,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{Binding Kind, Converter={StaticResource navStatusBrush}}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+    </DockPanel>
+</UserControl>

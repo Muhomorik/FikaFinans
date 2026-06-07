@@ -8,6 +8,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:viewModels="clr-namespace:FikaFinans.Wpf.ViewModels"
     xmlns:bankViews="clr-namespace:FikaFinans.Wpf.Views.Bank"
+    xmlns:navViews="clr-namespace:FikaFinans.Wpf.Views.NavSync"
     xmlns:stepViews="clr-namespace:FikaFinans.Wpf.Views.Steps"
     Title="{Binding Title}"
     Width="1080"
@@ -291,6 +292,20 @@
                     </StackPanel>
                 </TabItem.Header>
                 <stepViews:StepView DataContext="{Binding Step10Tab}"/>
+            </TabItem>
+
+            <!-- 11 · NAV Sync (local Queue-Storage front-door simulation) -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE895;"
+                                   FontFamily="Segoe Fluent Icons"
+                                   Foreground="{StaticResource MahApps.Brushes.Gray3}"
+                                   FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text=" NAV Sync" FontSize="12" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <navViews:NavSyncView DataContext="{Binding NavSyncTab}"/>
             </TabItem>
 
         </TabControl>
