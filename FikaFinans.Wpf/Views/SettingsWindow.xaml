@@ -119,6 +119,33 @@
                                      mah:ControlsHelper.CornerRadius="4"
                                      mahShared:PasswordBoxBindingBehavior.Password="{Binding BackendApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
+                        <TextBlock Text="YieldRaccoon database (NAV sync, read-only)"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SectionSpacing}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding NavSyncDbPath, UpdateSourceTrigger=PropertyChanged}"
+                                     mah:TextBoxHelper.Watermark="Path to YieldRaccoon.db (empty disables NAV sync)"
+                                     mah:ControlsHelper.CornerRadius="4"/>
+                            <Button Grid.Column="2"
+                                    Command="{Binding BrowseYieldRaccoonDbCommand}"
+                                    Style="{StaticResource ff.ButtonStyle}"
+                                    Padding="12,4"
+                                    Content="Browse…"/>
+                        </Grid>
+
+                        <TextBlock Text="NAV sync company filter"
+                                   Style="{StaticResource ff.SubheaderStyle}"
+                                   Margin="{StaticResource ff.SubsectionSpacing}"/>
+                        <TextBox Text="{Binding NavSyncCompany, UpdateSourceTrigger=PropertyChanged}"
+                                 mah:TextBoxHelper.Watermark="e.g. Schroder (empty = all companies)"
+                                 mah:ControlsHelper.CornerRadius="4"/>
+
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

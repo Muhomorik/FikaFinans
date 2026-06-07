@@ -15,9 +15,33 @@ public sealed record AppSettings
     public ScheduleSettings Schedules { get; init; } = new();
     public SyncSettings Sync { get; init; } = new();
     public PipelineSettings Pipeline { get; init; } = new();
+    public NavSyncSettings NavSync { get; init; } = new();
 
     /// <summary>Backward-compat accessor — maps to <see cref="FolderSettings.YieldRaccoonInputs"/>.</summary>
     public string DataFolder => Folders.YieldRaccoonInputs;
+}
+
+/// <summary>
+/// Local NAV-change simulation settings (the WPF stand-in for the Azure
+/// Queue Storage front door). Built into <c>NavSyncOptions</c> at DI
+/// composition and consumed by the YieldRacoon NAV provider + the detector.
+/// </summary>
+public sealed record NavSyncSettings
+{
+    /// <summary>
+    /// Read-only filesystem path to YieldRacoon's SQLite database, used to read
+    /// the latest NAV date per ISIN. Empty disables detection (the provider
+    /// returns no funds, so nothing is raised).
+    /// </summary>
+    public string YieldRaccoonDbPath { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Company / asset-manager name to restrict local detection to (exact,
+    /// case-insensitive match on YR's <c>CompanyName</c>, e.g. <c>"Schroder"</c>).
+    /// Empty considers all companies — but we usually narrow locally so we don't
+    /// run the full universe.
+    /// </summary>
+    public string CompanyFilter { get; init; } = string.Empty;
 }
 
 public sealed record PipelineSettings

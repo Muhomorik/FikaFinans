@@ -23,6 +23,8 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _dbPath = string.Empty;
     private string _backendApiUrl = string.Empty;
     private string _backendApiKey = string.Empty;
+    private string _navSyncDbPath = string.Empty;
+    private string _navSyncCompany = string.Empty;
 
     // ── Models tab ────────────────────────────────────────────────
     private string? _selectedModelId;
@@ -56,6 +58,12 @@ public sealed class SettingsViewModel : ViewModelBase
     public string DbPath { get => _dbPath; set => SetProperty(ref _dbPath, value, nameof(DbPath)); }
     public string BackendApiUrl { get => _backendApiUrl; set => SetProperty(ref _backendApiUrl, value, nameof(BackendApiUrl)); }
     public string BackendApiKey { get => _backendApiKey; set => SetProperty(ref _backendApiKey, value, nameof(BackendApiKey)); }
+
+    /// <summary>Read-only path to YieldRacoon's SQLite DB (local NAV-change detection source).</summary>
+    public string NavSyncDbPath { get => _navSyncDbPath; set => SetProperty(ref _navSyncDbPath, value, nameof(NavSyncDbPath)); }
+
+    /// <summary>Company filter for local NAV-change detection (exact, case-insensitive; e.g. "Schroder").</summary>
+    public string NavSyncCompany { get => _navSyncCompany; set => SetProperty(ref _navSyncCompany, value, nameof(NavSyncCompany)); }
 
     public ObservableCollection<ModelDeploymentEntryViewModel> Deployments { get; } = new();
 
@@ -94,6 +102,7 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand BrowseInputsCommand { get; }
     public ICommand BrowseOutputsCommand { get; }
     public ICommand BrowseDatabaseLocationCommand { get; }
+    public ICommand BrowseYieldRaccoonDbCommand { get; }
     public ICommand BrowseAnalyticsJsonCommand { get; }
     public ICommand BrowseExamplesCommand { get; }
     public ICommand OpenSettingsLocationCommand { get; }
@@ -118,6 +127,7 @@ public sealed class SettingsViewModel : ViewModelBase
         BrowseInputsCommand = new DelegateCommand(() => BrowseFolder(v => YieldRaccoonInputs = v));
         BrowseOutputsCommand = new DelegateCommand(() => BrowseFolder(v => StepOutputs = v));
         BrowseDatabaseLocationCommand = new DelegateCommand(() => BrowseDatabaseFile(v => DbPath = v, DbPath));
+        BrowseYieldRaccoonDbCommand = new DelegateCommand(() => BrowseOpenDatabaseFile(v => NavSyncDbPath = v, NavSyncDbPath));
         BrowseAnalyticsJsonCommand = new DelegateCommand(() => BrowseFolder(v => AnalyticsJson = v));
         BrowseExamplesCommand = new DelegateCommand(() => BrowseFolder(v => Examples = v));
         OpenSettingsLocationCommand = new DelegateCommand(OnOpenSettingsLocation);
@@ -159,6 +169,8 @@ public sealed class SettingsViewModel : ViewModelBase
         DbPath = s.Database.Path;
         BackendApiUrl = s.Database.BackendApiUrl;
         BackendApiKey = s.Database.BackendApiKey;
+        NavSyncDbPath = s.NavSync.YieldRaccoonDbPath;
+        NavSyncCompany = s.NavSync.CompanyFilter;
 
         Deployments.Clear();
         foreach (var d in s.Models.Deployments)
@@ -260,6 +272,11 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             BaseUrl = SyncBaseUrl,
             AuthToken = SyncAuthToken
+        },
+        NavSync = new NavSyncSettings
+        {
+            YieldRaccoonDbPath = NavSyncDbPath,
+            CompanyFilter = NavSyncCompany
         }
     };
 
@@ -287,6 +304,19 @@ public sealed class SettingsViewModel : ViewModelBase
             OverwritePrompt = false,
             CheckPathExists = false,
             FileName = string.IsNullOrWhiteSpace(current) ? "fikafinans.db" : current
+        };
+        if (dialog.ShowDialog() == true)
+            setter(dialog.FileName);
+    }
+
+    private static void BrowseOpenDatabaseFile(Action<string> setter, string current)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select YieldRaccoon database (read-only)",
+            Filter = "SQLite database (*.db;*.sqlite)|*.db;*.sqlite|All files (*.*)|*.*",
+            CheckFileExists = true,
+            FileName = current
         };
         if (dialog.ShowDialog() == true)
             setter(dialog.FileName);
