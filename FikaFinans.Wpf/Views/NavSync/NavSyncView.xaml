@@ -128,6 +128,22 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
+
+                    <!-- Debug: force a single scoped run for this fund (bypasses dedup). -->
+                    <DataGridTemplateColumn Header="Debug" Width="64">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Style="{StaticResource ff.ButtonFlatStyle}"
+                                        Padding="8,2"
+                                        HorizontalAlignment="Center"
+                                        ToolTip="Send single NAV signal (debug) — forces a scoped run for this fund"
+                                        Command="{Binding DataContext.SendSignalCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}">
+                                    <TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" FontSize="12"/>
+                                </Button>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

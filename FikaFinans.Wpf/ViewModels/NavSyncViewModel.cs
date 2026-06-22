@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Domain.Identifiers;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels;
@@ -24,6 +25,7 @@ public sealed class NavSyncViewModel : ViewModelBase
     private readonly ILogger? _logger;
     private readonly NavChangeDetector? _detector;
     private readonly NavSyncOptions? _options;
+    private readonly INavSignalPublisher? _publisher;
 
     private string _companyLabel = "All companies";
     private string _yrDbStatusText = "not set";
@@ -86,12 +88,20 @@ public sealed class NavSyncViewModel : ViewModelBase
     /// <summary>Raise NAV-change signals → parent auto-triggers the scoped run.</summary>
     public ICommand CheckAndRunCommand { get; }
 
+    /// <summary>
+    /// Debug: publish a single signal for one row's fund, <em>bypassing dedup</em>
+    /// — forces that fund through the scoped run even when it's "Up to date".
+    /// </summary>
+    public ICommand SendSignalCommand { get; }
+
     /// <summary>Runtime constructor (DI).</summary>
-    public NavSyncViewModel(ILogger logger, NavChangeDetector detector, NavSyncOptions options) : this()
+    public NavSyncViewModel(
+        ILogger logger, NavChangeDetector detector, NavSyncOptions options, INavSignalPublisher publisher) : this()
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _detector = detector ?? throw new ArgumentNullException(nameof(detector));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
 
         CompanyLabel = string.IsNullOrWhiteSpace(_options.CompanyFilter)
             ? "All companies"
@@ -104,6 +114,7 @@ public sealed class NavSyncViewModel : ViewModelBase
     {
         RefreshCommand = new AsyncCommand(OnRefreshAsync, () => !IsBusy);
         CheckAndRunCommand = new AsyncCommand(OnCheckAndRunAsync, () => !IsBusy && !IsRunning);
+        SendSignalCommand = new AsyncCommand<NavSyncStatusRowViewModel>(OnSendSignalAsync, _ => !IsRunning);
     }
 
     protected override void OnInitializeInDesignMode()
@@ -112,12 +123,13 @@ public sealed class NavSyncViewModel : ViewModelBase
         CompanyLabel = "Schroder";
         YrDbStatusText = "configured";
         SummaryText = "2 of 3 funds have new NAV data";
+        var sample = new DateTimeOffset(2026, 6, 5, 0, 0, 0, TimeSpan.Zero);
         Rows.Add(new NavSyncStatusRowViewModel("LU0000000123", "Schroder ISF Global Eq", "Schroder",
-            "2026-06-05", "2026-06-01", "Changed", NavSyncStatusKind.Changed));
+            "2026-06-05", "2026-06-01", "Changed", NavSyncStatusKind.Changed, sample));
         Rows.Add(new NavSyncStatusRowViewModel("LU0000000456", "Schroder Asian Growth", "Schroder",
-            "2026-06-05", "—", "New", NavSyncStatusKind.New));
+            "2026-06-05", "—", "New", NavSyncStatusKind.New, sample));
         Rows.Add(new NavSyncStatusRowViewModel("LU0000000789", "Schroder Euro Corp Bond", "Schroder",
-            "2026-06-05", "2026-06-05", "Up to date", NavSyncStatusKind.UpToDate));
+            "2026-06-05", "2026-06-05", "Up to date", NavSyncStatusKind.UpToDate, sample));
     }
 
     private async Task OnRefreshAsync()
@@ -162,5 +174,24 @@ public sealed class NavSyncViewModel : ViewModelBase
             _logger?.Error(ex, "NAV Sync check-and-run failed");
         }
         finally { IsBusy = false; }
+    }
+
+    private async Task OnSendSignalAsync(NavSyncStatusRowViewModel? row)
+    {
+        if (_publisher is null || row is null) return;
+
+        try
+        {
+            // Publish straight through the bus — bypassing the detector/dedup —
+            // so this forces a run for the fund even when it's "Up to date".
+            var signal = new NavChangeSignal(new Isin(row.Isin), row.NavDate);
+            await _publisher.PublishAsync(new[] { signal });
+            _logger?.Info("NAV Sync debug: published 1 signal for {Isin} @ {NavDate:yyyy-MM-dd}",
+                row.Isin, row.NavDate);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Error(ex, "NAV Sync debug send-signal failed for {Isin}", row.Isin);
+        }
     }
 }

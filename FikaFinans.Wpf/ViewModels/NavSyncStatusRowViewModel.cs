@@ -16,7 +16,8 @@ public sealed record NavSyncStatusRowViewModel(
     string YrNavDateText,
     string LastProcessedText,
     string StatusText,
-    NavSyncStatusKind Kind)
+    NavSyncStatusKind Kind,
+    DateTimeOffset NavDate)
 {
     /// <summary>Projects a domain status row into its display form ("—" for a missing anchor).</summary>
     public static NavSyncStatusRowViewModel From(NavSyncStatusRow row) => new(
@@ -26,7 +27,8 @@ public sealed record NavSyncStatusRowViewModel(
         row.LatestNavDate.ToString("yyyy-MM-dd"),
         row.LastProcessedNavDate?.ToString("yyyy-MM-dd") ?? "—",
         StatusTextFor(row.Kind),
-        row.Kind);
+        row.Kind,
+        row.LatestNavDate);
 
     private static string StatusTextFor(NavSyncStatusKind kind) => kind switch
     {
