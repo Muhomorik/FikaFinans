@@ -1,4 +1,5 @@
 using System.Diagnostics;
+
 using FikaFinans.Domain.Identifiers;
 
 namespace FikaFinans.Application.Pipeline.Signals;

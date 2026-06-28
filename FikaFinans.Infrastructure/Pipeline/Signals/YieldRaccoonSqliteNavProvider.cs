@@ -1,7 +1,9 @@
 using System.Globalization;
+
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Infrastructure.YieldRaccoon;
+
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -37,14 +39,16 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
         // No path configured yet (Settings not filled in) → no funds, so
         // detection raises nothing rather than throwing on a missing file.
         if (string.IsNullOrWhiteSpace(_dbPath))
+        {
             return Array.Empty<FundNavInfo>();
+        }
 
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadOnly,
             // Don't hold a pooled handle on YR's file between detections.
-            Pooling = false,
+            Pooling = false
         }.ConnectionString;
 
         var options = new DbContextOptionsBuilder<YieldRaccoonReadDbContext>()
@@ -63,7 +67,7 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
                 fp.Isin,
                 fp.Name,
                 fp.CompanyName,
-                NavDate = fp.HistoryRecords.Max(h => h.NavDate),
+                NavDate = fp.HistoryRecords.Max(h => h.NavDate)
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -72,7 +76,9 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
         foreach (var row in rows)
         {
             if (string.IsNullOrEmpty(row.NavDate))
+            {
                 continue;
+            }
 
             var navDate = DateTimeOffset.Parse(
                 row.NavDate, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
