@@ -464,7 +464,7 @@ public sealed class InfrastructureModule : Autofac.Module
                 isinProgress: ctx.Resolve<IIsinProgressRepository>(),
                 publisher: ctx.Resolve<INavSignalPublisher>(),
                 logger: LogManager.GetLogger(nameof(NavChangeDetector))))
-            .AsSelf()
+            .As<INavChangeDetector>()
             .SingleInstance();
     }
 

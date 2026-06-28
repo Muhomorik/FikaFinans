@@ -5,9 +5,10 @@ using NLog;
 namespace FikaFinans.Application.Pipeline.Signals;
 
 /// <summary>
-/// The shared "brain" of NAV-change detection. Compares each fund's latest
-/// trading date (from <see cref="ILatestNavProvider"/>) against the durable
-/// dedup anchor (<c>IsinProgressEntity.LatestProcessedNavDate</c>) and raises a
+/// Default <see cref="INavChangeDetector"/> — the shared "brain" of NAV-change
+/// detection. Compares each fund's latest trading date (from
+/// <see cref="ILatestNavProvider"/>) against the durable dedup anchor
+/// (<c>IsinProgressEntity.LatestProcessedNavDate</c>) and raises a
 /// <see cref="NavChangeSignal"/> for every fund whose NAV has advanced.
 /// </summary>
 /// <remarks>
@@ -16,7 +17,7 @@ namespace FikaFinans.Application.Pipeline.Signals;
 /// <see cref="ILatestNavProvider"/> and <see cref="INavSignalPublisher"/>
 /// differ. Library code: awaits with <c>ConfigureAwait(false)</c>.
 /// </remarks>
-public sealed class NavChangeDetector
+public sealed class NavChangeDetector : INavChangeDetector
 {
     /// <summary>Partition key for every <c>IsinProgress</c> row (see the gateway).</summary>
     private const string IsinProgressPartition = "isin-progress";
@@ -46,11 +47,7 @@ public sealed class NavChangeDetector
         _logger = logger;
     }
 
-    /// <summary>
-    /// Detect — but do not publish — the NAV-change signals for the configured
-    /// company. A fund qualifies when it has no progress row, its anchor is
-    /// null, or its latest NAV date is strictly newer than the anchor.
-    /// </summary>
+    /// <inheritdoc />
     public async Task<IReadOnlyList<NavChangeSignal>> DetectAsync(CancellationToken ct = default)
     {
         var (candidates, rowByIsin) = await LoadAsync(ct).ConfigureAwait(false);
@@ -77,13 +74,7 @@ public sealed class NavChangeDetector
         return signals;
     }
 
-    /// <summary>
-    /// Describe — for display only — every candidate fund for the configured
-    /// company, classifying each (<see cref="NavSyncStatusKind"/>) by its latest
-    /// YR NAV date vs the <c>IsinProgressEntity</c> anchor and state. Returns
-    /// <em>all</em> candidates (not just the will-raise ones), so the local
-    /// status grid can show the full picture. Does not publish anything.
-    /// </summary>
+    /// <inheritdoc />
     public async Task<IReadOnlyList<NavSyncStatusRow>> DescribeAsync(CancellationToken ct = default)
     {
         var (candidates, rowByIsin) = await LoadAsync(ct).ConfigureAwait(false);
@@ -131,10 +122,7 @@ public sealed class NavChangeDetector
         return (candidates, rowByIsin);
     }
 
-    /// <summary>
-    /// Detect and, if any signals were raised, publish them through the
-    /// configured <see cref="INavSignalPublisher"/>. Returns the published set.
-    /// </summary>
+    /// <inheritdoc />
     public async Task<IReadOnlyList<NavChangeSignal>> DetectAndPublishAsync(CancellationToken ct = default)
     {
         var signals = await DetectAsync(ct).ConfigureAwait(false);

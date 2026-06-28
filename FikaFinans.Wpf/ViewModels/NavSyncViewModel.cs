@@ -23,7 +23,7 @@ namespace FikaFinans.Wpf.ViewModels;
 public sealed class NavSyncViewModel : ViewModelBase
 {
     private readonly ILogger? _logger;
-    private readonly NavChangeDetector? _detector;
+    private readonly INavChangeDetector? _detector;
     private readonly NavSyncOptions? _options;
     private readonly INavSignalPublisher? _publisher;
 
@@ -96,7 +96,7 @@ public sealed class NavSyncViewModel : ViewModelBase
 
     /// <summary>Runtime constructor (DI).</summary>
     public NavSyncViewModel(
-        ILogger logger, NavChangeDetector detector, NavSyncOptions options, INavSignalPublisher publisher) : this()
+        ILogger logger, INavChangeDetector detector, NavSyncOptions options, INavSignalPublisher publisher) : this()
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _detector = detector ?? throw new ArgumentNullException(nameof(detector));
