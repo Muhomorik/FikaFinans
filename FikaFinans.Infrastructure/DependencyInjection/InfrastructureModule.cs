@@ -453,7 +453,7 @@ public sealed class InfrastructureModule : Autofac.Module
 
         // One bus instance, two seams (publisher + source) — so the detector's
         // publish reaches the WPF subscription. SingleInstance is essential.
-        builder.RegisterType<LocalRxNavSignalBus>()
+        builder.Register(_ => new LocalRxNavSignalBus(LogManager.GetLogger(nameof(LocalRxNavSignalBus))))
             .As<INavSignalPublisher>()
             .As<INavSignalSource>()
             .SingleInstance();

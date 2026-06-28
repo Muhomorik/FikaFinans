@@ -1,6 +1,7 @@
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using FikaFinans.Application.Pipeline.Signals;
+using NLog;
 
 namespace FikaFinans.Infrastructure.Pipeline.Signals;
 
@@ -19,6 +20,12 @@ public sealed class LocalRxNavSignalBus : INavSignalPublisher, INavSignalSource,
 {
     private readonly Subject<NavChangeSignal> _signals = new();
     private readonly object _gate = new();
+    private readonly ILogger _logger;
+
+    public LocalRxNavSignalBus(ILogger logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     /// <inheritdoc />
     public IObservable<NavChangeSignal> Signals => _signals.AsObservable();
@@ -28,6 +35,11 @@ public sealed class LocalRxNavSignalBus : INavSignalPublisher, INavSignalSource,
     {
         ArgumentNullException.ThrowIfNull(signals);
 
+        if (signals.Count == 0)
+            return Task.CompletedTask;
+
+        _logger.Debug("NavSignal bus: publishing {0} signal(s)", signals.Count);
+
         // Serialize emissions so concurrent publishers can't interleave
         // OnNext calls (same guard PipelineRunner.Emit uses).
         lock (_gate)
@@ -35,6 +47,7 @@ public sealed class LocalRxNavSignalBus : INavSignalPublisher, INavSignalSource,
             foreach (var signal in signals)
             {
                 ct.ThrowIfCancellationRequested();
+                _logger.Trace("NavSignal published: {0} @ {1:yyyy-MM-dd}", signal.Isin.Value, signal.NavDate);
                 _signals.OnNext(signal);
             }
         }
