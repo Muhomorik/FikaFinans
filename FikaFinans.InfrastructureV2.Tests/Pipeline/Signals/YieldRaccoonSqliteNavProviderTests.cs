@@ -3,6 +3,7 @@ using FikaFinans.Infrastructure.Pipeline.Signals;
 using FikaFinans.Infrastructure.YieldRaccoon;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using NLog;
 
 namespace FikaFinans.InfrastructureV2.Tests.Pipeline.Signals;
 
@@ -63,7 +64,7 @@ public sealed class YieldRaccoonSqliteNavProviderTests
     [Test]
     public async Task GetLatestNavDatesAsync_ReturnsLatestNavDatePerFundWithCompany()
     {
-        var sut = new YieldRaccoonSqliteNavProvider(new NavSyncOptions { YieldRaccoonDbPath = _dbPath });
+        var sut = new YieldRaccoonSqliteNavProvider(LogManager.GetLogger("test"), new NavSyncOptions { YieldRaccoonDbPath = _dbPath });
 
         var infos = (await sut.GetLatestNavDatesAsync()).OrderBy(i => i.Isin.Value).ToList();
 
@@ -87,7 +88,7 @@ public sealed class YieldRaccoonSqliteNavProviderTests
     {
         // Unconfigured path is a no-op rather than a throw — local dev before
         // the YR DB path is set in Settings.
-        var sut = new YieldRaccoonSqliteNavProvider(new NavSyncOptions { YieldRaccoonDbPath = string.Empty });
+        var sut = new YieldRaccoonSqliteNavProvider(LogManager.GetLogger("test"), new NavSyncOptions { YieldRaccoonDbPath = string.Empty });
 
         var infos = await sut.GetLatestNavDatesAsync();
 

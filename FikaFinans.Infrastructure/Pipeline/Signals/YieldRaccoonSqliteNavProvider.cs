@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 
 using FikaFinans.Application.Pipeline.Signals;
@@ -6,6 +7,8 @@ using FikaFinans.Infrastructure.YieldRaccoon;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+
+using NLog;
 
 namespace FikaFinans.Infrastructure.Pipeline.Signals;
 
@@ -25,10 +28,12 @@ namespace FikaFinans.Infrastructure.Pipeline.Signals;
 /// </remarks>
 public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
 {
+    private readonly ILogger _logger;
     private readonly string _dbPath;
 
-    public YieldRaccoonSqliteNavProvider(NavSyncOptions options)
+    public YieldRaccoonSqliteNavProvider(ILogger logger, NavSyncOptions options)
     {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(options);
         _dbPath = options.YieldRaccoonDbPath;
     }
@@ -40,8 +45,14 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
         // detection raises nothing rather than throwing on a missing file.
         if (string.IsNullOrWhiteSpace(_dbPath))
         {
+            _logger.Trace("YR NAV read skipped — no database path configured");
             return Array.Empty<FundNavInfo>();
         }
+
+        // Read-only EF query over YR's SQLite file — a heavy IO operation;
+        // bracket it with start/stop traces so the cost is visible in the log.
+        var stopwatch = Stopwatch.StartNew();
+        _logger.Trace("YR NAV read starting — db={0}", _dbPath);
 
         var connectionString = new SqliteConnectionStringBuilder
         {
@@ -72,6 +83,8 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        _logger.Trace("YR NAV query returned {0} profile row(s) in {1} ms", rows.Count, stopwatch.ElapsedMilliseconds);
+
         var results = new List<FundNavInfo>(rows.Count);
         foreach (var row in rows)
         {
@@ -86,6 +99,9 @@ public sealed class YieldRaccoonSqliteNavProvider : ILatestNavProvider
             results.Add(new FundNavInfo(
                 new Isin(row.Isin), navDate, row.CompanyName ?? string.Empty, row.Name ?? string.Empty));
         }
+
+        stopwatch.Stop();
+        _logger.Trace("YR NAV read done — {0} fund(s) mapped, {1} ms total", results.Count, stopwatch.ElapsedMilliseconds);
 
         return results;
     }

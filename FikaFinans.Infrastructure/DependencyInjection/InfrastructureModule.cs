@@ -445,7 +445,9 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<NavSyncOptions>()
             .SingleInstance();
 
-        builder.RegisterType<YieldRaccoonSqliteNavProvider>()
+        builder.Register(ctx => new YieldRaccoonSqliteNavProvider(
+                LogManager.GetLogger(nameof(YieldRaccoonSqliteNavProvider)),
+                ctx.Resolve<NavSyncOptions>()))
             .As<ILatestNavProvider>()
             .SingleInstance();
 
