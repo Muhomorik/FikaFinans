@@ -99,6 +99,30 @@ The semantic mapping is trivial (`period_start` ↔ `periodStart`); don't try to
 - **OS:** Windows 11.
 - **Shell:** Git Bash (use Unix-style forward-slash paths and `/dev/null`, not `NUL`).
 
+## Git Branch Naming
+
+When asked to suggest or create a branch, always use:
+
+```text
+<year>-w<ISO week>-<short-description>
+```
+
+- **Year + ISO-8601 week number**, zero-padded to two digits — `2026-w35`, `2026-w07`
+- **Short description** — 2–4 words, lowercase `kebab-case`, describing the *what*, not the *how*
+
+Examples:
+
+- `2026-w35-nav-signal-dedup`
+- `2026-w35-foundry-agent-migration`
+- `2026-w36-fikaforecast-readme`
+
+**Always show the suggested branch name in chat and wait for confirmation before running
+`git checkout -b`.** If no description is given, propose 2–3 candidates based on the current work and let the user pick.
+
+Use the *current* ISO week — derive it from today's date rather than guessing
+(`date +%G-w%V` in Git Bash; `git log -1 --date=format:'%G-w%V' --format=%ad` shows the
+format for the last commit).
+
 ## Project Overview
 
 **Project Hosting:**

@@ -533,6 +533,14 @@ local.settings.json
 nul
 **/nul
 
+# Claude Code local (machine-specific) settings & runtime state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/shell-snapshots/
+.claude/statsig/
+.claude/todos/
+CLAUDE.local.md
+
 # FikaFinans local-only data examples (real holdings, not for public repo)
 FikaFinans/DataExamples/*
 !FikaFinans/DataExamples/.gitkeep
