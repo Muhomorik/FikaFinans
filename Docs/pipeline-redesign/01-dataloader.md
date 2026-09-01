@@ -219,7 +219,8 @@ two file inputs are replaced by one fetch — see the next section.
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | **Identity slice** — static per-fund facts: name, fee, category, risk, owner count. The spine; no row here means the fund does not exist downstream | `YieldRaccoon_metadata_{family}_{iso_week}.csv` | YieldRaccoon SQLite database | REST call to the YieldRaccoon backend |
-| Raw NAV series | — producer shipped the metrics precomputed, so the series never left YieldRaccoon | YieldRaccoon SQLite → mirror table, delta-fetched | REST call → mirror table, delta-fetched |
+| **Bucketed history metrics** — producer-computed, 26 non-overlapping two-week buckets per fund. Five of them (`best_day_pct`, `worst_day_pct`, `pct_positive_days`, `skewness`, `ann_volatility_2w_pct`) are daily-return statistics the four sample points cannot recover | `YieldRaccoon_summary_{family}_{iso_week}.csv` → `NavBucket` | **stops being an input** — computed from the mirrored series | same |
+| **Rolling-window metrics** — producer-computed 12-week and 1-year figures | `YieldRaccoon_snapshot_{family}_{iso_week}.csv` → `FundSnapshot` | **stops being an input** — computed from the mirrored series | same |
 | **Positions** — what is currently held | `positions.csv` | `SqlitePositionsRepository` — already migrated | `IPositionsRepository`, cloud store still open |
 | **Pinnings** — hand-written layer overrides: `core` or `writeoff`, everything else is an active position | `portfolio_structure.md` | unchanged — still parsed from the file by `PortfolioStructureMdParser` | still open |
 | Step configs (2, 4, 9, 10) | `config-NN-*.json` in the inputs folder | unchanged | still open — not producer data |
