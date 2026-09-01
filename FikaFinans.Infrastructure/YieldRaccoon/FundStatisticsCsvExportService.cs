@@ -10,15 +10,24 @@ namespace FikaFinans.Infrastructure.YieldRaccoon;
 
 /// <summary>
 /// Reads fund NAV data from a SQLite database (read-only), computes per-bucket summary statistics
-/// over non-overlapping time windows, and writes the results to a CSV file.
+/// over non-overlapping time windows, and either returns them in memory or writes them to a CSV file.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>Mirrored from the YieldRaccoon producer</b>
 /// (<c>YieldRaccoon.Infrastructure.Services.FundStatisticsCsvExportService</c>). It lives beside the
 /// copied read-only ORM model in this folder because it is upstream code, not FikaFinans code:
 /// it talks to YR's schema and emits YR's summary CSV — the very file
 /// <c>Pipeline.Csv.SummaryCsvParser</c> consumes. Keep it in sync with the original rather than
 /// evolving it here; divergence means our numbers stop matching YR's own exports.
+/// </para>
+/// <para>
+/// <b>Ahead of upstream:</b> the read-and-compute half was split out into
+/// <see cref="ComputeAsync"/> so the pipeline can consume the buckets in memory without a disk
+/// round-trip. <see cref="ExportAsync"/> is now that method plus CSV serialization, which keeps
+/// the windowing logic in one place but means its body no longer matches YR's line for line.
+/// This split has to be ported back by hand.
+/// </para>
 /// </remarks>
 public class FundStatisticsCsvExportService : IFundStatisticsCsvExportService
 {
@@ -55,17 +64,41 @@ public class FundStatisticsCsvExportService : IFundStatisticsCsvExportService
         DateOnly? cutoffDate = null,
         IProgress<(int processed, int total)>? progress = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDatabasePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(csvOutputPath);
+
+        _logger.Info("Starting CSV statistics export: source={0}, dest={1}, window={2}d, company={3}, minOwners={4}, cutoff={5}",
+            sourceDatabasePath, csvOutputPath, windowSizeDays, companyName ?? "(all)", minNumberOfOwners, cutoffDate?.ToString("yyyy-MM-dd") ?? "(all)");
+
+        var allStats = await ComputeAsync(
+                sourceDatabasePath, windowSizeDays, companyName, minNumberOfOwners, cutoffDate, progress)
+            .ConfigureAwait(false);
+
+        var outputDir = Path.GetDirectoryName(csvOutputPath);
+        if (!string.IsNullOrEmpty(outputDir))
+            Directory.CreateDirectory(outputDir);
+
+        await WriteCsvAsync(csvOutputPath, allStats).ConfigureAwait(false);
+
+        _logger.Info("CSV export completed: {0} ({1} rows)", csvOutputPath, allStats.Count);
+        return allStats.Count;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FundSummaryStatistics>> ComputeAsync(
+        string sourceDatabasePath,
+        int windowSizeDays,
+        string? companyName = null,
+        int minNumberOfOwners = 0,
+        DateOnly? cutoffDate = null,
+        IProgress<(int processed, int total)>? progress = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDatabasePath);
 
         if (windowSizeDays < 1)
             throw new ArgumentOutOfRangeException(nameof(windowSizeDays), "Window size must be at least 1 day.");
 
         if (!File.Exists(sourceDatabasePath))
             throw new FileNotFoundException("Source database file not found.", sourceDatabasePath);
-
-        _logger.Info("Starting CSV statistics export: source={0}, dest={1}, window={2}d, company={3}, minOwners={4}, cutoff={5}",
-            sourceDatabasePath, csvOutputPath, windowSizeDays, companyName ?? "(all)", minNumberOfOwners, cutoffDate?.ToString("yyyy-MM-dd") ?? "(all)");
 
         var connectionString = $"Data Source={sourceDatabasePath};Mode=ReadOnly";
         await using var connection = new SqliteConnection(connectionString);
@@ -115,15 +148,7 @@ public class FundStatisticsCsvExportService : IFundStatisticsCsvExportService
 
         _logger.Info("Computed {0} statistics rows from {1} funds", allStats.Count, fundProfiles.Count);
 
-        // Step 3: Write CSV
-        var outputDir = Path.GetDirectoryName(csvOutputPath);
-        if (!string.IsNullOrEmpty(outputDir))
-            Directory.CreateDirectory(outputDir);
-
-        await WriteCsvAsync(csvOutputPath, allStats).ConfigureAwait(false);
-
-        _logger.Info("CSV export completed: {0} ({1} rows)", csvOutputPath, allStats.Count);
-        return allStats.Count;
+        return allStats;
     }
 
     /// <summary>
@@ -172,7 +197,7 @@ public class FundStatisticsCsvExportService : IFundStatisticsCsvExportService
         return span >= MinimumWindowDays;
     }
 
-    private static async Task WriteCsvAsync(string path, List<FundSummaryStatistics> statistics)
+    private static async Task WriteCsvAsync(string path, IReadOnlyList<FundSummaryStatistics> statistics)
     {
         await using var writer = new StreamWriter(path, append: false, encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 

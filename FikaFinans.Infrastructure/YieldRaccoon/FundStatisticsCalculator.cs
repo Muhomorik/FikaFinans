@@ -1,3 +1,5 @@
+using FikaFinans.Application.YieldRaccoon;
+
 using MathNet.Numerics.Statistics;
 
 namespace FikaFinans.Infrastructure.YieldRaccoon;
