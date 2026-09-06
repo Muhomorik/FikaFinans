@@ -84,8 +84,24 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         => throw new NotImplementedException();
 
     /// <inheritdoc />
-    public Task LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    public async Task LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // TODO: _family is still empty, and the SQLite provider treats a company mismatch as
+        // "out of scope" — so this returns null for every fund until the identity seam exists.
+        // The miss is logged because it is indistinguishable from an unknown ISIN.
+        var metadata = await _metadata
+            .GetMetadataAsync(signal.Isin, _family, _isoWeek, ct)
+            .ConfigureAwait(false);
+
+        if (metadata is null)
+            _logger.Debug("Step 1 metadata miss — isin={0}, company='{1}'", signal.Isin.Value, _family.Value);
+
+        _fundMetadata = metadata is null ? Array.Empty<FundMetadata>() : [metadata];
+
+        // TODO: NAV history delta — the mirrored-series read has no seam yet.
+    }
 
     /// <inheritdoc />
     public Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default)
