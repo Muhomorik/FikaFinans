@@ -14,6 +14,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
 {
     private readonly NavSyncOptions _options;
     private readonly IFundMetadataProvider _metadata;
+    private readonly IFundSummaryProvider _summary;
     private readonly IIsinProgressRepository _isinProgress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
@@ -46,6 +47,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     public Step01DataLoaderHandler(
         NavSyncOptions options,
         IFundMetadataProvider metadata,
+        IFundSummaryProvider summary,
         IIsinProgressRepository isinProgress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
@@ -61,6 +63,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         //   run id            minting seam is an open question in the parent plan
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(isinProgress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
@@ -68,8 +71,10 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(logger);
+        
         _options = options;
         _metadata = metadata;
+        _summary = summary;
         _isinProgress = isinProgress;
         _gateway = gateway;
         _funds = funds;
@@ -104,23 +109,38 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    public Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    public async Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        var buckets = await _summary
+            .GetNavBucketsAsync(signal.Isin, _family, _isoWeek, ct)
+            .ConfigureAwait(false);
+
+        // Keyed even when empty: the agent looks buckets up per ISIN and treats a
+        // missing key as "no history", which is exactly what an empty list means.
+        _navBuckets = new Dictionary<Isin, IReadOnlyList<NavBucket>> { [signal.Isin] = buckets };
+
+        if (buckets.Count == 0)
+            _logger.Debug("Step 1 no NAV buckets — isin={0}", signal.Isin.Value);
+
+        // TODO: _fundSnapshots — the 12w/1y slice has no seam, and the mirrored
+        // calculator only covers the 2w window shape.
+    }
 
     /// <inheritdoc />
     public Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default)
     {
         // Everything the agent joins is already in memory by now — this phase opens no file and
-        // touches no database. 
-        // The fields are still the empty defaults wherever the fetch seam
-        // that fills them has not been built yet.
-        
+        // touches no database. _fundMetadata and _navBuckets arrive from the earlier phases
+        // through IFundMetadataProvider and IFundSummaryProvider, so their source swaps (SQLite
+        // today, REST later) without this call changing. The rest are still the empty defaults,
+        // wherever the seam that fills them has not been built yet.
+
         // TODO: _family — no seam; CompanyFilter is the detector's, not this step's.
         // TODO: _isoWeek — no seam; derived from the signal's NavDate once that rule is settled.
         // TODO: _runId — minting seam is still open (see the constructor TODO).
-        // TODO: _fundMetadata — from IFundMetadataProvider, fetched in LoadFundAsync.
-        // TODO: _navBuckets — computed from the mirrored NAV series in AssembleAgentInputAsync.
-        // TODO: _fundSnapshots — computed from the mirrored NAV series in AssembleAgentInputAsync.
+        // TODO: _fundSnapshots — the 12w/1y slice; no seam and no mirrored math for it yet.
         // TODO: _holdings — from IPositionsRepository, filtered to this signal's ISIN.
         // TODO: _portfolioStructure — portfolio_structure.md has no Application-level parser seam.
         _agentOutput = _agent.RunInMemory(
