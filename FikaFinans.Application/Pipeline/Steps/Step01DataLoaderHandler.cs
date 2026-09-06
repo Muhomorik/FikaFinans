@@ -15,6 +15,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly NavSyncOptions _options;
     private readonly IFundMetadataProvider _metadata;
     private readonly IFundSummaryProvider _summary;
+    private readonly IFundSnapshotProvider _snapshots;
     private readonly IIsinProgressRepository _isinProgress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
@@ -48,6 +49,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         NavSyncOptions options,
         IFundMetadataProvider metadata,
         IFundSummaryProvider summary,
+        IFundSnapshotProvider snapshots,
         IIsinProgressRepository isinProgress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
@@ -64,6 +66,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(summary);
+        ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(isinProgress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
@@ -75,6 +78,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _options = options;
         _metadata = metadata;
         _summary = summary;
+        _snapshots = snapshots;
         _isinProgress = isinProgress;
         _gateway = gateway;
         _funds = funds;
@@ -124,23 +128,32 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         if (buckets.Count == 0)
             _logger.Debug("Step 1 no NAV buckets — isin={0}", signal.Isin.Value);
 
-        // TODO: _fundSnapshots — the 12w/1y slice has no seam, and the mirrored
-        // calculator only covers the 2w window shape.
+        var snapshot = await _snapshots
+            .GetSnapshotAsync(signal.Isin, _family, _isoWeek, ct)
+            .ConfigureAwait(false);
+
+        // Left unkeyed when null so the agent hits its own "snapshot missing" warning
+        // rather than being handed an entry whose metrics are all null anyway.
+        _fundSnapshots = snapshot is null
+            ? new Dictionary<Isin, FundSnapshot>()
+            : new Dictionary<Isin, FundSnapshot> { [signal.Isin] = snapshot };
+
+        if (snapshot is null)
+            _logger.Debug("Step 1 no snapshot — isin={0}", signal.Isin.Value);
     }
 
     /// <inheritdoc />
     public Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default)
     {
         // Everything the agent joins is already in memory by now — this phase opens no file and
-        // touches no database. _fundMetadata and _navBuckets arrive from the earlier phases
-        // through IFundMetadataProvider and IFundSummaryProvider, so their source swaps (SQLite
-        // today, REST later) without this call changing. The rest are still the empty defaults,
+        // touches no database. _fundMetadata, _navBuckets and _fundSnapshots arrive from the
+        // earlier phases through the three fetch seams, so their source swaps (SQLite today,
+        // REST later) without this call changing. The rest are still the empty defaults,
         // wherever the seam that fills them has not been built yet.
 
         // TODO: _family — no seam; CompanyFilter is the detector's, not this step's.
         // TODO: _isoWeek — no seam; derived from the signal's NavDate once that rule is settled.
         // TODO: _runId — minting seam is still open (see the constructor TODO).
-        // TODO: _fundSnapshots — the 12w/1y slice; no seam and no mirrored math for it yet.
         // TODO: _holdings — from IPositionsRepository, filtered to this signal's ISIN.
         // TODO: _portfolioStructure — portfolio_structure.md has no Application-level parser seam.
         _agentOutput = _agent.RunInMemory(
