@@ -64,6 +64,11 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         }
     }
 
+    /// <summary>
+    /// Parses the four text inputs, then joins. A <see cref="TextReader"/> is a serialization
+    /// boundary, so this overload stays tied to the producer's file formats and loses readers one
+    /// at a time as inputs move off disk.
+    /// </summary>
     public DataLoaderOutput RunInMemory(
         string family, string isoWeek, PipelineRunId runId,
         TextReader metadataCsv, TextReader summaryCsv, TextReader snapshotCsv,
@@ -74,8 +79,25 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         var snapshots = _snapshotParser.Parse(snapshotCsv);
         var structure = _portfolioParser.Parse(portfolioStructureMd);
 
-        return Join(family, isoWeek, runId, metadata, summary, snapshots, positions, structure);
+        return RunInMemory(
+            Company.From(family), IsoWeek.From(isoWeek), runId,
+            metadata, summary, snapshots, positions, structure);
     }
+
+    /// <summary>
+    /// Joins already-parsed inputs. Pure and storage-agnostic — reads nothing, writes nothing, so
+    /// the caller owns both ends of the read-modify-write and catches
+    /// <see cref="DataLoaderHaltException"/> itself. Every input is a domain model on purpose: the
+    /// loader must not know whether buckets came from a CSV, the SQLite mirror or a REST call.
+    /// </summary>
+    public DataLoaderOutput RunInMemory(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundMetadata> metadata,
+        IReadOnlyDictionary<Isin, IReadOnlyList<NavBucket>> summary,
+        IReadOnlyDictionary<Isin, FundSnapshot> snapshots,
+        PositionsParseResult positions,
+        PortfolioStructure structure)
+        => Join(family.Value, isoWeek.Value, runId, metadata, summary, snapshots, positions, structure);
 
     /// <summary>
     /// Adapter from repo rows back to <see cref="PositionsParseResult"/> so

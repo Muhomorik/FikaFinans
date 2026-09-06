@@ -55,6 +55,40 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _logger = logger;
     }
 
-    public Task Step01LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default)
+    /// <summary>
+    /// Marks the fund's progress row in-flight before anything is read — the half of
+    /// <c>ClaimIsinProgressAsync</c> that must precede the fetch, so an at-least-once redelivery
+    /// is detectable instead of racing a second full fetch.
+    /// </summary>
+    public Task BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    /// <summary>Reads the identity slice and the NAV history delta through the fetch seam.</summary>
+    public Task LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    /// <summary>
+    /// Computes the bucketed and rolling-window metrics from the mirrored series, giving the
+    /// agent the inputs that arrive as producer CSVs today.
+    /// </summary>
+    public Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    /// <summary>Joins the assembled inputs via <see cref="IDataLoaderAgent.RunInMemory"/>.</summary>
+    public Task RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    /// <summary>
+    /// Writes the two outputs — <c>Step01Json</c> on the progress row (latest-only) and the new
+    /// raw NAV rows (accumulating).
+    /// </summary>
+    public Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    /// <summary>
+    /// Emits the step-2 trigger, after the write so a crash between the two replays this step
+    /// rather than advancing the chain past an output that was never written.
+    /// </summary>
+    public Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default)
         => throw new NotImplementedException();
 }
