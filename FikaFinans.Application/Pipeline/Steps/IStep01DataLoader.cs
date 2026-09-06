@@ -1,4 +1,5 @@
 using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Domain.Funds;
 
 namespace FikaFinans.Application.Pipeline.Steps;
 
@@ -14,7 +15,7 @@ public interface IStep01DataLoader
     Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default);
 
     /// <summary>Joins the assembled inputs via <c>IDataLoaderAgent.RunInMemory</c>.</summary>
-    Task RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default);
+    Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default);
 
     /// <summary>Writes <c>Step01Json</c> on the progress row and the new raw NAV rows.</summary>
     Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default);
