@@ -16,6 +16,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IFundMetadataProvider _metadata;
     private readonly IFundSummaryProvider _summary;
     private readonly IFundSnapshotProvider _snapshots;
+    private readonly IHoldingsProvider _holdingsProvider;
     private readonly IIsinProgressRepository _isinProgress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
@@ -50,6 +51,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IFundMetadataProvider metadata,
         IFundSummaryProvider summary,
         IFundSnapshotProvider snapshots,
+        IHoldingsProvider holdingsProvider,
         IIsinProgressRepository isinProgress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
@@ -67,6 +69,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(holdingsProvider);
         ArgumentNullException.ThrowIfNull(isinProgress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
@@ -79,6 +82,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _metadata = metadata;
         _summary = summary;
         _snapshots = snapshots;
+        _holdingsProvider = holdingsProvider;
         _isinProgress = isinProgress;
         _gateway = gateway;
         _funds = funds;
@@ -108,6 +112,16 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             _logger.Debug("Step 1 metadata miss — isin={0}, company='{1}'", signal.Isin.Value, _family.Value);
 
         _fundMetadata = metadata is null ? Array.Empty<FundMetadata>() : [metadata];
+
+        // Portfolio-scoped, unlike everything else this phase reads: cash, the frozen list
+        // and the downstream weight sums all span the whole book.
+        //
+        // TODO: this is the halt exposure — the join throws held_isin_not_in_metadata for
+        // any held ISIN it has no metadata for, and _fundMetadata currently covers the
+        // signal's fund alone. Harmless while _family is empty (metadata comes back empty,
+        // so nothing is held as far as the join can tell), but the moment identity is
+        // wired, either metadata has to span every held ISIN or that rule has to give.
+        _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
 
         // TODO: NAV history delta — the mirrored-series read has no seam yet.
     }
@@ -154,7 +168,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // TODO: _family — no seam; CompanyFilter is the detector's, not this step's.
         // TODO: _isoWeek — no seam; derived from the signal's NavDate once that rule is settled.
         // TODO: _runId — minting seam is still open (see the constructor TODO).
-        // TODO: _holdings — from IPositionsRepository, filtered to this signal's ISIN.
         // TODO: _portfolioStructure — portfolio_structure.md has no Application-level parser seam.
         _agentOutput = _agent.RunInMemory(
             _family, _isoWeek, _runId,
