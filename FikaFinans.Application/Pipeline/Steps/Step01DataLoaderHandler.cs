@@ -17,6 +17,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IFundSummaryProvider _summary;
     private readonly IFundSnapshotProvider _snapshots;
     private readonly IHoldingsProvider _holdingsProvider;
+    private readonly IPortfolioStructureProvider _structureProvider;
     private readonly IIsinProgressRepository _isinProgress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
@@ -52,6 +53,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IFundSummaryProvider summary,
         IFundSnapshotProvider snapshots,
         IHoldingsProvider holdingsProvider,
+        IPortfolioStructureProvider structureProvider,
         IIsinProgressRepository isinProgress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
@@ -70,6 +72,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(holdingsProvider);
+        ArgumentNullException.ThrowIfNull(structureProvider);
         ArgumentNullException.ThrowIfNull(isinProgress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
@@ -83,6 +86,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _summary = summary;
         _snapshots = snapshots;
         _holdingsProvider = holdingsProvider;
+        _structureProvider = structureProvider;
         _isinProgress = isinProgress;
         _gateway = gateway;
         _funds = funds;
@@ -122,6 +126,10 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // so nothing is held as far as the join can tell), but the moment identity is
         // wired, either metadata has to span every held ISIN or that rule has to give.
         _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
+
+        // Pinnings are configuration, not producer data, so they are read per run rather
+        // than per fund — the join needs the whole set to resolve one fund's layer.
+        _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
 
         // TODO: NAV history delta — the mirrored-series read has no seam yet.
     }
@@ -168,7 +176,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // TODO: _family — no seam; CompanyFilter is the detector's, not this step's.
         // TODO: _isoWeek — no seam; derived from the signal's NavDate once that rule is settled.
         // TODO: _runId — minting seam is still open (see the constructor TODO).
-        // TODO: _portfolioStructure — portfolio_structure.md has no Application-level parser seam.
         _agentOutput = _agent.RunInMemory(
             _family, _isoWeek, _runId,
             _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);
