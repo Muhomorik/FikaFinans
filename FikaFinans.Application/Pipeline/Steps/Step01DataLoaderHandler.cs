@@ -3,6 +3,7 @@ using System.Globalization;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Fetch;
+using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
@@ -20,6 +21,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IFundSnapshotProvider _snapshots;
     private readonly IHoldingsProvider _holdingsProvider;
     private readonly IPortfolioStructureProvider _structureProvider;
+    private readonly IPipelineRunIdFactory _runIdFactory;
     private readonly IIsinProgressRepository _isinProgress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
@@ -37,7 +39,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// <summary>Week of the trading date that raised the signal.</summary>
     private IsoWeek _isoWeek = new(string.Empty);
 
-    /// <summary>Minted when the progress row is claimed; empty until then.</summary>
+    /// <summary>Names this run in the output and every log line; empty until the fund loads.</summary>
     private PipelineRunId _runId = new(string.Empty);
 
     /// <summary>The signal's fund, or empty when it is out of scope or unknown.</summary>
@@ -71,6 +73,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IFundSnapshotProvider snapshots,
         IHoldingsProvider holdingsProvider,
         IPortfolioStructureProvider structureProvider,
+        IPipelineRunIdFactory runIdFactory,
         IIsinProgressRepository isinProgress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
@@ -83,13 +86,13 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         //   fetch seam        identity slice + NAV history delta
         //   IPipelineSignals  emit Step01DoneSignal
         //   StepEvent sink    shape deferred
-        //   run id            minting seam is an open question in the parent plan
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(holdingsProvider);
         ArgumentNullException.ThrowIfNull(structureProvider);
+        ArgumentNullException.ThrowIfNull(runIdFactory);
         ArgumentNullException.ThrowIfNull(isinProgress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
@@ -104,6 +107,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _snapshots = snapshots;
         _holdingsProvider = holdingsProvider;
         _structureProvider = structureProvider;
+        _runIdFactory = runIdFactory;
         _isinProgress = isinProgress;
         _gateway = gateway;
         _funds = funds;
@@ -125,6 +129,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _isoWeek = ToIsoWeek(signal.NavDate);
 
         _family = new Company(_options.CompanyFilter);
+
+        _runId = _runIdFactory.NewRunId(signal.Isin, signal.NavDate);
 
         var metadata = await _metadata
             .GetMetadataAsync(signal.Isin, _family, _isoWeek, ct)
@@ -205,11 +211,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // Everything the agent joins is already in memory by now — this phase opens no file and
         // touches no database. _fundMetadata, _navBuckets and _fundSnapshots arrive from the
         // earlier phases through the three fetch seams, so their source swaps (SQLite today,
-        // REST later) without this call changing. The rest are still the empty defaults,
-        // wherever the seam that fills them has not been built yet.
-
-        // TODO: _runId — minted by IPipelineRunIdFactory once BeginProcessingAsync claims
-        // the row; that phase is still a stub, so this stays empty.
+        // REST later) without this call changing.
         _agentOutput = _agent.RunInMemory(
             _family, _isoWeek, _runId,
             _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);
