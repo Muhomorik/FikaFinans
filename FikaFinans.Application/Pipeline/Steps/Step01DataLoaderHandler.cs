@@ -28,17 +28,31 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IDataLoaderAgent _agent;
     private readonly ILogger _logger;
 
-    // In-flight state for one signal, filled phase by phase. Every one starts empty and stays
-    // empty until its fetch seam exists — the agent must never be handed a value read from disk
-    // at join time.
+    /// <summary>
+    /// Company filter from configuration — only funds belonging to it are processed. 
+    /// Holds one company today. Empty filters means no filtering.
+    /// </summary>
     private Company _family = new(string.Empty);
+
+    /// <summary>Week of the trading date that raised the signal.</summary>
     private IsoWeek _isoWeek = new(string.Empty);
+
+    /// <summary>Minted when the progress row is claimed; empty until then.</summary>
     private PipelineRunId _runId = new(string.Empty);
 
+    /// <summary>The signal's fund, or empty when it is out of scope or unknown.</summary>
     private IReadOnlyList<FundMetadata> _fundMetadata = Array.Empty<FundMetadata>();
+
+    /// <summary>Two-week windows, keyed by ISIN.</summary>
     private IReadOnlyDictionary<Isin, IReadOnlyList<NavBucket>> _navBuckets = new Dictionary<Isin, IReadOnlyList<NavBucket>>();
+
+    /// <summary>12-week and 1-year metrics, keyed by ISIN. Unkeyed when unavailable.</summary>
     private IReadOnlyDictionary<Isin, FundSnapshot> _fundSnapshots = new Dictionary<Isin, FundSnapshot>();
+
+    /// <summary>Layer pinnings for the whole portfolio.</summary>
     private PortfolioStructure _portfolioStructure = new() { Pinnings = Array.Empty<PinnedFund>() };
+
+    /// <summary>Every held position plus cash — portfolio-scoped, not per fund.</summary>
     private PositionsParseResult _holdings = new()
     {
         Holdings = Array.Empty<Position>(),
@@ -47,6 +61,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         TotalRowCount = 0,
     };
 
+    /// <summary>What the agent joined, kept for the phases that persist and emit it.</summary>
     private DataLoaderOutput? _agentOutput;
 
     public Step01DataLoaderHandler(
@@ -109,13 +124,14 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
 
         _isoWeek = ToIsoWeek(signal.NavDate);
 
-        // TODO: _family is still empty, and the SQLite provider treats a company mismatch as
-        // "out of scope" — so this returns null for every fund until the identity seam exists.
-        // The miss is logged because it is indistinguishable from an unknown ISIN.
+        _family = new Company(_options.CompanyFilter);
+
         var metadata = await _metadata
             .GetMetadataAsync(signal.Isin, _family, _isoWeek, ct)
             .ConfigureAwait(false);
 
+        // A miss is indistinguishable from an unknown ISIN, so it is logged rather than
+        // thrown — the fund simply produces no record downstream.
         if (metadata is null)
             _logger.Debug("Step 1 metadata miss — isin={0}, company='{1}'", signal.Isin.Value, _family.Value);
 
@@ -124,11 +140,12 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // Portfolio-scoped, unlike everything else this phase reads: cash, the frozen list
         // and the downstream weight sums all span the whole book.
         //
-        // TODO: this is the halt exposure — the join throws held_isin_not_in_metadata for
-        // any held ISIN it has no metadata for, and _fundMetadata currently covers the
-        // signal's fund alone. Harmless while _family is empty (metadata comes back empty,
-        // so nothing is held as far as the join can tell), but the moment identity is
-        // wired, either metadata has to span every held ISIN or that rule has to give.
+        // TODO: this is the halt exposure, and it is live — the join throws
+        // held_isin_not_in_metadata for any held ISIN it has no metadata for, while
+        // _fundMetadata covers the signal's fund alone. A portfolio holding a second fund
+        // trips it. Either metadata spans every held ISIN, or that rule stops applying to
+        // per-ISIN runs; the orchestration plan lists the same question for pin matching
+        // and has not settled it.
         _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
 
         // Pinnings are configuration, not producer data, so they are read per run rather
@@ -191,9 +208,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // REST later) without this call changing. The rest are still the empty defaults,
         // wherever the seam that fills them has not been built yet.
 
-        // TODO: _family — no seam; CompanyFilter is the detector's, not this step's.
-        // TODO: _isoWeek — no seam; derived from the signal's NavDate once that rule is settled.
-        // TODO: _runId — minting seam is still open (see the constructor TODO).
+        // TODO: _runId — minted by IPipelineRunIdFactory once BeginProcessingAsync claims
+        // the row; that phase is still a stub, so this stays empty.
         _agentOutput = _agent.RunInMemory(
             _family, _isoWeek, _runId,
             _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);

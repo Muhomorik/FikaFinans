@@ -88,7 +88,11 @@ public sealed class YieldRaccoonSqliteMetadataProvider : IFundMetadataProvider
 
         // The export filename's company token is lower-cased while CompanyName
         // preserves original case, so this match is deliberately case-insensitive.
-        if (!string.Equals(profile.CompanyName, company.Value, StringComparison.OrdinalIgnoreCase))
+        // An empty company is no filter at all — the reading NavSyncOptions documents,
+        // NavChangeDetector implements, and YR's own profile query gives a null
+        // @company parameter.
+        if (!string.IsNullOrWhiteSpace(company.Value) &&
+            !string.Equals(profile.CompanyName, company.Value, StringComparison.OrdinalIgnoreCase))
         {
             _logger.Trace(
                 "YR metadata read done — isin={0} belongs to '{1}', not '{2}'; treated as out of scope",
