@@ -55,13 +55,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private PortfolioStructure _portfolioStructure = new() { Pinnings = Array.Empty<PinnedFund>() };
 
     /// <summary>Every held position plus cash — portfolio-scoped, not per fund.</summary>
-    private PositionsParseResult _holdings = new()
-    {
-        Holdings = Array.Empty<Position>(),
-        CashAvailableKr = 0m,
-        Warnings = Array.Empty<string>(),
-        TotalRowCount = 0,
-    };
+    private PositionsParseResult _holdings = PositionsParseResult.Empty;
 
     /// <summary>What the agent joined, kept for the phases that persist and emit it.</summary>
     private DataLoaderOutput? _agentOutput;
@@ -82,10 +76,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IDataLoaderAgent agent,
         ILogger logger)
     {
-        // TODO (01-dataloader.md) — not yet expressible, no type exists:
-        //   fetch seam        identity slice + NAV history delta
-        //   IPipelineSignals  emit Step01DoneSignal
-        //   StepEvent sink    shape deferred
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(summary);
@@ -118,6 +108,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
+    // TODO: claim the progress row through _isinProgress — state to Processing, stamp
+    // ProcessingStartedAt, clear the later columns. Losing the race means returning
+    // without starting a run, so the caller needs to hear which happened.
     public Task BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default)
         => throw new NotImplementedException();
 
@@ -146,19 +139,22 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // Portfolio-scoped, unlike everything else this phase reads: cash, the frozen list
         // and the downstream weight sums all span the whole book.
         //
-        // TODO: this is the halt exposure, and it is live — the join throws
-        // held_isin_not_in_metadata for any held ISIN it has no metadata for, while
-        // _fundMetadata covers the signal's fund alone. A portfolio holding a second fund
-        // trips it. Either metadata spans every held ISIN, or that rule stops applying to
-        // per-ISIN runs; the orchestration plan lists the same question for pin matching
-        // and has not settled it.
+        // TODO: live halt exposure — the join throws held_isin_not_in_metadata for any held
+        // ISIN it has no metadata for, and _fundMetadata covers the signal's fund alone, so
+        // a second holding trips it. Either metadata spans every held ISIN or the rule stops
+        // applying to per-ISIN runs; the plan asks the same of pin matching, unanswered.
         _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
 
         // Pinnings are configuration, not producer data, so they are read per run rather
         // than per fund — the join needs the whole set to resolve one fund's layer.
         _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
 
-        // TODO: NAV history delta — the mirrored-series read has no seam yet.
+        // TODO: NAV history delta — nothing reads or writes the local mirror yet, so there
+        // is no raw series to diff against.
+        //
+        // TODO: the summary and snapshot seams read YieldRaccoon's database straight, which
+        // is the opposite of the cache-first mirror the plan picked. Mirror-backed
+        // implementations replace them once the mirror holds rows.
     }
 
     /// <summary>
@@ -220,10 +216,14 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
+    // TODO: store _agentOutput and close the progress row. The old Run path wrote JSON under
+    // IPathsService; where it lands now is open, and the NAV mirror write belongs here too.
     public Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
         => throw new NotImplementedException();
 
     /// <inheritdoc />
+    // TODO: emit Step01DoneSignal through _gateway so step 2 picks the fund up, and record a
+    // StepEvent — neither type exists yet, and the event's shape is still deferred.
     public Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default)
         => throw new NotImplementedException();
 }
