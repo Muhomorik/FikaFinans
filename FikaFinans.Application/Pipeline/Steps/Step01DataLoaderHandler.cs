@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Fetch;
@@ -105,6 +107,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     {
         ArgumentNullException.ThrowIfNull(signal);
 
+        _isoWeek = ToIsoWeek(signal.NavDate);
+
         // TODO: _family is still empty, and the SQLite provider treats a company mismatch as
         // "out of scope" — so this returns null for every fund until the identity seam exists.
         // The miss is logged because it is indistinguishable from an unknown ISIN.
@@ -132,6 +136,20 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
 
         // TODO: NAV history delta — the mirrored-series read has no seam yet.
+    }
+
+    /// <summary>
+    /// Returns the ISO-8601 week label that a trading date falls in.
+    /// </summary>
+    /// <param name="navDate">Read in its own offset; converting to UTC can move the week.</param>
+    /// <returns>A label in <c>YYYY-Www</c> form, for example <c>2026-W18</c>.</returns>
+    private static IsoWeek ToIsoWeek(DateTimeOffset navDate)
+    {
+        var date = navDate.Date;
+
+        return IsoWeek.From(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ISOWeek.GetYear(date):D4}-W{ISOWeek.GetWeekOfYear(date):D2}"));
     }
 
     /// <inheritdoc />
