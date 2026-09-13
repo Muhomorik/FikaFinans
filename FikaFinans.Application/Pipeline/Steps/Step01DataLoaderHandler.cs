@@ -136,25 +136,12 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
 
         _fundMetadata = metadata is null ? Array.Empty<FundMetadata>() : [metadata];
 
-        // Portfolio-scoped, unlike everything else this phase reads: cash, the frozen list
-        // and the downstream weight sums all span the whole book.
-        //
-        // TODO: live halt exposure — the join throws held_isin_not_in_metadata for any held
-        // ISIN it has no metadata for, and _fundMetadata covers the signal's fund alone, so
-        // a second holding trips it. Either metadata spans every held ISIN or the rule stops
-        // applying to per-ISIN runs; the plan asks the same of pin matching, unanswered.
+        // One row per held fund, plus the cash balance available to trade with.
         _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
 
         // Pinnings are configuration, not producer data, so they are read per run rather
         // than per fund — the join needs the whole set to resolve one fund's layer.
         _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
-
-        // TODO: NAV history delta — nothing reads or writes the local mirror yet, so there
-        // is no raw series to diff against.
-        //
-        // TODO: the summary and snapshot seams read YieldRaccoon's database straight, which
-        // is the opposite of the cache-first mirror the plan picked. Mirror-backed
-        // implementations replace them once the mirror holds rows.
     }
 
     /// <summary>
@@ -204,10 +191,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// <inheritdoc />
     public Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default)
     {
-        // Everything the agent joins is already in memory by now — this phase opens no file and
-        // touches no database. _fundMetadata, _navBuckets and _fundSnapshots arrive from the
-        // earlier phases through the three fetch seams, so their source swaps (SQLite today,
-        // REST later) without this call changing.
+        // Everything the agent joins is already in memory by now — this phase opens no file
+        // and touches no database. The earlier phases fill every argument through a fetch
+        // seam, so their source swaps (SQLite today, REST later) without this call changing.
         _agentOutput = _agent.RunInMemory(
             _family, _isoWeek, _runId,
             _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);
