@@ -13,4 +13,4 @@ namespace FikaFinans.Application.Pipeline.Signals;
 /// a Queue Storage message.
 /// </summary>
 [DebuggerDisplay("{Isin.Value,nq} @ {NavDate.Date,nq:yyyy-MM-dd}")]
-public sealed record NavChangeSignal(Isin Isin, DateTimeOffset NavDate);
+public sealed record NavChangeSignal(Isin Isin, DateTimeOffset NavDate) : IPipelineSignal;
