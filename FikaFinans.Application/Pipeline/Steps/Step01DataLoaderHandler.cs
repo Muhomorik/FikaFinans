@@ -7,6 +7,7 @@ using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
@@ -23,7 +24,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IHoldingsProvider _holdingsProvider;
     private readonly IPortfolioStructureProvider _structureProvider;
     private readonly IPipelineRunIdFactory _runIdFactory;
-    private readonly IIsinProgressClaim _progressClaim;
+    private readonly IIsinProgressStore _progress;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
     private readonly IPositionsRepository _positions;
@@ -61,6 +62,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// <summary>What the agent joined, kept for the phases that persist and emit it.</summary>
     private DataLoaderOutput? _agentOutput;
 
+    /// <summary>This fund's progress row as this run last wrote it; null until it is claimed.</summary>
+    private IsinProgressEntity? _progressRow;
+
     public Step01DataLoaderHandler(
         NavSyncOptions options,
         IFundMetadataProvider metadata,
@@ -69,7 +73,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IHoldingsProvider holdingsProvider,
         IPortfolioStructureProvider structureProvider,
         IPipelineRunIdFactory runIdFactory,
-        IIsinProgressClaim progressClaim,
+        IIsinProgressStore progress,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
         IPositionsRepository positions,
@@ -84,7 +88,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(holdingsProvider);
         ArgumentNullException.ThrowIfNull(structureProvider);
         ArgumentNullException.ThrowIfNull(runIdFactory);
-        ArgumentNullException.ThrowIfNull(progressClaim);
+        ArgumentNullException.ThrowIfNull(progress);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
         ArgumentNullException.ThrowIfNull(positions);
@@ -99,7 +103,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _holdingsProvider = holdingsProvider;
         _structureProvider = structureProvider;
         _runIdFactory = runIdFactory;
-        _progressClaim = progressClaim;
+        _progress = progress;
         _gateway = gateway;
         _funds = funds;
         _positions = positions;
@@ -113,22 +117,28 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     {
         ArgumentNullException.ThrowIfNull(signal);
 
+        _logger.Debug(
+            "Step 1 begin — isin={0}, navDate={1:yyyy-MM-dd}",
+            signal.Isin.Value, signal.NavDate);
+
         try
         {
-            var claimed = await _progressClaim
-                .TryClaimAsync(signal.Isin, signal.NavDate, ct)
+            _progressRow = await _progress
+                .ClaimAsync(signal.Isin, signal.NavDate, ct)
                 .ConfigureAwait(false);
 
-            if (claimed)
-                _logger.Debug(
-                    "Step 1 claimed — isin={0}, navDate={1:yyyy-MM-dd}",
-                    signal.Isin.Value, signal.NavDate);
-            else
+            if (_progressRow is null)
+            {
                 _logger.Info(
                     "Step 1 skipped — isin={0} already in flight, navDate={1:yyyy-MM-dd}",
                     signal.Isin.Value, signal.NavDate);
 
-            return claimed;
+                return false;
+            }
+
+            _logger.Debug("Step 1 claimed — isin={0}", signal.Isin.Value);
+
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -233,11 +243,47 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    // TODO: store _agentOutput and release the row BeginProcessingAsync claimed — a second
-    // seam alongside IIsinProgressClaim. The old Run path wrote JSON under IPathsService;
-    // where it lands now is open, and the NAV mirror write belongs here too.
-    public Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    // TODO: write the new raw NAV rows the interface also promises. Nothing to write yet —
+    // no phase fetches a history delta, so the mirror has no rows to take.
+    public async Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // Both are set by the phases this one runs after. Reaching here without them is a
+        // caller running the phases out of order, not a condition to recover from.
+        if (_agentOutput is null)
+            throw new InvalidOperationException("RunAgentAsync must run before PersistAsync.");
+
+        if (_progressRow is null)
+            throw new InvalidOperationException("BeginProcessingAsync must run before PersistAsync.");
+
+        _logger.Debug(
+            "Step 1 persist — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+        try
+        {
+            _progressRow = await _progress
+                .SaveStepOutputAsync(signal.Isin, StepId.DataLoader, _runId, _agentOutput, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug(
+                "Step 1 persisted — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown, unlike the claim: EmitDoneAsync must not tell step 2 to read an
+            // output that was never stored. The row stays in flight for the janitor.
+            _logger.Error(
+                ex, "Step 1 persist failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            throw;
+        }
+    }
 
     /// <inheritdoc />
     // TODO: emit Step01DoneSignal through _gateway so step 2 picks the fund up, and record a
