@@ -6,7 +6,11 @@ namespace FikaFinans.Application.Pipeline.Steps;
 public interface IStep01DataLoader
 {
     /// <summary>Marks the fund's progress row in-flight, before anything is read.</summary>
-    Task BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default);
+    /// <returns>
+    /// <c>true</c> when the row was claimed and the remaining phases may run;
+    /// <c>false</c> when another run already holds it or the store could not be reached.
+    /// </returns>
+    Task<bool> BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default);
 
     /// <summary>Reads the identity slice and the NAV history delta through the fetch seam.</summary>
     Task LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default);

@@ -3,6 +3,7 @@ using System.Globalization;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Fetch;
+using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Storage.Bank;
@@ -22,7 +23,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IHoldingsProvider _holdingsProvider;
     private readonly IPortfolioStructureProvider _structureProvider;
     private readonly IPipelineRunIdFactory _runIdFactory;
-    private readonly IIsinProgressRepository _isinProgress;
+    private readonly IIsinProgressClaim _progressClaim;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
     private readonly IPositionsRepository _positions;
@@ -68,7 +69,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IHoldingsProvider holdingsProvider,
         IPortfolioStructureProvider structureProvider,
         IPipelineRunIdFactory runIdFactory,
-        IIsinProgressRepository isinProgress,
+        IIsinProgressClaim progressClaim,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
         IPositionsRepository positions,
@@ -83,7 +84,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(holdingsProvider);
         ArgumentNullException.ThrowIfNull(structureProvider);
         ArgumentNullException.ThrowIfNull(runIdFactory);
-        ArgumentNullException.ThrowIfNull(isinProgress);
+        ArgumentNullException.ThrowIfNull(progressClaim);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
         ArgumentNullException.ThrowIfNull(positions);
@@ -98,7 +99,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _holdingsProvider = holdingsProvider;
         _structureProvider = structureProvider;
         _runIdFactory = runIdFactory;
-        _isinProgress = isinProgress;
+        _progressClaim = progressClaim;
         _gateway = gateway;
         _funds = funds;
         _positions = positions;
@@ -108,11 +109,41 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    // TODO: claim the progress row through _isinProgress — state to Processing, stamp
-    // ProcessingStartedAt, clear the later columns. Losing the race means returning
-    // without starting a run, so the caller needs to hear which happened.
-    public Task BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    public async Task<bool> BeginProcessingAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        try
+        {
+            var claimed = await _progressClaim
+                .TryClaimAsync(signal.Isin, signal.NavDate, ct)
+                .ConfigureAwait(false);
+
+            if (claimed)
+                _logger.Debug(
+                    "Step 1 claimed — isin={0}, navDate={1:yyyy-MM-dd}",
+                    signal.Isin.Value, signal.NavDate);
+            else
+                _logger.Info(
+                    "Step 1 skipped — isin={0} already in flight, navDate={1:yyyy-MM-dd}",
+                    signal.Isin.Value, signal.NavDate);
+
+            return claimed;
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(
+                ex, "Step 1 claim failed — isin={0}, navDate={1:yyyy-MM-dd}",
+                signal.Isin.Value, signal.NavDate);
+
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     public async Task LoadFundAsync(NavChangeSignal signal, CancellationToken ct = default)
@@ -202,8 +233,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    // TODO: store _agentOutput and close the progress row. The old Run path wrote JSON under
-    // IPathsService; where it lands now is open, and the NAV mirror write belongs here too.
+    // TODO: store _agentOutput and release the row BeginProcessingAsync claimed — a second
+    // seam alongside IIsinProgressClaim. The old Run path wrote JSON under IPathsService;
+    // where it lands now is open, and the NAV mirror write belongs here too.
     public Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
         => throw new NotImplementedException();
 
