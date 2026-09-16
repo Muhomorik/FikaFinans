@@ -25,6 +25,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IPortfolioStructureProvider _structureProvider;
     private readonly IPipelineRunIdFactory _runIdFactory;
     private readonly IIsinProgressStore _progress;
+    private readonly IPipelineSignals _signals;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
     private readonly IPositionsRepository _positions;
@@ -74,6 +75,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IPortfolioStructureProvider structureProvider,
         IPipelineRunIdFactory runIdFactory,
         IIsinProgressStore progress,
+        IPipelineSignals signals,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
         IPositionsRepository positions,
@@ -89,6 +91,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(structureProvider);
         ArgumentNullException.ThrowIfNull(runIdFactory);
         ArgumentNullException.ThrowIfNull(progress);
+        ArgumentNullException.ThrowIfNull(signals);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
         ArgumentNullException.ThrowIfNull(positions);
@@ -104,6 +107,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _structureProvider = structureProvider;
         _runIdFactory = runIdFactory;
         _progress = progress;
+        _signals = signals;
         _gateway = gateway;
         _funds = funds;
         _positions = positions;
@@ -286,8 +290,42 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    // TODO: emit Step01DoneSignal through _gateway so step 2 picks the fund up, and record a
-    // StepEvent — neither type exists yet, and the event's shape is still deferred.
-    public Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default)
-        => throw new NotImplementedException();
+    public async Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // Names the run the signal belongs to, so it has to be minted by now. The write
+        // this emit follows is PersistAsync's, which throws rather than returning quietly
+        // when it fails — so a caller that ran the phases in order has already stored the
+        // output by the time it reaches here.
+        if (string.IsNullOrEmpty(_runId.Value))
+            throw new InvalidOperationException("LoadFundAsync must run before EmitDoneAsync.");
+
+        _logger.Debug("Step 1 emit — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+        try
+        {
+            // Identity only, no payload: step 2 reads the record back off the row, so
+            // nothing travelling here can disagree with what was stored.
+            await _signals
+                .PublishAsync(new Step01DoneSignal(signal.Isin, signal.NavDate, _runId), ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 1 emitted — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The output is stored but step 2 was never told. Rethrown so the caller can
+            // fail the fund; the row stays in flight rather than looking complete.
+            _logger.Error(
+                ex, "Step 1 emit failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            throw;
+        }
+    }
 }
