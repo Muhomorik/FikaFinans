@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 
 using FikaFinans.Application.Paths;
@@ -26,6 +27,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IPipelineRunIdFactory _runIdFactory;
     private readonly IIsinProgressStore _progress;
     private readonly IPipelineSignals _signals;
+    private readonly IStepEventPublisher _stepEvents;
     private readonly IStreamingPipelineGateway _gateway;
     private readonly IFundsRepository _funds;
     private readonly IPositionsRepository _positions;
@@ -66,6 +68,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// <summary>This fund's progress row as this run last wrote it; null until it is claimed.</summary>
     private IsinProgressEntity? _progressRow;
 
+    /// <summary>Runs from the claim, so a reported duration covers every phase.</summary>
+    private readonly Stopwatch _stepDuration = new();
+
     public Step01DataLoaderHandler(
         NavSyncOptions options,
         IFundMetadataProvider metadata,
@@ -76,6 +81,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IPipelineRunIdFactory runIdFactory,
         IIsinProgressStore progress,
         IPipelineSignals signals,
+        IStepEventPublisher stepEvents,
         IStreamingPipelineGateway gateway,
         IFundsRepository funds,
         IPositionsRepository positions,
@@ -92,6 +98,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(runIdFactory);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentNullException.ThrowIfNull(signals);
+        ArgumentNullException.ThrowIfNull(stepEvents);
         ArgumentNullException.ThrowIfNull(gateway);
         ArgumentNullException.ThrowIfNull(funds);
         ArgumentNullException.ThrowIfNull(positions);
@@ -108,6 +115,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _runIdFactory = runIdFactory;
         _progress = progress;
         _signals = signals;
+        _stepEvents = stepEvents;
         _gateway = gateway;
         _funds = funds;
         _positions = positions;
@@ -142,6 +150,11 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
 
             _logger.Debug("Step 1 claimed — isin={0}", signal.Isin.Value);
 
+            // Only now is the fund ours to work on, so this is where the step begins as
+            // far as anything watching is concerned.
+            _stepDuration.Restart();
+            Report(StepEventKind.Started, signal.Isin);
+
             return true;
         }
         catch (OperationCanceledException)
@@ -154,6 +167,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             _logger.Error(
                 ex, "Step 1 claim failed — isin={0}, navDate={1:yyyy-MM-dd}",
                 signal.Isin.Value, signal.NavDate);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
 
             return false;
         }
@@ -188,6 +203,20 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         // than per fund — the join needs the whole set to resolve one fund's layer.
         _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Reports this step's progress for one fund, the way <c>PipelineRunner</c> does for
+    /// the whole run. Elapsed time is measured from the claim, so it spans every phase
+    /// rather than the one that happened to report.
+    /// </summary>
+    /// <param name="kind">Started carries no duration; there is nothing elapsed yet.</param>
+    private void Report(StepEventKind kind, Isin isin, string? message = null)
+        => _stepEvents.Publish(new StepEvent(
+            StepId.DataLoader,
+            kind,
+            isin,
+            message,
+            kind == StepEventKind.Started ? null : _stepDuration.Elapsed));
 
     /// <summary>
     /// Returns the ISO-8601 week label that a trading date falls in.
@@ -285,6 +314,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             _logger.Error(
                 ex, "Step 1 persist failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
 
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
             throw;
         }
     }
@@ -312,6 +343,9 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
                 .ConfigureAwait(false);
 
             _logger.Debug("Step 1 emitted — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            // The last phase, so the step is done for this fund.
+            Report(StepEventKind.Succeeded, signal.Isin);
         }
         catch (OperationCanceledException)
         {
@@ -324,6 +358,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             // fail the fund; the row stays in flight rather than looking complete.
             _logger.Error(
                 ex, "Step 1 emit failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
 
             throw;
         }
