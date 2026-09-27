@@ -223,18 +223,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var sub = _runner.Events.ObserveOn(_uiScheduler!).Subscribe(OnStepEvent);
         _disposables.Add(sub);
 
-        // NAV-change front door: the NAV Sync tab publishes signals through the
-        // detector; here we (the local equivalent of the Azure queue trigger)
-        // collect a batch and kick off a scoped pipeline run for just those
-        // ISINs. Buffer coalesces the per-signal pushes into one run.
+        // NAV-change signals: the local stand-in for the Azure queue trigger. Coalescing
+        // lives here rather than below the call — buffer to drop duplicate funds, then
+        // flatten back to one signal per invocation, because the front door takes one fund.
         var navSource = _scope.Resolve<INavSignalSource>();
+        var frontDoor = _scope.Resolve<IPipelineFrontDoor>();
         var navSub = navSource.Signals
             .Buffer(TimeSpan.FromMilliseconds(250))
-            .Where(batch => batch.Count > 0)
-            .ObserveOn(_uiScheduler!)
-            .Subscribe(OnNavSignalsBatch);
+            .SelectMany(batch => batch.DistinctBy(s => s.Isin))
+            .Subscribe(signal => RunFrontDoorAsync(frontDoor, signal));
         _disposables.Add(navSub);
     }
+
+    /// <summary>
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2-9 still
+    /// run through <see cref="IPipelineRunner"/> from the Run All button.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
+    /// but an exception reaching <c>Subscribe</c> ends the subscription for the session and
+    /// every later signal would be silently dropped.
+    /// </remarks>
+    private void RunFrontDoorAsync(IPipelineFrontDoor frontDoor, NavChangeSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await frontDoor.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 1 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 1 failed for {Isin}", signal.Isin.Value);
+            }
+        });
 
     private void PushContextToAllSteps()
     {
