@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 
 using FikaFinans.Application.Pipeline;
@@ -14,7 +15,7 @@ namespace FikaFinans.Infrastructure.Pipeline;
 /// Register as a singleton — a publisher and a subscriber on separate instances would not
 /// share a stream.
 /// </remarks>
-public sealed class LocalRxStepEventBus : IStepEventPublisher, IDisposable
+public sealed class LocalRxStepEventBus : IStepEventPublisher, IStepEventSource, IDisposable
 {
     private readonly Subject<StepEvent> _events = new();
     private readonly Lock _gate = new();
@@ -24,6 +25,9 @@ public sealed class LocalRxStepEventBus : IStepEventPublisher, IDisposable
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <inheritdoc />
+    public IObservable<StepEvent> Events => _events.AsObservable();
 
     /// <inheritdoc />
     public void Publish(StepEvent stepEvent)

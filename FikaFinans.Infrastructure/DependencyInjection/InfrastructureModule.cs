@@ -495,6 +495,7 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.Register(_ => new LocalRxStepEventBus(
                 LogManager.GetLogger(nameof(LocalRxStepEventBus))))
             .As<IStepEventPublisher>()
+            .As<IStepEventSource>()
             .SingleInstance();
 
         // Deliberately not SingleInstance. The handler carries one run's state in fields —
