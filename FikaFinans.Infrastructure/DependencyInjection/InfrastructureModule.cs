@@ -6,8 +6,12 @@ using FikaFinans.Application.Bank;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Application.Pipeline.Progress;
+using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Application.Settings;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.UseCases;
@@ -18,6 +22,10 @@ using FikaFinans.Infrastructure.Foundry;
 using FikaFinans.Infrastructure.Paths;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Csv;
+using FikaFinans.Infrastructure.Pipeline.Fetch;
+using FikaFinans.Infrastructure.Pipeline.Progress;
+using FikaFinans.Infrastructure.Pipeline.Run;
 using FikaFinans.Infrastructure.Pipeline.Signals;
 using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Prompts;
@@ -421,6 +429,104 @@ public sealed class InfrastructureModule : Autofac.Module
             .SingleInstance();
 
         RegisterNavSyncServices(builder);
+        RegisterStep01Services(builder);
+    }
+
+    /// <summary>
+    /// The redesigned step 1 — its fetch seams, its progress store, its outbound buses, the
+    /// handler and the front door that drives it. Every host difference lands in this method:
+    /// an Azure deployment swaps these registrations and no step code changes.
+    /// </summary>
+    private static void RegisterStep01Services(ContainerBuilder builder)
+    {
+        // The three YieldRaccoon reads — its SQLite file locally, a REST client in Azure.
+        builder.Register(ctx => new YieldRaccoonSqliteMetadataProvider(
+                LogManager.GetLogger(nameof(YieldRaccoonSqliteMetadataProvider)),
+                ctx.Resolve<NavSyncOptions>()))
+            .As<IFundMetadataProvider>()
+            .SingleInstance();
+
+        builder.Register(ctx => new YieldRaccoonSqliteSummaryProvider(
+                LogManager.GetLogger(nameof(YieldRaccoonSqliteSummaryProvider)),
+                ctx.Resolve<NavSyncOptions>()))
+            .As<IFundSummaryProvider>()
+            .SingleInstance();
+
+        builder.Register(ctx => new YieldRaccoonSqliteSnapshotProvider(
+                LogManager.GetLogger(nameof(YieldRaccoonSqliteSnapshotProvider)),
+                ctx.Resolve<NavSyncOptions>()))
+            .As<IFundSnapshotProvider>()
+            .SingleInstance();
+
+        // The two reads of our own data: positions from the bank store, pinnings from the
+        // hand-written markdown file. The parser is a pure function over a TextReader with no
+        // seam of its own, so it is constructed here rather than resolved.
+        builder.Register(ctx => new RepositoryBackedHoldingsProvider(
+                LogManager.GetLogger(nameof(RepositoryBackedHoldingsProvider)),
+                ctx.Resolve<IPositionsRepository>()))
+            .As<IHoldingsProvider>()
+            .SingleInstance();
+
+        builder.Register(ctx => new MarkdownBackedPortfolioStructureProvider(
+                LogManager.GetLogger(nameof(MarkdownBackedPortfolioStructureProvider)),
+                ctx.Resolve<IPathsService>(),
+                new PortfolioStructureMdParser()))
+            .As<IPortfolioStructureProvider>()
+            .SingleInstance();
+
+        builder.RegisterType<PipelineRunIdFactory>()
+            .As<IPipelineRunIdFactory>()
+            .SingleInstance();
+
+        builder.Register(ctx => new RepositoryBackedIsinProgressStore(
+                LogManager.GetLogger(nameof(RepositoryBackedIsinProgressStore)),
+                ctx.Resolve<IIsinProgressRepository>()))
+            .As<IIsinProgressStore>()
+            .SingleInstance();
+
+        // One bus instance per stream, same reason as LocalRxNavSignalBus: a publisher and a
+        // subscriber on separate instances would not share a stream.
+        builder.Register(_ => new LocalRxPipelineSignalBus(
+                LogManager.GetLogger(nameof(LocalRxPipelineSignalBus))))
+            .As<IPipelineSignals>()
+            .As<IPipelineSignalStreams>()
+            .SingleInstance();
+
+        builder.Register(_ => new LocalRxStepEventBus(
+                LogManager.GetLogger(nameof(LocalRxStepEventBus))))
+            .As<IStepEventPublisher>()
+            .SingleInstance();
+
+        // Deliberately not SingleInstance. The handler carries one run's state in fields —
+        // run id, holdings, agent output, progress row — so two funds sharing an instance
+        // would overwrite each other's run.
+        builder.Register(ctx => new Step01DataLoaderHandler(
+                options: ctx.Resolve<NavSyncOptions>(),
+                metadata: ctx.Resolve<IFundMetadataProvider>(),
+                summary: ctx.Resolve<IFundSummaryProvider>(),
+                snapshots: ctx.Resolve<IFundSnapshotProvider>(),
+                holdingsProvider: ctx.Resolve<IHoldingsProvider>(),
+                structureProvider: ctx.Resolve<IPortfolioStructureProvider>(),
+                runIdFactory: ctx.Resolve<IPipelineRunIdFactory>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>(),
+                gateway: ctx.Resolve<IStreamingPipelineGateway>(),
+                funds: ctx.Resolve<IFundsRepository>(),
+                positions: ctx.Resolve<IPositionsRepository>(),
+                paths: ctx.Resolve<IPathsService>(),
+                agent: ctx.Resolve<IDataLoaderAgent>(),
+                logger: LogManager.GetLogger(nameof(Step01DataLoaderHandler))))
+            .As<IStep01DataLoader>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the front door mints a
+        // fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new PipelineFrontDoor(
+                ctx.Resolve<Func<IStep01DataLoader>>(),
+                LogManager.GetLogger(nameof(PipelineFrontDoor))))
+            .As<IPipelineFrontDoor>()
+            .SingleInstance();
     }
 
     /// <summary>
