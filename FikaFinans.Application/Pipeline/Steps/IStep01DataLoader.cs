@@ -1,5 +1,6 @@
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Application.Pipeline.Steps;
 
@@ -26,4 +27,11 @@ public interface IStep01DataLoader
 
     /// <summary>Emits the step-2 trigger — after the write, never before.</summary>
     Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads a finished run's output back for display. A read, never a trigger — opening a
+    /// view must not start anything.
+    /// </summary>
+    /// <returns><c>null</c> when that run wrote no output.</returns>
+    Task<StepOutput?> ReadOutputAsync(PipelineRunId runId, CancellationToken ct = default);
 }

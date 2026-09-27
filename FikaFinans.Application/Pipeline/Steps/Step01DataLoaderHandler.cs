@@ -204,6 +204,33 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<StepOutput?> ReadOutputAsync(
+        PipelineRunId runId, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 1 read — runId={0}", runId.Value);
+
+        try
+        {
+            return await _progress
+                .ReadStepOutputAsync(StepId.DataLoader, runId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A read feeds a view, so a failure costs a display rather than a run. Null lets
+            // the caller show its "nothing here" state instead of surfacing a crash.
+            _logger.Error(ex, "Step 1 read failed — runId={0}", runId.Value);
+
+            return null;
+        }
+    }
+
     /// <summary>
     /// Reports this step's progress for one fund, the way <c>PipelineRunner</c> does for
     /// the whole run. Elapsed time is measured from the claim, so it spans every phase

@@ -38,4 +38,14 @@ public interface IIsinProgressStore
     /// <returns>The row as it now stands, output written.</returns>
     Task<IsinProgressEntity> SaveStepOutputAsync(
         Isin isin, StepId step, PipelineRunId runId, DataLoaderOutput output, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads back every fund record one run wrote for <paramref name="step"/> — the same
+    /// column <see cref="SaveStepOutputAsync"/> fills, across every ISIN in the run.
+    /// </summary>
+    /// <param name="step">Decides which column is read.</param>
+    /// <param name="runId">Only rows naming this run are included.</param>
+    /// <returns><c>null</c> when no row carries output for that run and step.</returns>
+    Task<StepOutput?> ReadStepOutputAsync(
+        StepId step, PipelineRunId runId, CancellationToken ct = default);
 }

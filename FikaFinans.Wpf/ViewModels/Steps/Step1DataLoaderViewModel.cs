@@ -1,12 +1,7 @@
-using System.IO;
 using System.Reactive.Concurrency;
-using System.Text.Json;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
-using FikaFinans.Application.Storage.Bank;
-using FikaFinans.Domain.Funds;
-using FikaFinans.Infrastructure.Pipeline.Json;
-using FikaFinans.Wpf.Services;
+using FikaFinans.Application.Pipeline.Steps;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
@@ -15,7 +10,7 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly IDataLoaderAgent? _agent;
-    private readonly IIsinProgressRepository? _isinProgress;
+    private readonly IStep01DataLoader? _step01;
 
     public override int StepNumber => 1;
     public override string AgentName => "Data loader";
@@ -25,12 +20,12 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 
     public Step1DataLoaderViewModel(ILogger logger, IScheduler uiScheduler,
         IPathsService paths, IDataLoaderAgent agent,
-        IIsinProgressRepository isinProgress)
+        IStep01DataLoader step01)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
-        _isinProgress = isinProgress;
+        _step01 = step01;
     }
 
     protected override async Task RunStepCoreAsync()
@@ -52,36 +47,17 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 
     public override async Task LoadOutputAsync()
     {
-        // 8c: prefer SQLite Step01Json columns; fall back to disk if no row has
-        // a populated column for this RunId (per-step "Run this step" buttons
-        // don't write SQLite, only "Run All" does).
-        if (_isinProgress is not null)
-        {
-            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
-                _isinProgress, RunId, row => row.Step01Json);
-            if (sqliteResult is not null)
-            {
-                OutputJson = sqliteResult.Json;
-                OutputSummaryText = $"{sqliteResult.Funds.Count} funds loaded";
-                return;
-            }
-        }
+        if (_step01 is null) return;
 
-        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
+        var output = await _step01.ReadOutputAsync(RunId);
 
-        var outPath = _paths.DataLoaderOutput(IsoWeek, RunId);
-        if (!File.Exists(outPath))
+        if (output is null)
         {
-            OutputSummaryText = "Output file not found";
+            OutputSummaryText = "Nothing stored for this run yet";
             return;
         }
 
-        var json = await File.ReadAllTextAsync(outPath);
-        OutputJson = json;
-
-        var output = JsonSerializer.Deserialize<DataLoaderOutput>(json, JsonOptions.Default);
-        OutputSummaryText = output is null
-            ? "Output file present but unreadable"
-            : $"{output.Funds.Count} funds loaded";
+        OutputJson = output.Json;
+        OutputSummaryText = $"{output.Funds.Count} funds loaded";
     }
 }

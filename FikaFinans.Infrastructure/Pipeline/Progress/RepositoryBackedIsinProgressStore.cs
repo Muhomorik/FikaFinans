@@ -120,6 +120,60 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         return written;
     }
 
+    /// <inheritdoc />
+    public async Task<StepOutput?> ReadStepOutputAsync(
+        StepId step, PipelineRunId runId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(runId.Value))
+            return null;
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // One row per ISIN, so the run's output is spread across the partition rather than
+        // sitting in one place — the run id is what gathers it back up.
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+
+        var funds = rows
+            .Where(r => string.Equals(r.RunId?.Value, runId.Value, StringComparison.Ordinal))
+            .Select(r => StepJson(r, step))
+            .Where(json => !string.IsNullOrEmpty(json))
+            .Select(json => JsonSerializer.Deserialize<FundRecord>(json!, JsonOptions.Default))
+            .OfType<FundRecord>()
+            .ToList();
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress output read — {0}, runId={1}, {2} fund(s), {3} ms",
+            step, runId.Value, funds.Count, stopwatch.ElapsedMilliseconds);
+
+        // No rows for this run is a normal state — the run may not have reached this step.
+        if (funds.Count == 0)
+            return null;
+
+        return new StepOutput(JsonSerializer.Serialize(funds, JsonOptions.Default), funds);
+    }
+
+    /// <summary>
+    /// The <c>Step{N}Json</c> column <paramref name="step"/> owns — the read counterpart of
+    /// the write in <see cref="WithStepOutput"/>.
+    /// </summary>
+    private static string? StepJson(IsinProgressEntity row, StepId step) => step.Value switch
+    {
+        1 => row.Step01Json,
+        2 => row.Step02Json,
+        3 => row.Step03Json,
+        4 => row.Step04Json,
+        5 => row.Step05Json,
+        6 => row.Step06Json,
+        7 => row.Step07Json,
+        8 => row.Step08Json,
+        9 => row.Step09Json,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(step), step, "Only steps 1-9 write a per-ISIN output column."),
+    };
+
     /// <summary>
     /// Copies a row, replacing the one <c>Step{N}Json</c> column <paramref name="step"/>
     /// owns and advancing the run marker to it. Every other column survives untouched,
