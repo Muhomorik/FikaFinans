@@ -54,8 +54,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// <summary>12-week and 1-year metrics, keyed by ISIN. Unkeyed when unavailable.</summary>
     private IReadOnlyDictionary<Isin, FundSnapshot> _fundSnapshots = new Dictionary<Isin, FundSnapshot>();
 
-    /// <summary>Layer pinnings for the whole portfolio.</summary>
-    private PortfolioStructure _portfolioStructure = new() { Pinnings = Array.Empty<PinnedFund>() };
+    /// <summary>Every pinned fund in the portfolio, with the layer it is pinned to.</summary>
+    private PortfolioStructure _portfolioStructure = new() { PinnedFunds = Array.Empty<PinnedFund>() };
 
     /// <summary>Every held position plus cash — portfolio-scoped, not per fund.</summary>
     private PositionsParseResult _holdings = PositionsParseResult.Empty;
@@ -189,8 +189,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             // One row per held fund, plus the cash balance available to trade with.
             _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
 
-            // Pinnings are configuration, not producer data, so they are read per run rather
-            // than per fund — the join needs the whole set to resolve one fund's layer.
+            // Pinned funds are configuration, not producer data, so they are read per run
+            // rather than per fund — the join needs the whole set to resolve one fund's layer.
             _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

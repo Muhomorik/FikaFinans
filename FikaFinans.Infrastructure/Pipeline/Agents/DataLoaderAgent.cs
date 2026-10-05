@@ -178,7 +178,7 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
 
         // Warn: any pinning that resolves to no metadata fund.
         var metaNames = new HashSet<string>(metadata.Select(m => m.Name), StringComparer.Ordinal);
-        foreach (var p in structure.Pinnings)
+        foreach (var p in structure.PinnedFunds)
         {
             var matchesByIsin = p.Isin.HasValue && metaByIsin.ContainsKey(p.Isin.Value);
             var matchesByName = !p.Isin.HasValue && p.Name != null && metaNames.Contains(p.Name);
@@ -263,14 +263,14 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
 
     private static PinnedLayer? ResolvePinning(FundMetadata m, PortfolioStructure structure)
     {
-        // ISIN takes precedence: scan ISIN-keyed pinnings first.
-        foreach (var p in structure.Pinnings)
+        // ISIN takes precedence: scan ISIN-keyed pinned funds first.
+        foreach (var p in structure.PinnedFunds)
         {
             if (p.Isin != null && p.Isin == m.Isin)
                 return p.Layer;
         }
-        // Fall back to name-only pinnings.
-        foreach (var p in structure.Pinnings)
+        // Fall back to name-only pinned funds.
+        foreach (var p in structure.PinnedFunds)
         {
             if (p.Isin == null && p.Name != null && p.Name == m.Name)
                 return p.Layer;

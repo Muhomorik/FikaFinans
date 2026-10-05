@@ -40,14 +40,15 @@ public sealed class MarkdownBackedPortfolioStructureProvider : IPortfolioStructu
         if (!File.Exists(path))
         {
             _logger.Trace("Portfolio structure file not found — {0}", path);
-            return new PortfolioStructure { Pinnings = Array.Empty<PinnedFund>() };
+            return new PortfolioStructure { PinnedFunds = Array.Empty<PinnedFund>() };
         }
 
         var markdown = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
         using var reader = new StringReader(markdown);
         var structure = _parser.Parse(reader);
 
-        _logger.Trace("Portfolio structure read — {0} pinning(s) from {1}", structure.Pinnings.Count, path);
+        _logger.Trace(
+            "Portfolio structure read — {0} pinned fund(s) from {1}", structure.PinnedFunds.Count, path);
 
         return structure;
     }

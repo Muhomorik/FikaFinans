@@ -458,7 +458,7 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<IFundSnapshotProvider>()
             .SingleInstance();
 
-        // The two reads of our own data: positions from the bank store, pinnings from the
+        // The two reads of our own data: positions from the bank store, pinned funds from the
         // hand-written markdown file. The parser is a pure function over a TextReader with no
         // seam of its own, so it is constructed here rather than resolved.
         builder.Register(ctx => new RepositoryBackedHoldingsProvider(

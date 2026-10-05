@@ -6,7 +6,7 @@ public sealed class PortfolioStructureMdParser
 {
     public PortfolioStructure Parse(TextReader reader)
     {
-        var pinnings = new List<PinnedFund>();
+        var pinnedFunds = new List<PinnedFund>();
 
         string? line;
         while ((line = reader.ReadLine()) != null)
@@ -23,10 +23,10 @@ public sealed class PortfolioStructureMdParser
             if (!TryParseLayer(layer, out var pinned)) continue;
             if (isin == null && name == null) continue;
 
-            pinnings.Add(new PinnedFund { Isin = isin is null ? null : new(isin), Name = name, Layer = pinned });
+            pinnedFunds.Add(new PinnedFund { Isin = isin is null ? null : new(isin), Name = name, Layer = pinned });
         }
 
-        return new PortfolioStructure { Pinnings = pinnings };
+        return new PortfolioStructure { PinnedFunds = pinnedFunds };
     }
 
     private static bool IsPipeRow(string line)

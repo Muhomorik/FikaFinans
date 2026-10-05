@@ -20,7 +20,7 @@ public class PortfolioStructureMdParserTests
     }
 
     [Test]
-    public void Parse_NameOnlyCoreAndWriteoffPinnings_PreservesNameAndNullsIsin()
+    public void Parse_NameOnlyCoreAndWriteoffPinnedFunds_PreservesNameAndNullsIsin()
     {
         const string md = """
             # Portfolio Structure
@@ -39,11 +39,11 @@ public class PortfolioStructureMdParserTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Pinnings, Has.Count.EqualTo(3));
-            Assert.That(result.Pinnings.All(p => p.Isin is null), Is.True);
-            Assert.That(result.Pinnings[0].Name, Is.EqualTo("Storebrand Global All Countries A SEK"));
-            Assert.That(result.Pinnings[0].Layer, Is.EqualTo(PinnedLayer.Core));
-            Assert.That(result.Pinnings[2].Layer, Is.EqualTo(PinnedLayer.Writeoff));
+            Assert.That(result.PinnedFunds, Has.Count.EqualTo(3));
+            Assert.That(result.PinnedFunds.All(p => p.Isin is null), Is.True);
+            Assert.That(result.PinnedFunds[0].Name, Is.EqualTo("Storebrand Global All Countries A SEK"));
+            Assert.That(result.PinnedFunds[0].Layer, Is.EqualTo(PinnedLayer.Core));
+            Assert.That(result.PinnedFunds[2].Layer, Is.EqualTo(PinnedLayer.Writeoff));
         });
     }
 
@@ -62,11 +62,11 @@ public class PortfolioStructureMdParserTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Pinnings[0].Isin?.Value, Is.EqualTo("LU0000000001"));
-            Assert.That(result.Pinnings[0].Name, Is.EqualTo("Foo Fund"));
-            Assert.That(result.Pinnings[0].Layer, Is.EqualTo(PinnedLayer.Core));
-            Assert.That(result.Pinnings[1].Isin?.Value, Is.EqualTo("LU0000000002"));
-            Assert.That(result.Pinnings[1].Layer, Is.EqualTo(PinnedLayer.Writeoff));
+            Assert.That(result.PinnedFunds[0].Isin?.Value, Is.EqualTo("LU0000000001"));
+            Assert.That(result.PinnedFunds[0].Name, Is.EqualTo("Foo Fund"));
+            Assert.That(result.PinnedFunds[0].Layer, Is.EqualTo(PinnedLayer.Core));
+            Assert.That(result.PinnedFunds[1].Isin?.Value, Is.EqualTo("LU0000000002"));
+            Assert.That(result.PinnedFunds[1].Layer, Is.EqualTo(PinnedLayer.Writeoff));
         });
     }
 
@@ -81,7 +81,7 @@ public class PortfolioStructureMdParserTests
 
         var result = sut.Parse(new StringReader(md));
 
-        Assert.That(result.Pinnings, Is.Empty);
+        Assert.That(result.PinnedFunds, Is.Empty);
     }
 
     [Test]
@@ -101,8 +101,8 @@ public class PortfolioStructureMdParserTests
 
         var result = sut.Parse(new StringReader(md));
 
-        Assert.That(result.Pinnings, Has.Count.EqualTo(1));
-        Assert.That(result.Pinnings[0].Name, Is.EqualTo("Foo Fund"));
+        Assert.That(result.PinnedFunds, Has.Count.EqualTo(1));
+        Assert.That(result.PinnedFunds[0].Name, Is.EqualTo("Foo Fund"));
     }
 
     [Test]
@@ -118,17 +118,17 @@ public class PortfolioStructureMdParserTests
 
         var result = sut.Parse(new StringReader(md));
 
-        Assert.That(result.Pinnings, Has.Count.EqualTo(1));
-        Assert.That(result.Pinnings[0].Name, Is.EqualTo("Bar Fund"));
+        Assert.That(result.PinnedFunds, Has.Count.EqualTo(1));
+        Assert.That(result.PinnedFunds[0].Name, Is.EqualTo("Bar Fund"));
     }
 
     [Test]
-    public void Parse_EmptyInput_ReturnsEmptyPinnings()
+    public void Parse_EmptyInput_ReturnsNoPinnedFunds()
     {
         var sut = _fixture.Create<PortfolioStructureMdParser>();
 
         var result = sut.Parse(new StringReader(""));
 
-        Assert.That(result.Pinnings, Is.Empty);
+        Assert.That(result.PinnedFunds, Is.Empty);
     }
 }
