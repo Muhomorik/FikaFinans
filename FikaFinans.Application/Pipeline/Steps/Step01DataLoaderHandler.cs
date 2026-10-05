@@ -1,13 +1,11 @@
 using System.Diagnostics;
 using System.Globalization;
 
-using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
-using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
@@ -28,16 +26,12 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private readonly IIsinProgressStore _progress;
     private readonly IPipelineSignals _signals;
     private readonly IStepEventPublisher _stepEvents;
-    private readonly IStreamingPipelineGateway _gateway;
-    private readonly IFundsRepository _funds;
-    private readonly IPositionsRepository _positions;
-    private readonly IPathsService _paths;
     private readonly IDataLoaderAgent _agent;
     private readonly ILogger _logger;
 
     /// <summary>
     /// Company filter from configuration — only funds belonging to it are processed. 
-    /// Holds one company today. Empty filters means no filtering.
+    /// Holds one company today. Empty filters mean no filtering.
     /// </summary>
     private Company _family = new(string.Empty);
 
@@ -82,10 +76,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         IIsinProgressStore progress,
         IPipelineSignals signals,
         IStepEventPublisher stepEvents,
-        IStreamingPipelineGateway gateway,
-        IFundsRepository funds,
-        IPositionsRepository positions,
-        IPathsService paths,
         IDataLoaderAgent agent,
         ILogger logger)
     {
@@ -99,10 +89,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentNullException.ThrowIfNull(signals);
         ArgumentNullException.ThrowIfNull(stepEvents);
-        ArgumentNullException.ThrowIfNull(gateway);
-        ArgumentNullException.ThrowIfNull(funds);
-        ArgumentNullException.ThrowIfNull(positions);
-        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(logger);
         
@@ -116,10 +102,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         _progress = progress;
         _signals = signals;
         _stepEvents = stepEvents;
-        _gateway = gateway;
-        _funds = funds;
-        _positions = positions;
-        _paths = paths;
         _agent = agent;
         _logger = logger;
     }
@@ -257,6 +239,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     /// rather than the one that happened to report.
     /// </summary>
     /// <param name="kind">Started carries no duration; there is nothing elapsed yet.</param>
+    /// <param name="isin"></param>
+    /// <param name="message"></param>
     private void Report(StepEventKind kind, Isin isin, string? message = null)
         => _stepEvents.Publish(new StepEvent(
             StepId.DataLoader,
@@ -303,7 +287,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
                 .GetSnapshotAsync(signal.Isin, _family, _isoWeek, ct)
                 .ConfigureAwait(false);
 
-            // Left unkeyed when null so the agent hits its own "snapshot missing" warning
+            // Left unkeyed when null, so the agent hits its own "snapshot missing" warning
             // rather than being handed an entry whose metrics are all null anyway.
             _fundSnapshots = snapshot is null
                 ? new Dictionary<Isin, FundSnapshot>()
@@ -411,8 +395,8 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     {
         ArgumentNullException.ThrowIfNull(signal);
 
-        // Names the run the signal belongs to, so it has to be minted by now. The write
-        // this emit follows is PersistAsync's, which throws rather than returning quietly
+        // Names the run the signal belongs to, so it has to be minted by now. The writing
+        // this emitting follows is PersistAsync's, which throws rather than returning quietly
         // when it fails — so a caller that ran the phases in order has already stored the
         // output by the time it reaches here.
         if (string.IsNullOrEmpty(_runId.Value))
@@ -440,7 +424,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         }
         catch (Exception ex)
         {
-            // The output is stored but step 2 was never told. Rethrown so the caller can
+            // The output is stored, but step 2 was never told. Rethrown so the caller can
             // fail the fund; the row stays in flight rather than looking complete.
             _logger.Error(
                 ex, "Step 1 emit failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);

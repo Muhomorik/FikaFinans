@@ -512,10 +512,6 @@ public sealed class InfrastructureModule : Autofac.Module
                 progress: ctx.Resolve<IIsinProgressStore>(),
                 signals: ctx.Resolve<IPipelineSignals>(),
                 stepEvents: ctx.Resolve<IStepEventPublisher>(),
-                gateway: ctx.Resolve<IStreamingPipelineGateway>(),
-                funds: ctx.Resolve<IFundsRepository>(),
-                positions: ctx.Resolve<IPositionsRepository>(),
-                paths: ctx.Resolve<IPathsService>(),
                 agent: ctx.Resolve<IDataLoaderAgent>(),
                 logger: LogManager.GetLogger(nameof(Step01DataLoaderHandler))))
             .As<IStep01DataLoader>()
