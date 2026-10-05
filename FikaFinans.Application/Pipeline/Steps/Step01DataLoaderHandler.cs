@@ -179,29 +179,49 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     {
         ArgumentNullException.ThrowIfNull(signal);
 
-        _isoWeek = ToIsoWeek(signal.NavDate);
+        _logger.Debug("Step 1 load — isin={0}", signal.Isin.Value);
 
-        _family = new Company(_options.CompanyFilter);
+        try
+        {
+            _isoWeek = ToIsoWeek(signal.NavDate);
 
-        _runId = _runIdFactory.NewRunId(signal.Isin, signal.NavDate);
+            _family = new Company(_options.CompanyFilter);
 
-        var metadata = await _metadata
-            .GetMetadataAsync(signal.Isin, _family, _isoWeek, ct)
-            .ConfigureAwait(false);
+            _runId = _runIdFactory.NewRunId(signal.Isin, signal.NavDate);
 
-        // A miss is indistinguishable from an unknown ISIN, so it is logged rather than
-        // thrown — the fund simply produces no record downstream.
-        if (metadata is null)
-            _logger.Debug("Step 1 metadata miss — isin={0}, company='{1}'", signal.Isin.Value, _family.Value);
+            var metadata = await _metadata
+                .GetMetadataAsync(signal.Isin, _family, _isoWeek, ct)
+                .ConfigureAwait(false);
 
-        _fundMetadata = metadata is null ? Array.Empty<FundMetadata>() : [metadata];
+            // A miss is indistinguishable from an unknown ISIN, so it is logged rather than
+            // thrown — the fund simply produces no record downstream.
+            if (metadata is null)
+                _logger.Debug("Step 1 metadata miss — isin={0}, company='{1}'", signal.Isin.Value, _family.Value);
 
-        // One row per held fund, plus the cash balance available to trade with.
-        _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
+            _fundMetadata = metadata is null ? Array.Empty<FundMetadata>() : [metadata];
 
-        // Pinnings are configuration, not producer data, so they are read per run rather
-        // than per fund — the join needs the whole set to resolve one fund's layer.
-        _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
+            // One row per held fund, plus the cash balance available to trade with.
+            _holdings = await _holdingsProvider.GetHoldingsAsync(ct).ConfigureAwait(false);
+
+            // Pinnings are configuration, not producer data, so they are read per run rather
+            // than per fund — the join needs the whole set to resolve one fund's layer.
+            _portfolioStructure = await _structureProvider.GetStructureAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown: the later phases join what this one read, so there is nothing to
+            // carry on with. Reported first so the view shows why rather than hanging.
+            _logger.Error(ex, "Step 1 load failed — isin={0}", signal.Isin.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -264,42 +284,81 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     {
         ArgumentNullException.ThrowIfNull(signal);
 
-        var buckets = await _summary
-            .GetNavBucketsAsync(signal.Isin, _family, _isoWeek, ct)
-            .ConfigureAwait(false);
+        _logger.Debug("Step 1 assemble — isin={0}", signal.Isin.Value);
 
-        // Keyed even when empty: the agent looks buckets up per ISIN and treats a
-        // missing key as "no history", which is exactly what an empty list means.
-        _navBuckets = new Dictionary<Isin, IReadOnlyList<NavBucket>> { [signal.Isin] = buckets };
+        try
+        {
+            var buckets = await _summary
+                .GetNavBucketsAsync(signal.Isin, _family, _isoWeek, ct)
+                .ConfigureAwait(false);
 
-        if (buckets.Count == 0)
-            _logger.Debug("Step 1 no NAV buckets — isin={0}", signal.Isin.Value);
+            // Keyed even when empty: the agent looks buckets up per ISIN and treats a
+            // missing key as "no history", which is exactly what an empty list means.
+            _navBuckets = new Dictionary<Isin, IReadOnlyList<NavBucket>> { [signal.Isin] = buckets };
 
-        var snapshot = await _snapshots
-            .GetSnapshotAsync(signal.Isin, _family, _isoWeek, ct)
-            .ConfigureAwait(false);
+            if (buckets.Count == 0)
+                _logger.Debug("Step 1 no NAV buckets — isin={0}", signal.Isin.Value);
 
-        // Left unkeyed when null so the agent hits its own "snapshot missing" warning
-        // rather than being handed an entry whose metrics are all null anyway.
-        _fundSnapshots = snapshot is null
-            ? new Dictionary<Isin, FundSnapshot>()
-            : new Dictionary<Isin, FundSnapshot> { [signal.Isin] = snapshot };
+            var snapshot = await _snapshots
+                .GetSnapshotAsync(signal.Isin, _family, _isoWeek, ct)
+                .ConfigureAwait(false);
 
-        if (snapshot is null)
-            _logger.Debug("Step 1 no snapshot — isin={0}", signal.Isin.Value);
+            // Left unkeyed when null so the agent hits its own "snapshot missing" warning
+            // rather than being handed an entry whose metrics are all null anyway.
+            _fundSnapshots = snapshot is null
+                ? new Dictionary<Isin, FundSnapshot>()
+                : new Dictionary<Isin, FundSnapshot> { [signal.Isin] = snapshot };
+
+            if (snapshot is null)
+                _logger.Debug("Step 1 no snapshot — isin={0}", signal.Isin.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown: these are the metrics the agent scores on, so a run without them
+            // would produce a record that looks complete and is not.
+            _logger.Error(ex, "Step 1 assemble failed — isin={0}", signal.Isin.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
     public Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default)
     {
-        // Everything the agent joins is already in memory by now — this phase opens no file
-        // and touches no database. The earlier phases fill every argument through a fetch
-        // seam, so their source swaps (SQLite today, REST later) without this call changing.
-        _agentOutput = _agent.RunInMemory(
-            _family, _isoWeek, _runId,
-            _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);
+        ArgumentNullException.ThrowIfNull(signal);
 
-        return Task.FromResult(_agentOutput);
+        _logger.Debug("Step 1 join — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+        try
+        {
+            // Everything the agent joins is already in memory by now — this phase opens no
+            // file and touches no database. The earlier phases fill every argument through a
+            // fetch seam, so their source swaps (SQLite today, REST later) without this call
+            // changing.
+            _agentOutput = _agent.RunInMemory(
+                _family, _isoWeek, _runId,
+                _fundMetadata, _navBuckets, _fundSnapshots, _holdings, _portfolioStructure);
+
+            return Task.FromResult(_agentOutput);
+        }
+        catch (Exception ex)
+        {
+            // Catches DataLoaderHaltException too, which IDataLoaderAgent says the caller
+            // owns. Reporting it as a failure is the honest reading for now — a halt means
+            // the join refused the data, and nothing downstream should run on it.
+            _logger.Error(ex, "Step 1 join failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
