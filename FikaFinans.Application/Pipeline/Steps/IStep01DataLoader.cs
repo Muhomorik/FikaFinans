@@ -4,6 +4,10 @@ using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Application.Pipeline.Steps;
 
+/// <summary>
+/// Step 1 for one fund, split into the phases a caller runs in order — so the claim can
+/// precede the reads, and the write can precede the emit.
+/// </summary>
 public interface IStep01DataLoader
 {
     /// <summary>Marks the fund's progress row in-flight, before anything is read.</summary>

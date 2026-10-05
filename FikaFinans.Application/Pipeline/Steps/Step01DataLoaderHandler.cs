@@ -14,6 +14,10 @@ using NLog;
 
 namespace FikaFinans.Application.Pipeline.Steps;
 
+/// <summary>
+/// Default <see cref="IStep01DataLoader"/>. Reads every input through a seam and keeps one
+/// fund's run in fields, so it must not be shared between funds.
+/// </summary>
 public sealed class Step01DataLoaderHandler : IStep01DataLoader
 {
     private readonly NavSyncOptions _options;
