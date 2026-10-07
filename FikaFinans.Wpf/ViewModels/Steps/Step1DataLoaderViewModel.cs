@@ -1,6 +1,5 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
-using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Signals;
@@ -12,7 +11,6 @@ namespace FikaFinans.Wpf.ViewModels.Steps;
 
 public sealed class Step1DataLoaderViewModel : StepViewModel
 {
-    private readonly IPathsService? _paths;
     private readonly IDataLoaderAgent? _agent;
     private readonly IStep01DataLoader? _step01;
 
@@ -23,12 +21,11 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
     public Step1DataLoaderViewModel() { }
 
     public Step1DataLoaderViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IDataLoaderAgent agent,
+        IDataLoaderAgent agent,
         IStep01DataLoader step01, IStepEventSource stepEvents,
         IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
-        _paths = paths;
         _agent = agent;
         _step01 = step01;
 
@@ -97,11 +94,9 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 
     protected override async Task RunStepCoreAsync()
     {
-        if (_agent is null || _paths is null)
-        {
-            OutputSummaryText = "Configure data folder in Settings → Folders";
+        // Null only under the designer's parameterless constructor.
+        if (_agent is null)
             return;
-        }
         if (string.IsNullOrEmpty(IsoWeek))
         {
             OutputSummaryText = "Select a week in the run bar first";
