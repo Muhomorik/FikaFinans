@@ -119,7 +119,8 @@ public sealed class YieldRaccoonSqliteSummaryProvider : IFundSummaryProvider
     /// Projects the producer's statistics row onto <see cref="NavBucket"/>,
     /// mirroring <c>Pipeline.Csv.SummaryCsvParser</c> field for field: only
     /// <c>sharpe_2w</c> treats NaN as null, matching the calculator's near-zero
-    /// volatility guard. The remaining casts keep full <see cref="double"/>
+    /// volatility guard; the rest map non-finite values to 0 (see
+    /// <see cref="ToDecimalOrZero"/>). The casts keep full <see cref="double"/>
     /// precision, where the CSV path rounds to four decimals.
     /// </summary>
     private static NavBucket ToBucket(FundSummaryStatistics s) => new()
@@ -130,14 +131,23 @@ public sealed class YieldRaccoonSqliteSummaryProvider : IFundSummaryProvider
         LastNav            = s.LastNav,
         NavHigh            = s.NavHigh,
         NavLow             = s.NavLow,
-        Return2wPct        = (decimal)s.Return2wPct,
-        AnnVolatility2wPct = (decimal)s.AnnVolatility2wPct,
-        MaxDrawdown2wPct   = (decimal)s.MaxDrawdown2wPct,
-        CurrentDrawdownPct = (decimal)s.CurrentDrawdownPct,
-        Sharpe2w           = double.IsNaN(s.Sharpe2w) ? null : (decimal)s.Sharpe2w,
-        BestDayPct         = (decimal)s.BestDayPct,
-        WorstDayPct        = (decimal)s.WorstDayPct,
-        PctPositiveDays    = (decimal)s.PctPositiveDays,
-        Skewness           = (decimal)s.Skewness,
+        Return2wPct        = ToDecimalOrZero(s.Return2wPct),
+        AnnVolatility2wPct = ToDecimalOrZero(s.AnnVolatility2wPct),
+        MaxDrawdown2wPct   = ToDecimalOrZero(s.MaxDrawdown2wPct),
+        CurrentDrawdownPct = ToDecimalOrZero(s.CurrentDrawdownPct),
+        Sharpe2w           = double.IsFinite(s.Sharpe2w) ? (decimal)s.Sharpe2w : null,
+        BestDayPct         = ToDecimalOrZero(s.BestDayPct),
+        WorstDayPct        = ToDecimalOrZero(s.WorstDayPct),
+        PctPositiveDays    = ToDecimalOrZero(s.PctPositiveDays),
+        Skewness           = ToDecimalOrZero(s.Skewness),
     };
+
+    /// <summary>
+    /// <see cref="decimal"/> can't hold NaN/±Infinity, and the calculator emits NaN
+    /// on degenerate windows: sample std dev of a 2-point window (one daily return)
+    /// and skewness of a flat window (zero std dev). Falls back to 0, the
+    /// calculator's own value for too-short skewness windows.
+    /// </summary>
+    private static decimal ToDecimalOrZero(double value) =>
+        double.IsFinite(value) ? (decimal)value : 0m;
 }
