@@ -3,7 +3,9 @@ using System.Reactive.Linq;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
+using FikaFinans.Domain.Pipeline;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
@@ -22,7 +24,8 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
 
     public Step1DataLoaderViewModel(ILogger logger, IScheduler uiScheduler,
         IPathsService paths, IDataLoaderAgent agent,
-        IStep01DataLoader step01, IStepEventSource stepEvents)
+        IStep01DataLoader step01, IStepEventSource stepEvents,
+        IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
         _paths = paths;
@@ -35,6 +38,23 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
             .Where(tick => tick.Step == StepId.DataLoader)
             .ObserveOn(uiScheduler)
             .Subscribe(Apply));
+
+        // StepEvent carries no run id, and a per-ISIN run mints its own rather than using
+        // the run bar's — so the output is read from the done-signal, which names the run.
+        Disposables.Add(pipelineSignals.Signals
+            .OfType<Step01DoneSignal>()
+            .ObserveOn(uiScheduler)
+            .Select(done => Observable
+                .FromAsync(() => LoadOutputAsync(done.RunId))
+                // Caught per load: an error reaching Subscribe would end the stream for
+                // the session, and the next run's output would never show.
+                .Catch((Exception ex) =>
+                {
+                    Logger?.Error(ex, "Step 1 output load failed — runId={0}", done.RunId.Value);
+                    return Observable.Empty<System.Reactive.Unit>();
+                }))
+            .Concat()
+            .Subscribe());
     }
 
     /// <summary>
@@ -92,11 +112,13 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
         await LoadOutputAsync();
     }
 
-    public override async Task LoadOutputAsync()
+    public override Task LoadOutputAsync() => LoadOutputAsync(RunId);
+
+    private async Task LoadOutputAsync(PipelineRunId runId)
     {
         if (_step01 is null) return;
 
-        var output = await _step01.ReadOutputAsync(RunId);
+        var output = await _step01.ReadOutputAsync(runId);
 
         if (output is null)
         {
