@@ -710,6 +710,16 @@ Function only ever holds one fund's metadata. "This pin matches no
 fund" becomes unanswerable. That is warning-only today, not fatal, but
 it is a genuine loss when Step 1 goes per-ISIN.
 
+The held-ISIN halt has the same shape, and it *is* fatal. Positions are
+portfolio-wide, so "every holding is a known fund" can only be checked
+against universe-wide metadata. The batch overload of
+`DataLoaderAgent.RunInMemory` (`TextReader` inputs) still enforces it;
+the per-ISIN path does not, since it would fire on every other holding.
+The risk it guarded remains: a held fund with no metadata never gets a
+signal, never reaches Step 10, and `portfolio_value_kr` comes up short.
+That check should come back as a universe-level, once-per-run
+validation near the Step 10 sink. **Not built yet.**
+
 Three ways were considered. **The third is chosen (2026-08-25).**
 
 - **Per-ISIN fetch seam.** Step 1 becomes "load these funds" with a

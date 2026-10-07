@@ -79,6 +79,19 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         var snapshots = _snapshotParser.Parse(snapshotCsv);
         var structure = _portfolioParser.Parse(portfolioStructureMd);
 
+        // Halt: any held ISIN must exist in metadata. Checked here, not in Join, because only
+        // this path's metadata is the whole universe — a per-ISIN caller holds one fund's.
+        var knownIsins = metadata.Select(m => m.Isin).ToHashSet();
+        foreach (var p in positions.Holdings)
+        {
+            if (!knownIsins.Contains(p.Isin))
+            {
+                throw new DataLoaderHaltException(
+                    "held_isin_not_in_metadata",
+                    $"Positions repository references ISIN '{p.Isin}' which is not present in metadata.");
+            }
+        }
+
         return RunInMemory(
             Company.From(family), IsoWeek.From(isoWeek), runId,
             metadata, summary, snapshots, positions, structure);
@@ -160,17 +173,6 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         var warnings = new List<string>(positions.Warnings);
         var metaByIsin = metadata.ToDictionary(m => m.Isin);
         var positionByIsin = positions.Holdings.ToDictionary(p => p.Isin);
-
-        // Halt: any held ISIN must exist in metadata.
-        foreach (var p in positions.Holdings)
-        {
-            if (!metaByIsin.ContainsKey(p.Isin))
-            {
-                throw new DataLoaderHaltException(
-                    "held_isin_not_in_metadata",
-                    $"positions.csv references ISIN '{p.Isin}' which is not present in metadata.");
-            }
-        }
 
         // Warn: any summary ISIN missing from metadata is dropped silently from funds[].
         foreach (var orphanIsin in summary.Keys.Where(k => !metaByIsin.ContainsKey(k)))
