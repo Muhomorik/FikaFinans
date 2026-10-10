@@ -350,8 +350,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     }
 
     /// <inheritdoc />
-    // TODO: write the new raw NAV rows the interface also promises. Nothing to write yet —
-    // no phase fetches a history delta, so the mirror has no rows to take.
     public async Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(signal);

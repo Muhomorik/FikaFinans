@@ -26,7 +26,7 @@ public interface IStep01DataLoader
     /// <summary>Joins the assembled inputs via <c>IDataLoaderAgent.RunInMemory</c>.</summary>
     Task<DataLoaderOutput> RunAgentAsync(NavChangeSignal signal, CancellationToken ct = default);
 
-    /// <summary>Writes <c>Step01Json</c> on the progress row and the new raw NAV rows.</summary>
+    /// <summary>Writes this run's output to <c>Step01Json</c> on the fund's progress row.</summary>
     Task PersistAsync(NavChangeSignal signal, CancellationToken ct = default);
 
     /// <summary>Emits the step-2 trigger — after the write, never before.</summary>
