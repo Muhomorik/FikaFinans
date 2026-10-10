@@ -35,7 +35,7 @@ What exists today and is reused as-is:
 | [`Step01DoneSignal`](../../FikaFinans.Application/Pipeline/Signals/Step01DoneSignal.cs) | step 1's output signal | **its input** |
 | [`IPipelineSignals`](../../FikaFinans.Application/Pipeline/Signals/IPipelineSignals.cs) | one overload, step 1's | gains a second overload, for step 2's done-signal |
 | [`IPipelineSignalStreams`](../../FikaFinans.Application/Pipeline/Signals/IPipelineSignalStreams.cs) | one stream of every `IStepDoneSignal` | step 2 subscribes and filters to `Step01DoneSignal` — nothing on the interface changes |
-| [`IIsinProgressStore`](../../FikaFinans.Application/Pipeline/Progress/IIsinProgressStore.cs) | claim, save, run-wide read | save is reused; step 2 must **not** claim (see below); needs a per-fund read it does not have |
+| [`IIsinProgressStore`](../../FikaFinans.Application/Pipeline/Progress/IIsinProgressStore.cs) | claim, save, run-wide read | read and save reused; step 2 must **not** claim (see below). Gains a per-fund release and a stuck-row query |
 | [`IStepEventPublisher`](../../FikaFinans.Application/Pipeline/IStepEventPublisher.cs) | step 1's progress ticks | same, with `StepId.MetricsCalculator` |
 | [`IStep01DataLoader`](../../FikaFinans.Application/Pipeline/Steps/IStep01DataLoader.cs) + [`Step01DataLoaderHandler`](../../FikaFinans.Application/Pipeline/Steps/Step01DataLoaderHandler.cs) | phase-split, per-fund handler with run state in fields | **the template** — step 2 gets its own pair in the same shape |
 | [`PipelineFrontDoor`](../../FikaFinans.Application/Pipeline/PipelineFrontDoor.cs) | drives step 1's phases per `NavChangeSignal` | **does not reach step 2** — nothing drives step 2 off a done-signal yet |
@@ -50,6 +50,24 @@ And what runs step 2 today, which this page replaces:
 Neither reads `Step01Json`. Locally the column is written and then
 ignored — the exact gap the parent plan's "what travels on a hop" section
 describes.
+
+## Names
+
+Every new type carries the step number, the way step 1's do. All
+*(new)*:
+
+| Role | Step 1 (exists) | Step 2 *(new)* |
+| --- | --- | --- |
+| Handler interface | `IStep01DataLoader` | `IStep02MetricsCalculator` |
+| Handler | `Step01DataLoaderHandler` | `Step02MetricsCalculatorHandler` |
+| Entry point — runs the phases per signal | `PipelineFrontDoor` | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry` |
+| Done-signal | `Step01DoneSignal` | `Step02DoneSignal` |
+| Config provider | — step 1 has no config | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` |
+| Cloud function | `Step01DataLoaderFunction` *(sketch)* | `Step02MetricsCalculatorFunction` |
+
+`PipelineFrontDoor` keeps its name — it is the pipeline's entry, not
+only step 1's. `JsonBacked…` follows `RepositoryBackedIsinProgressStore`
+and `MarkdownBackedPortfolioStructureProvider`.
 
 ## Sketch — the same step, two hosts
 
@@ -67,7 +85,7 @@ registration differs.
 | `IPipelineSignals` | `LocalRxPipelineSignalBus` | queue publisher *(new)* |
 | `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | still open — the parent plan's run-lifecycle question |
-| Step 2 config | `config-02-metrics.json` via `IPathsService` | **still open** — no filesystem |
+| `IStep02MetricsConfigProvider` *(new)* | `JsonBackedStep02MetricsConfigProvider` *(new)* — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
 
 No fetch seam. Step 2 never talks to YieldRaccoon — everything it needs
 is already on the row. That makes it the cheapest step in the chain to
@@ -82,18 +100,19 @@ order "write, then emit" itself:
 
 | Step 1 phase | Step 2 equivalent | Difference |
 | --- | --- | --- |
-| `BeginProcessingAsync` — **claims** the row | verify the row is this run's | must not claim — see "Do not claim" below |
-| `LoadFundAsync` — fetch identity, holdings, pins | read `Step01Json` for this ISIN and run id | one key lookup, no fetch |
-| `AssembleAgentInputAsync` — compute buckets, snapshot | load the step 2 config | config only; the record is already assembled |
+| `BeginProcessingAsync` — **claims** the row | read `Step01Json` for the signal's run id; null → stop | must not claim — see "Do not claim" below |
+| `LoadFundAsync` — fetch identity, holdings, pins | take this fund's record out of what Begin read | no I/O |
+| `AssembleAgentInputAsync` — compute buckets, snapshot | load the step 2 config through the config provider | config only; the record is already assembled |
 | `RunAgentAsync` — `IDataLoaderAgent.RunInMemory` | `IMetricsCalculatorAgent.ProcessFund` | already on the interface, already pure |
 | `PersistAsync` — `Step01Json` | `Step02Json` | same store call, different `StepId` |
 | `EmitDoneAsync` — `Step01DoneSignal` | step 2's done-signal | new signal type, new overload |
 | `ReadOutputAsync` | same, `StepId.MetricsCalculator` | none |
 
-Whether step 2 keeps six phases or collapses the middle three is a
-judgement call — the middle is a lookup, a config read and a pure call.
-Keeping the same shape makes the step files diff cleanly against each
-other, which is what the README template asks for. **Not decided.**
+**Decided: six phases, same as step 1.** The middle three are only a
+lookup, a config read and a pure call, so they could be merged — but
+keeping the shape means the entry point is a near-copy of
+`PipelineFrontDoor`, the step files diff cleanly against each other,
+and steps 4–8, which add LLM calls, inherit a split they will need.
 
 ### Where the code lives
 
@@ -104,8 +123,8 @@ only the few lines that connect a transport to it differ per host.
 ```mermaid
 flowchart TB
   subgraph app["Application — shared by both hosts"]
-    door["step 2 entry point (new)<br/>one Step01DoneSignal in"]
-    h["step 2 handler (new)<br/>check row → read Step01Json → ProcessFund → save → emit"]
+    door["Step02MetricsCalculatorEntry (new)<br/>one Step01DoneSignal in"]
+    h["Step02MetricsCalculatorHandler (new)<br/>check row → read Step01Json → ProcessFund → save → emit"]
     agent["IMetricsCalculatorAgent.ProcessFund"]
     door --> h --> agent
   end
@@ -124,8 +143,8 @@ flowchart TB
 | Piece | Lives in | Shared with cloud |
 | --- | --- | --- |
 | The calculation — `ProcessFund` | Infrastructure, behind `IMetricsCalculatorAgent` | yes |
-| Step 2 handler — the phases | Application, beside step 1's | yes |
-| Step 2 entry point — runs the phases in order, the front door's twin | Application, beside `PipelineFrontDoor` | yes |
+| `Step02MetricsCalculatorHandler` — the phases | Application, beside step 1's | yes |
+| `Step02MetricsCalculatorEntry` — runs the phases in order, the front door's twin | Application, beside `PipelineFrontDoor` | yes |
 | Signal → entry point | `MainWindowViewModel` locally, a Function class in cloud | no — transport wiring |
 | The tab | WPF | no — display only |
 
@@ -143,7 +162,7 @@ survives:
 // sketch
 pipelineSignals.Signals                          // IPipelineSignalStreams
     .OfType<Step01DoneSignal>()
-    .Subscribe(done => RunStep02Async(step02Door, done));   // (new)
+    .Subscribe(done => RunStep02Async(step02Entry, done));  // (new)
 ```
 
 Wiring only. `MainWindowViewModel` holds it because that is where step
@@ -164,11 +183,12 @@ binding. Step 2 is its trigger:
 
 ```text
 // sketch
-[Function("Step02MetricsCalculator")]                       // (new)
+// in Step02MetricsCalculatorFunction (new)
+[Function("Step02MetricsCalculator")]
 public Task Run(
     [QueueTrigger("%Step02Queue%")] Step01DoneSignal signal,
     CancellationToken ct)
-    => _step02Door.HandleAsync(signal, ct);                 // (new)
+    => _step02Entry.HandleAsync(signal, ct);   // IStep02MetricsCalculatorEntry (new)
 ```
 
 The same entry point the local subscription calls — so the cloud adds a
@@ -202,9 +222,15 @@ mints the run id. Every later step inherits it.
 step column** — that is how a new run starts clean. Calling it from
 step 2 would wipe the `Step01Json` step 2 is about to read.
 
-So step 2's first phase is a check, not a claim: the row exists, it is
-in flight, and its run id is the signal's. Anything else → log, report,
-stop. The lock taken by step 1 covers the whole chain for that fund.
+So step 2's first phase is a check, not a claim: does this fund's row
+still carry the signal's run id, with `Step01Json` written? The lock
+taken by step 1 covers the whole chain for that fund.
+
+The check falls out of the read. `ReadStepOutputAsync` only returns rows
+naming the run id it is given, so a null answer covers every "not mine"
+case at once — no row, a newer run's claim, or a cleared column. Null →
+log and return false, the way step 1's refused claim does. The read
+therefore happens in the first phase, so the gate stays first.
 
 ### Manual trigger — WPF only
 
@@ -222,19 +248,52 @@ plan's "unify the run paths" slice routes them through the runner.
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | **Step 1's fund record** — identity, buckets, snapshot, holding, layer | `01-dataloader-{iso_week}-{run_id}.json` (button) or the in-memory record (runner) | `Step01Json` on this fund's row, matched by run id | same, Tables |
-| **Config** — stale-snapshot window, fee horizon | `config-02-metrics.json` via `IPathsService`, falling back to defaults when absent | unchanged | **still open** — step 1's page already lists step configs as having no cloud home |
+| **Config** — stale-snapshot window, fee horizon | `config-02-metrics.json` via `IPathsService`, falling back to defaults when absent — read separately by the agent's `Run` and by `StreamingPipelineGateway.LoadMetricsConfig` | through the config provider *(new)*, JSON-backed — same file | through the same provider, other source |
 
-### The per-fund read does not exist
+### Config through a seam
 
-`IIsinProgressStore.ReadStepOutputAsync` is a *display* read: it scans
-the whole partition, gathers every fund that names the run id, and
-returns them as one blob. Step 2 wants one row by key — the ISIN —
-checked against the run id.
+**Decided: the step reads its config through
+`IStep02MetricsConfigProvider` *(new)*, never a file.** The same move as step 1's fetch seams — the
+handler knows it needs a `MetricsCalculatorConfig`, not that it lives
+in a JSON file under the inputs folder.
 
-**TODO:** a per-fund read on `IIsinProgressStore`, by ISIN, returning
-that row's record for one step plus enough of the row to run the
-"is this still my run" check. A point read, which is exactly what Tables
-is cheap at.
+```mermaid
+flowchart LR
+  h["Step02MetricsCalculatorHandler"] --> p["IStep02MetricsConfigProvider (new)"]
+  p -->|local| json["config-02-metrics.json<br/>via IPathsService"]
+  p -->|cloud| other["other source<br/>open"]
+```
+
+| | Local | Cloud |
+| --- | --- | --- |
+| Implementation | `JsonBackedStep02MetricsConfigProvider` — the file the tab's config editor already edits | not chosen — app settings, a table row and blob storage are all plausible |
+| Source of truth | unchanged | the open question already on step 1's page |
+
+The provider is the step's only way to its config. The tab's config
+editor keeps writing the same file, so locally nothing visible changes.
+The agent's own `Run` still reads the file directly — that is the debug
+button's path, which this page leaves alone.
+
+The provider also owns the missing-config policy. Today's silent
+fallback to defaults is harmless on a desktop; in a host with no file it
+is a silent misconfiguration. Whether the cloud implementation falls
+back or fails is its call — but it is one place to decide it, not two.
+
+Steps 4, 9 and 10 have config files of their own and inherit this
+pattern.
+
+### The existing read is enough — a run is one fund
+
+`IIsinProgressStore.ReadStepOutputAsync(step, runId)` gathers every row
+naming a run id. Step 1 mints a fresh run id per fund
+(`IPipelineRunIdFactory.NewRunId(isin, navDate)`), so under per-fund
+processing that is always exactly one row — the answer's fund list has
+one entry, and it is this fund's.
+
+**Decided: reuse it, no change to the read.** The cost is a partition scan
+where a point read by ISIN would do. At the local universe size that is
+nothing; a point read can be added later if it ever shows up in cloud
+cost or latency.
 
 ### What the row does not carry
 
@@ -243,12 +302,38 @@ around it — frozen positions, cash available, run-level data-quality
 warnings, ISO week, company — never reaches the row;
 `SaveStepOutputAsync` picks the fund's record out and drops the rest.
 
-Step 2 does not care: `ProcessFund` takes a `FundRecord` and nothing
-else. `RunInMemory` copies the envelope through untouched, but that is
-the universe-wide path. Recorded here because step 2 is the first step to
-read the row back, so it is the first place the loss is visible — the
-consumers that do need the envelope (step 10's cash floor) are further
-down.
+Step 2's calculation does not care: `ProcessFund` takes a `FundRecord`
+and nothing else. But the consumers further down do — step 10's cash
+floor needs cash available, and frozen positions must never be proposed
+for sale.
+
+**Decided: carry the envelope on the row**, so every step reads it the
+same way it reads the fund record, and step 2 passes it through
+untouched — the append-only rule, applied to the envelope too.
+
+The cost, accepted:
+
+| Cost | Why it is acceptable |
+| --- | --- |
+| Portfolio-wide data duplicated on every fund's row | the universe is small; a few fields per row |
+| Two rows can disagree — each holds cash and positions as of its own run | each row records what *that* run saw, which is the right audit trail; a consumer wanting the current picture takes the most recent row |
+
+#### Open — how the envelope is stored
+
+Two shapes, neither chosen:
+
+| | Whole one-fund output in each step column | Separate envelope column |
+| --- | --- | --- |
+| What `Step{N}Json` holds | the step's full `DataLoaderOutput` — envelope plus its single fund record | the fund record only, as today |
+| Where the envelope lives | inside every step column — each step's copy | one new column on `IsinProgressEntity`, written by step 1, cleared at the claim |
+| Store change | save stops picking the record out; the read hands back the envelope too | new column in the SQLite row and the Tables entity, plus a migration and a read path |
+| Can a later step add to the envelope | yes — it rewrites its own copy | only by writing the shared column |
+| Rests on | a run being one fund — which holds today | nothing extra |
+
+The first is smaller and stores what the step actually produced,
+verbatim. The second keeps the step columns as they are and stores the
+envelope once. Decide before step 2 is built, since step 2 is the first
+step to read the envelope back.
 
 ### The config has fields that move to step 1
 
@@ -261,8 +346,10 @@ down.
 | `PrimarySharpeHorizonWeeks`, `TreatNanSharpeAsZeroForRules`, `WarnOnBucketsTotalLt`, `DataQualityFlagsEnabled` | not read by `ComputeMetrics` | unchanged — not this page's concern |
 
 Once step 1 computes buckets itself, the bucketing rules are step 1's
-input, sitting in step 2's file. Whether they move, are duplicated, or
-stay and get read by step 1 is open.
+input, sitting in step 2's file. Whatever step 1 ends up reading them
+from, it reads through a config provider like step 2's, never the file.
+Which provider, and whether the two fields move, is step 1's bucketing
+port to decide — step 2 does not read them either way.
 
 ## Pre-processing — assemble the agent input
 
@@ -316,14 +403,77 @@ One write, then one signal. Same order as step 1, same reason.
 | --- | --- | --- | --- | --- |
 | This fund's enriched record | `IIsinProgressStore.SaveStepOutputAsync` with `StepId.MetricsCalculator` | `Step02Json` on this fund's row; `CurrentStep` advances to 2 | SQLite | Azure Tables |
 
-No NAV rows, no mirror — step 2 writes only its column. The row stays in
-flight; step 2 does not release it.
+No NAV rows, no mirror — step 2 writes only its column.
 
-**TODO:** `SaveStepOutputAsync` takes a `DataLoaderOutput` and picks the
-fund out. Step 2 has one `FundRecord`. Either it wraps the record in an
-envelope to satisfy the signature, or the store grows a per-fund
-overload. The second matches the per-fund read above and stops every
-later step from building an envelope just to have it taken apart.
+`SaveStepOutputAsync` takes a `DataLoaderOutput` and picks this fund's
+record out. **Decided: reuse it** — step 2 wraps its one enriched record
+in a one-fund envelope, which is what step 1's output already is under
+per-fund processing. If the envelope ends up stored whole in each step
+column (see "How the envelope is stored"), the save stops picking the
+record out; the call stays.
+
+### Release — the chain tail frees the row
+
+Step 1's claim sets the row to processing, and on the signal path
+nothing sets it back. `ReleaseIsinProgressAsync` exists, but only the
+universe-wide `PipelineRunner` calls it. Two consequences, live today:
+
+| Case | What happens |
+| --- | --- |
+| Step 1 succeeds | row stays in flight forever — the next NAV signal for that fund is refused at the claim, and the dedup anchor never advances |
+| Step 1 fails | same — its comment says the janitor will reset it, but no janitor exists |
+
+**Decided: whichever step is currently last on the signal path releases
+the row**, once its emit is done:
+
+| Outcome | Row after release |
+| --- | --- |
+| Success | free; `LatestProcessedNavDate` advanced to the run's trading date |
+| Failure, any phase | free; anchor **not** advanced, `LastError` set — the next signal retries the fund |
+
+The tail moves as the chain grows: step 1 today, step 2 once it lands
+— and step 2 stays the tail until a later step consumes its
+done-signal. So step 2 takes the release over from step 1 in the same
+change that wires it — one step releases, never two.
+
+**Fix step 1 first**, as its own small change: it is broken today
+whether or not step 2 exists.
+
+**TODO:** a release on `IIsinProgressStore`. The gateway's `ReleaseIsinProgressAsync` is universe-shaped
+(the whole step 1 output plus a failed set) and lives on the old path;
+the per-fund chain needs the same two outcomes for one ISIN.
+
+### Stuck rows — restart when the tab opens (WPF only)
+
+A crash or app shutdown mid-run still leaves a row in flight, because no
+code gets to run the release. The "janitor" step 1's comments promise —
+a background job that resets rows stuck too long — does not exist.
+
+**Decided, local only: each step tab restarts its own stuck funds when
+it opens** — the rows whose `CurrentStep` is that tab's step. Step 2's
+tab restarts funds that died in step 2, step 1's those that died in
+step 1. For each such row still in flight:
+
+| Check | Then |
+| --- | --- |
+| claimed **before this app session started** | its run is dead — nothing from an earlier process can still be running. Reset the row and publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` |
+| claimed during this session | leave it — it may genuinely be running right now |
+
+The restart goes back through the front door like any other signal, so
+it always starts at step 1, whichever step the run died in. The dedup
+anchor is untouched by the reset.
+
+**A deliberate exception** to the rule on step 1's page that opening a
+view is only a read. It is limited to rows the session-start check
+proves dead, so a view still never starts work that is already
+underway.
+
+The reset must land before the signal: step 1's claim refuses a row
+still in flight, so a re-published signal against a row not yet reset
+would just be dropped. Finding the rows needs a store query step 2 does not
+otherwise use — every in-flight row at a given step.
+
+Cloud is not covered — decided when the cloud host is built.
 
 ### Emit
 
@@ -341,22 +491,25 @@ Nothing changes on `IPipelineSignalStreams` — it already carries every
 
 ### Who consumes it
 
-Not step 3. MacroAnalyst is a universe-wide barrier with no per-fund
-input from step 2; its translation is unresolved. Step 4 (SignalScorer)
-is the next per-fund consumer of step 2's output.
+**Decided: nobody, yet.** Step 2 emits its done-signal and nothing
+consumes it for work. Step 2 is the chain tail, so it is also the step
+that releases the row (see "Release" above).
 
-So step 2's done-signal goes to step 4's queue in cloud, skipping a
-number. That is fine for the signal — named by producer — but it is the
-first hop where the queue name and the step numbers stop lining up, and
-it leans on the barrier question being answered the way the step-flow
-plan assumes. See Open questions.
+Why not wire step 4 now: step 3 (MacroAnalyst) is a universe-wide
+barrier, and step 4 is the next per-fund consumer of step 2's output —
+but whether step 4 hangs off step 2 directly depends on how the barrier
+question resolves. Step 4's page decides what it listens to; step 2
+only publishes.
+
+The signal is still worth emitting with no work consumer: step 2's tab
+listens to it to know which run id to read, the same way step 1's tab
+does.
 
 ```mermaid
 flowchart LR
-  s1["Step 1<br/>DataLoader"] -->|"Step01DoneSignal"| s2["Step 2<br/>MetricsCalculator"]
-  s2 -->|"Step02DoneSignal (new)"| s4["Step 4<br/>SignalScorer"]
-  s3["Step 3<br/>MacroAnalyst<br/>barrier — unresolved"] -.->|"not per-fund"| s5["Step 5"]
-  s4 --> s5
+  s1["Step 1<br/>DataLoader"] -->|"Step01DoneSignal"| s2["Step 2<br/>MetricsCalculator<br/>chain tail — releases"]
+  s2 -->|"Step02DoneSignal (new)"| tab["step 2 tab<br/>reads only"]
+  s2 -.->|"later — step 4's page decides"| next["next step"]
   s1 -->|writes| row[("per-ISIN row")]
   row -->|"reads Step01Json"| s2
   s2 -->|writes Step02Json| row
@@ -365,7 +518,8 @@ flowchart LR
 ## What a frontend reads when the user opens the view
 
 Same as step 1: opening the tab is a read of `Step02Json`, never a
-trigger.
+trigger — with the one exception of restarting funds proven dead (see
+"Stuck rows").
 
 `Step2MetricsCalculatorViewModel.LoadOutputAsync` today goes through
 `IsinProgressOutputLoader` with a column selector, then falls back to
@@ -392,15 +546,21 @@ flight, not processed — apply unchanged.
 
 | # | Work | Touches |
 | --- | --- | --- |
-| 1 | Step 2 handler interface and default implementation, in step 1's shape | Application, `Pipeline/Steps` |
-| 2 | First phase checks the row instead of claiming it | the handler |
-| 3 | Per-fund read on the progress store | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
-| 4 | Per-fund save, or wrap the record | the same two |
+| 1 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape | Application, `Pipeline/Steps` |
+| 2 | First phase reads `Step01Json` by run id instead of claiming; null → stop | the handler — no store changes |
+| 3 | — | *(was: per-fund read — dropped, the run-wide read already returns one fund)* |
+| 4 | Save wraps the record in a one-fund envelope | the handler |
 | 5 | `Step02DoneSignal` *(new)* and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
-| 6 | Step 2 entry point, the front door's twin | Application, `Pipeline` |
+| 6 | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry`, the front door's twin | Application, `Pipeline` |
 | 7 | Subscription: `Step01DoneSignal` → entry point, beside step 1's | `MainWindowViewModel` |
 | 8 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
 | 9 | Registration — handler per-dependency, entry point single-instance, like step 1's | `InfrastructureModule` |
+| 10 | Per-fund release — success advances the anchor, failure does not | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
+| 11 | **Before everything else:** step 1 releases at the tail, so a fund is not locked after one signal | `Step01DataLoaderHandler`, `PipelineFrontDoor` |
+| 12 | Hand the release from step 1 to step 2 when step 2 is wired | both handlers |
+| 13 | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
+| 14 | `IStep02MetricsConfigProvider` in Application, `JsonBackedStep02MetricsConfigProvider` in Infrastructure | Application, Infrastructure, `InfrastructureModule` |
+| 15 | Each step tab restarts its own stuck funds on open — `CurrentStep` is its step, claimed before this session; reset first, then re-published as `NavChangeSignal`. Needs an in-flight-rows-by-step query | step 1 and step 2 tabs, `IIsinProgressStore`, `INavSignalPublisher` |
 
 None of it touches `MetricsCalculatorAgent`. The agent is done.
 
@@ -413,17 +573,22 @@ not settled here.
   step 1's in `MainWindowViewModel` for now. Both move out together in
   the "extract the coordinator" slice; step 2 adds nothing that slice
   did not already have to move.
-- **Who releases the row.** Step 1 claims, step 2 neither claims nor
-  releases. In a per-step chain, which step — or which barrier — moves
-  the row out of in flight and advances the dedup anchor? Today that is
-  `ReleaseIsinProgressAsync` on the universe-wide gateway path.
-- **Where the run-level envelope lives.** Cash available, frozen
-  positions and run-level warnings are dropped when step 1's output is
-  stored per fund. Step 2 does not need them; step 10 does.
-- **Where the bucketing config lives** once step 1 owns the bucketing.
-- **Step 2's done-signal skips step 3.** Holds only if the barrier
-  question resolves with step 3 off the per-fund chain.
-- **Where step configs live in cloud.** Already open on step 1's page;
-  step 2 is its first consumer. Note the silent fallback to defaults
-  when the file is missing — harmless on a desktop, a silent
-  misconfiguration in a host with no file at all.
+- **Crash recovery in cloud.** Local restarts on tab open; cloud has no
+  tab and needs a timeout-based reset. Decided when the cloud host is
+  built.
+- **How the envelope is stored on the row** — whole one-fund output in
+  each step column, or a separate envelope column. Options laid out
+  under "What the row does not carry".
+- **Which row step 10 trusts for the envelope.** Every row carries its
+  own run's cash and positions. Step 10 runs on a timer across the
+  universe, so it must pick one — most recent run is the obvious answer,
+  but it is step 10's page to decide.
+- **Where the bucketing config lives** once step 1 owns the bucketing —
+  through a config provider either way; which one is step 1's call.
+- **Who consumes step 2's done-signal.** Nobody for now; step 2 is the
+  tail. Step 4 is the natural consumer if step 3 resolves as a barrier
+  off the per-fund chain — step 4's page owns the decision.
+- **The cloud config source.** The seam is decided (config provider);
+  what sits behind it in cloud is not — app settings, a table row, or
+  blob. Also whether the cloud implementation falls back to defaults or
+  fails when nothing is there.
