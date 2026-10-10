@@ -64,7 +64,7 @@ already settled; it may not settle one on its own.
 | # | Step | Redesign notes |
 | --- | --- | --- |
 | 1 | DataLoader | [01-dataloader.md](./01-dataloader.md) |
-| 2 | MetricsCalculator | not written |
+| 2 | MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
 | 3 | MacroAnalyst | not written — universe-wide barrier, translation unresolved |
 | 4 | SignalScorer | not written |
 | 5 | MacroAligner | not written |
