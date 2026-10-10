@@ -95,28 +95,67 @@ judgement call — the middle is a lookup, a config read and a pure call.
 Keeping the same shape makes the step files diff cleanly against each
 other, which is what the README template asks for. **Not decided.**
 
+### Where the code lives
+
+**Step 2 is triggered by `Step01DoneSignal` — in both hosts, always.**
+Everything that runs on that signal lives in Application and is shared;
+only the few lines that connect a transport to it differ per host.
+
+```mermaid
+flowchart TB
+  subgraph app["Application — shared by both hosts"]
+    door["step 2 entry point (new)<br/>one Step01DoneSignal in"]
+    h["step 2 handler (new)<br/>check row → read Step01Json → ProcessFund → save → emit"]
+    agent["IMetricsCalculatorAgent.ProcessFund"]
+    door --> h --> agent
+  end
+  subgraph local["Local — WPF"]
+    rx["Rx subscription on IPipelineSignalStreams<br/>filtered to Step01DoneSignal"]
+    vm["Step2MetricsCalculatorViewModel<br/>passive — listens and reads"]
+  end
+  subgraph cloud["Cloud — Functions"]
+    fn["queue trigger on %Step02Queue%"]
+  end
+  rx --> door
+  fn --> door
+  h -. "step events + Step02DoneSignal" .-> vm
+```
+
+| Piece | Lives in | Shared with cloud |
+| --- | --- | --- |
+| The calculation — `ProcessFund` | Infrastructure, behind `IMetricsCalculatorAgent` | yes |
+| Step 2 handler — the phases | Application, beside step 1's | yes |
+| Step 2 entry point — runs the phases in order, the front door's twin | Application, beside `PipelineFrontDoor` | yes |
+| Signal → entry point | `MainWindowViewModel` locally, a Function class in cloud | no — transport wiring |
+| The tab | WPF | no — display only |
+
+The entry point is a twin of `PipelineFrontDoor`, not an extension of
+it: one signal type in, one step's phases out, a fresh handler per
+signal from a factory. That keeps step 1's front door untouched.
+
 ### Local
 
-Nothing drives step 2 off a done-signal today. The front door only knows
-step 1. Something has to subscribe to the done-signal stream, filter to
-step 1's signals, and call step 2's phases — the way the front door does
-for `NavChangeSignal`:
+The subscription sits next to step 1's, in `MainWindowViewModel`, and
+copies it — off the Rx callback, every exception caught so the stream
+survives:
 
 ```text
 // sketch
-_pipelineSignals.Signals                         // IPipelineSignalStreams
+pipelineSignals.Signals                          // IPipelineSignalStreams
     .OfType<Step01DoneSignal>()
-    .Subscribe(done => _step02Driver.HandleAsync(done, ct));   // (new)
+    .Subscribe(done => RunStep02Async(step02Door, done));   // (new)
 ```
 
-Where that subscriber lives, and whether the front door grows into a
-chain driver or each step gets its own entry point, is open — see Open
-questions.
+Wiring only. `MainWindowViewModel` holds it because that is where step
+1's wiring already is; the parent plan's "extract the coordinator" slice
+moves both later, together. No coalescing buffer here — unlike
+`NavChangeSignal`, a done-signal is emitted once per run per fund.
 
-`Step1DataLoaderViewModel` already subscribes to the same stream to
-refresh its view. That is a second subscriber on a work hop — fine for a
-read, and the parent plan's "single-consumer by convention" rule only
-binds the *work* subscriber.
+**No step ViewModel runs step 2.** `Step1DataLoaderViewModel` already
+subscribes to this stream, but only to know which run id to read for
+display. That is a read, so the parent plan's "single-consumer by
+convention" rule — which binds the *work* subscriber — is not broken by
+it.
 
 ### Cloud
 
@@ -129,8 +168,11 @@ binding. Step 2 is its trigger:
 public Task Run(
     [QueueTrigger("%Step02Queue%")] Step01DoneSignal signal,
     CancellationToken ct)
-    => _step02Driver.HandleAsync(signal, ct);               // (new)
+    => _step02Door.HandleAsync(signal, ct);                 // (new)
 ```
+
+The same entry point the local subscription calls — so the cloud adds a
+trigger, not a second copy of the step.
 
 The return-value-as-send question from step 1 applies unchanged.
 Whichever wins there, step 2 takes.
@@ -166,11 +208,14 @@ stop. The lock taken by step 1 covers the whole chain for that fund.
 
 ### Manual trigger — WPF only
 
-The tab's debug button calls `IMetricsCalculatorAgent.Run` today, which
-reads step 1's output from disk. Step 1's tab still does the same with
-its own agent, so the two stay consistent until the parent plan's
-"unify the run paths" slice routes both through the runner. Not changed
-here.
+The tab keeps its "Run this step" debug button, and the GUI does not
+change. It stays a desktop affordance with no cloud counterpart.
+
+It behaves as step 1's does today: the button calls
+`IMetricsCalculatorAgent.Run`, which reads step 1's output from disk.
+Not the signal path, and not meant to be — it is for debugging the
+calculation in isolation. Both buttons move together when the parent
+plan's "unify the run paths" slice routes them through the runner.
 
 ## Input data — what the step reads
 
@@ -329,10 +374,19 @@ both onto its handler's `ReadOutputAsync`, and it follows the step
 rather than running it — subscribing to step events for its `StepId` and
 to its own done-signal to know which run id to read.
 
-**TODO:** the same move for step 2. Two subscriptions, one read through
-the step-2 handler, and the disk fallback goes with the file it reads.
-The three view states from step 1's page — populated, in flight, not
-processed — apply unchanged.
+**TODO:** the same move for step 2 — the tab becomes **passive**, a copy
+of step 1's:
+
+| The tab | Does |
+| --- | --- |
+| Listens to step events | filtered to `StepId.MetricsCalculator`, projected onto status, duration, error |
+| Listens to `Step02DoneSignal` *(new)* | to learn the run id, then reads that run's output |
+| Reads | through the step 2 handler's `ReadOutputAsync`, never the repository directly |
+| Runs | **nothing** on a signal — only the debug button, as above |
+
+`IsinProgressOutputLoader` and the disk fallback leave the tab. No XAML
+changes. The three view states from step 1's page — populated, in
+flight, not processed — apply unchanged.
 
 ## TODO summary
 
@@ -343,9 +397,10 @@ processed — apply unchanged.
 | 3 | Per-fund read on the progress store | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
 | 4 | Per-fund save, or wrap the record | the same two |
 | 5 | `Step02DoneSignal` *(new)* and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
-| 6 | Something that subscribes to step 1's done-signal and drives step 2 | depends on the open question below |
-| 7 | Step 2's tab follows the step, reads through the handler | `Step2MetricsCalculatorViewModel` |
-| 8 | Registration, per-dependency like step 1's handler | `InfrastructureModule` |
+| 6 | Step 2 entry point, the front door's twin | Application, `Pipeline` |
+| 7 | Subscription: `Step01DoneSignal` → entry point, beside step 1's | `MainWindowViewModel` |
+| 8 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
+| 9 | Registration — handler per-dependency, entry point single-instance, like step 1's | `InfrastructureModule` |
 
 None of it touches `MetricsCalculatorAgent`. The agent is done.
 
@@ -354,11 +409,10 @@ None of it touches `MetricsCalculatorAgent`. The agent is done.
 Raised by this page; they belong in the parent plan's Open Questions,
 not settled here.
 
-- **What drives step N+1 locally.** The front door drives step 1 off
-  `NavChangeSignal`. Step 2 is the first step driven off a done-signal.
-  One driver per step, or one chain coordinator that maps each
-  done-signal to the next handler? Decided once here, inherited by
-  every later step — the same way step 1 decided the signal family.
+- **Where the local wiring ends up.** Step 2's subscription sits beside
+  step 1's in `MainWindowViewModel` for now. Both move out together in
+  the "extract the coordinator" slice; step 2 adds nothing that slice
+  did not already have to move.
 - **Who releases the row.** Step 1 claims, step 2 neither claims nor
   releases. In a per-step chain, which step — or which barrier — moves
   the row out of in flight and advances the dedup anchor? Today that is
