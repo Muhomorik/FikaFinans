@@ -485,6 +485,13 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPathsService>()))
             .As<IWeeklyAnalyticsReportsProvider>()
             .SingleInstance();
+
+        // The prompt folder the agent reads today; another source in Azure.
+        builder.Register(ctx => new FileBackedStep03MacroAnalystPromptsProvider(
+                LogManager.GetLogger(nameof(FileBackedStep03MacroAnalystPromptsProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IStep03MacroAnalystPromptsProvider>()
+            .SingleInstance();
     }
 
     /// <summary>
