@@ -6,6 +6,7 @@ using FikaFinans.Application.Bank;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Analytics;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Llm;
@@ -23,6 +24,7 @@ using FikaFinans.Infrastructure.Foundry;
 using FikaFinans.Infrastructure.Paths;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Analytics;
 using FikaFinans.Infrastructure.Pipeline.Configs;
 using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Fetch;
@@ -433,6 +435,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterNavSyncServices(builder);
         RegisterStep01Services(builder);
         RegisterStep02Services(builder);
+        RegisterStep03Services(builder);
     }
 
     /// <summary>
@@ -467,6 +470,20 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step02MetricsCalculatorEntry)),
                 ctx.Resolve<Func<IStep02MetricsCalculator>>()))
             .As<IStep02MetricsCalculatorEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 3 — only what is step 3's own, as for step 2. Filled in one row
+    /// at a time; nothing resolves these until the handler lands.
+    /// </summary>
+    private static void RegisterStep03Services(ContainerBuilder builder)
+    {
+        // The three analytics-*.json files locally; KanelBrief in Azure.
+        builder.Register(ctx => new FileBackedWeeklyAnalyticsReportsProvider(
+                LogManager.GetLogger(nameof(FileBackedWeeklyAnalyticsReportsProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IWeeklyAnalyticsReportsProvider>()
             .SingleInstance();
     }
 

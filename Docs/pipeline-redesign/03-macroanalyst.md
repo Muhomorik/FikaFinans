@@ -219,7 +219,7 @@ Every new type carries the step number, as steps 1 and 2 do. All
 | Done-signal | `Step02DoneSignal` | `Step03DoneSignal` |
 | Config provider | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` | `IStep03MacroAnalystPromptsProvider` + `FileBackedStep03MacroAnalystPromptsProvider` — placeholders; step 3 has no config file, its prompts play the same role |
 | What the provider returns | `MetricsCalculatorConfig` | `Step03MacroAnalystPrompts` — the three prompt templates as one record |
-| Analytics input | — | a loader for the three reports, as the typed runs the agent takes — the analytics plan's source, name not chosen there; `IAnalyticsBundleProvider` is a placeholder |
+| Analytics input | — | a loader for the three reports, as the typed runs the agent takes — the analytics plan's source, name not chosen there; `IWeeklyAnalyticsReportsProvider` returning `WeeklyAnalyticsReports` — built in row 1, named after the schema's "three weekly analytics reports" |
 | Universe for the agent | — | no new type — a "list every fund" read on the existing `IFundMetadataProvider`; the handler wraps it in a `DataLoaderOutput` |
 | Agent call | `IMetricsCalculatorAgent.RunInMemory` | `IMacroAnalystAgent.RunInMemoryAsync` — exists on the class, moves onto the interface |
 | Week's context, stored | — | `IMacroContextStore` — placeholder |
@@ -399,13 +399,20 @@ not this button's job.
 
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| **The week's analytics bundle** — weekly summary, substitution chain, rotation targets | three files via `IPathsService` (`AnalyticsWeeklySummaryJson` and siblings), fixed names, latest copy only — read inside `RunAsync` | the loader — file-backed, same files, deserialised into `WeeklySummaryRun`, `SubstitutionChainRun`, `OpportunityScanRun` | the loader — KanelBrief API, live or cached |
+| **The week's analytics reports** — weekly summary, substitution chain, rotation targets | three files via `IPathsService` (`AnalyticsWeeklySummaryJson` and siblings), fixed names, latest copy only — read inside `RunAsync` | the loader, asked for a week — file-backed, same files, deserialised into `WeeklySummaryRun`, `SubstitutionChainRun`, `OpportunityScanRun`; returns them only when the weekly summary's `periodIsoWeek` is the week asked for, otherwise none | the loader, asked for a week — KanelBrief REST API, live or cached |
 | **A universe `DataLoaderOutput`** — the agent reads every fund's `Metadata.Category` from it, and checks its `IsoWeek` | step 1's universe-wide output file | built by the handler from every fund's metadata — YieldRaccoon SQLite, see below | same, from YieldRaccoon's API — endpoint not built yet |
 | **Prompts** — system, user template, retry | three files in `MacroAnalystPromptsDir`, extracted from embedded resources on first use — read by the agent's constructor | through the prompts provider, file-backed — same folder, same files, so editing a prompt still works | through the prompts provider — source open |
 | **Foundry project + model id** | settings, `az login` | unchanged | app settings, managed identity |
 | **The fund's record** — `Step02Json` | the in-memory record, inside `PipelineRunner` | read by run id, passed through to `Step03Json` unchanged | same, Tables |
 
-The loader **only loads**. The FK-chain, status and same-week checks
+**The loader takes the week.** In cloud the reports come from a REST
+call, which has to name the week it wants; the file-backed loader takes
+the same parameter so the handler asks both the same way. The handler
+passes the fund's week — the one it derives from the trading date. The
+files hold one week only, so locally any other week is "none".
+
+The loader **only loads** — the week it was asked for is its one
+check, and only against the weekly summary. The FK-chain, status and same-week checks
 stay in `MacroAnalystAgent.ValidateInputs`, which runs inside
 `RunInMemoryAsync` on every call.
 [analytics-json-migration-plan.md](../analytics-json-migration-plan.md)
@@ -510,16 +517,21 @@ In order, for a fund whose week is W:
 | # | Finds | Does |
 | --- | --- | --- |
 | 1 | a stored context for W | uses it — the normal hit |
-| 2 | the loaded bundle **is** for W | computes W's context — the normal miss |
-| 3 | the bundle is for an earlier week, and a context for an earlier week is stored | uses the newest stored one |
-| 4 | the bundle is for an earlier week, nothing earlier stored | computes the context **for the bundle's week** — the agent gets a matched pair, stamped with the bundle's week, never with W — stores it, and uses it |
-| 5 | no bundle at all, or the bundle is for a week **after** W | fails the fund — nothing honest to use |
+| 2 | the loader has reports for W | computes W's context — the normal miss |
+| 3 | no reports for W, and a context for an earlier week is stored | uses the newest stored one |
+| 4 | no reports for W, nothing earlier stored | fails the fund — nothing honest to use |
 
 Whenever the context used is not W's, the step logs which week it is.
 The fund record has no field for it, and step 3 adds none — the
-context carries its own `IsoWeek` and source run ids. Once W's bundle lands, the
-next fund of week W misses at row 1, finds a W bundle at row 2, and
+context carries its own `IsoWeek` and source run ids. Once W's reports land, the
+next fund of week W misses at row 1, finds them at row 2, and
 computes — so the fallback ends by itself.
+
+Revised 2026-10-11, when the loader started taking the week: an earlier
+draft had a row between 3 and 4 that computed a context for whatever
+week the loaded reports held. A loader asked for W cannot say which
+earlier week it has, so that row went. The cost is the very first week
+only — with nothing stored yet, funds fail until W's reports land.
 
 ## Pre-processing — assemble the agent input
 
@@ -743,13 +755,13 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Not started. One change per row, each reviewed and committed before the
-next, as for step 2. Rows 1–4 do not depend on the open questions; the
+Row 1 done; the rest not started. One change per row, each reviewed and
+committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
-| 1 | Analytics loader, file-backed — reads the three files into the typed runs; no validation, the agent keeps it | Application, Infrastructure | — |
+| 1 | ✅ Analytics loader, file-backed — reads the three files into the typed runs; no validation, the agent keeps it. `IWeeklyAnalyticsReportsProvider.GetAsync(IsoWeek)` returning `WeeklyAnalyticsReports`, or nothing when any of the three files is missing or the files hold another week | Application, Infrastructure, `InfrastructureModule` | — |
 | 2a | The prompts record, the prompts provider in Application, and its file-backed implementation in Infrastructure — takes over the folder read and embedded-default extraction from the agent's constructor | Application, Infrastructure, `InfrastructureModule` | — |
 | 2b | `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time; the agent keeps `IPathsService`; the constructor's three template parameters are removed. No logic change. Tests for the in-memory call in a **new file** | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
 | 3 | `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
@@ -783,7 +795,9 @@ not settled here.
   YieldRaccoon SQLite locally. Still open on the producer's side: the
   list endpoint in YieldRaccoon's backend for cloud.
 - **What a fund does before its week's bundle exists.** ✅ **Resolved
-  2026-10-11** — fall back to an earlier week's context, logged; see "Which week's context a fund uses".
+  2026-10-11** — fall back to an earlier week's stored context, logged;
+  fail when none is stored. Revised the same day when the loader started
+  taking the week; see "Which week's context a fund uses".
 - **What the context is keyed by.** ✅ **Resolved 2026-10-11** — the
   run ids it was built from, weekly summary's `runId` at the head, as
   the analytics schema and the step 3 contract already document.
