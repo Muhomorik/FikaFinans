@@ -389,6 +389,80 @@ public sealed class Step02MetricsCalculatorHandlerTests
         Assert.That(output, Is.Null);
     }
 
+    // ── FailOrphanedRunsAsync ─────────────────────────────────────────
+
+    private static readonly DateTimeOffset SessionStart = new(2026, 6, 6, 9, 0, 0, TimeSpan.Zero);
+
+    [Test]
+    public async Task FailOrphanedRunsAsync_TwoOrphaned_FailsEachAtStep2AndReturnsCount()
+    {
+        // Arrange
+        _progress
+            .Setup(x => x.ListOrphanedStep02Async(SessionStart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Row("LU0000000021"), Row("LU0000000022")]);
+        var sut = CreateSut();
+
+        // Act
+        var failed = await sut.FailOrphanedRunsAsync(SessionStart);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(failed, Is.EqualTo(2));
+            _progress.Verify(x => x.FailStep02Async(
+                new Isin("LU0000000021"), It.Is<string>(m => m.StartsWith("Orphaned run")), It.IsAny<CancellationToken>()), Times.Once);
+            _progress.Verify(x => x.FailStep02Async(
+                new Isin("LU0000000022"), It.Is<string>(m => m.StartsWith("Orphaned run")), It.IsAny<CancellationToken>()), Times.Once);
+        });
+    }
+
+    [Test]
+    public async Task FailOrphanedRunsAsync_NoneOrphaned_ReturnsZeroAndFailsNothing()
+    {
+        // Arrange
+        _progress
+            .Setup(x => x.ListOrphanedStep02Async(SessionStart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<IsinProgressEntity>());
+        var sut = CreateSut();
+
+        // Act
+        var failed = await sut.FailOrphanedRunsAsync(SessionStart);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(failed, Is.Zero);
+            _progress.Verify(x => x.FailStep02Async(
+                It.IsAny<Isin>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        });
+    }
+
+    [Test]
+    public async Task FailOrphanedRunsAsync_OneFailThrows_CarriesOnWithTheRest()
+    {
+        // Arrange — one bad row must not leave the others locked.
+        _progress
+            .Setup(x => x.ListOrphanedStep02Async(SessionStart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Row("LU0000000021"), Row("LU0000000022")]);
+        _progress
+            .Setup(x => x.FailStep02Async(new Isin("LU0000000021"), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store unreachable"));
+        var sut = CreateSut();
+
+        // Act
+        var failed = await sut.FailOrphanedRunsAsync(SessionStart);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(failed, Is.EqualTo(1));
+            _progress.Verify(x => x.FailStep02Async(
+                new Isin("LU0000000022"), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        });
+    }
+
+    private static IsinProgressEntity Row(string isin) => new() { Isin = isin };
+
     private static DataLoaderOutput MakeOutput(params FundRecord[] funds) => new()
     {
         GeneratedAt = string.Empty,

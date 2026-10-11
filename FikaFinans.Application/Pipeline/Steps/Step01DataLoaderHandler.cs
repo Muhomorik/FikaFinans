@@ -454,4 +454,50 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
                 ex, "Step 1 fail could not be recorded — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
         }
     }
+
+    /// <inheritdoc />
+    public async Task<int> FailOrphanedRunsAsync(DateTimeOffset startedBefore, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 1 orphaned-run recovery — startedBefore={0:u}", startedBefore);
+
+        var orphaned = await _progress
+            .ListOrphanedStep01Async(startedBefore, ct)
+            .ConfigureAwait(false);
+
+        var failed = 0;
+
+        foreach (var row in orphaned)
+        {
+            try
+            {
+                // A fail, not a reset: it clears the stale lock and keeps the dedup anchor,
+                // so the next NAV sync sees the fund as changed and raises it again.
+                await _progress
+                    .FailStep01Async(
+                        new Isin(row.Isin),
+                        "Orphaned run — the process ended before step 1 finished; reprocessed on the next NAV sync.",
+                        ct)
+                    .ConfigureAwait(false);
+
+                failed++;
+
+                _logger.Info("Step 1 orphaned run failed — isin={0}, runId={1}", row.Isin, row.RunId?.Value);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown, not a failure — the rest stay locked until the next recovery.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Logged and skipped: one row the store will not write must not leave every
+                // other orphaned run locked too.
+                _logger.Error(ex, "Step 1 orphaned run could not be failed — isin={0}", row.Isin);
+            }
+        }
+
+        _logger.Debug("Step 1 orphaned-run recovery done — {0} of {1} failed", failed, orphaned.Count);
+
+        return failed;
+    }
 }

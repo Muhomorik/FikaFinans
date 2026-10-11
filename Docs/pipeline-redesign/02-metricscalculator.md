@@ -512,28 +512,33 @@ opened, those funds stay locked. For each row still in flight:
 
 | Check | Then |
 | --- | --- |
-| step 1 started it **before this app session started** | orphaned — nothing from an earlier process can still be running. Fail the step through that step's `FailStep{N}Async`, recording it as orphaned, then publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` to reprocess it |
+| step 1 started it **before this app session started** | orphaned — nothing from an earlier process can still be running. Fail the step through that step's `FailStep{N}Async`, recording it as orphaned |
 | started during this session | leave it — it may genuinely be running right now |
 
 | Piece | Name |
 | --- | --- |
 | Store — list a step's orphaned runs | `ListOrphanedStep01Async`, `ListOrphanedStep02Async` — one per step, like start / complete / fail |
-| Handler — fail each, then reprocess | `ReprocessOrphanedRunsAsync` *(new)* on `IStep01DataLoader` and `IStep02MetricsCalculator`; the tab only calls it |
+| Handler — fail each | `FailOrphanedRunsAsync` on `IStep01DataLoader` and `IStep02MetricsCalculator`; the tab only calls it |
 
 Clearing the stale lock is a fail on purpose: it does exactly what the
 recovery needs — frees the row, keeps the dedup anchor, records why — so
 it needs no method of its own.
 
-Reprocessing goes back through the front door like any other signal, so
-it always starts at step 1, whichever step the run was orphaned in.
+**Decided: recovery publishes nothing.** A step handler emits only its
+own done-signal; `NavChangeSignal` stays NAV detection's. Because a
+failed run keeps the dedup anchor, the next NAV sync sees the fund's
+trading date as newer than the anchor and raises it itself. That signal
+goes through the front door like any other, so reprocessing always
+starts at step 1, whichever step the run was orphaned in.
 
 **A deliberate exception** to the rule on step 1's page that opening a
 view is only a read. It is limited to runs the session-start check
 proves orphaned, so a view still never touches work that is underway.
 
-The fail must land before the signal: step 1's start refuses a row
-still in flight, so a reprocessing signal against a row not yet failed
-would just be dropped.
+The order holds by itself: the stale lock is cleared when the tab is
+opened, and the NAV sync that reprocesses the fund comes later. A sync
+run before the tab is opened still meets the lock and is refused at step
+1's start, so the fund waits for the tab.
 
 Cloud is not covered — decided when the cloud host is built.
 
@@ -621,7 +626,7 @@ committed before the next starts.
 | 10 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
 | 11a | This page: orphaned-run recovery, its terms and its timing | this page |
 | 11b | `ListOrphanedStep01Async`, `ListOrphanedStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
-| 11c | `ReprocessOrphanedRunsAsync` on both handlers — fail each orphaned run, then publish one `NavChangeSignal` batch | both handlers, `INavSignalPublisher` |
+| 11c | `FailOrphanedRunsAsync` on both handlers — fail each orphaned run; the next NAV sync reprocesses it | both handlers |
 | 11d | Each step tab calls it the first time it is opened in a session | step 1 and step 2 tabs, `StepViewModel`, `MainWindowViewModel` |
 | — | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
 

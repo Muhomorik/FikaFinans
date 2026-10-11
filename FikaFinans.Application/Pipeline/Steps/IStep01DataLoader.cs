@@ -42,6 +42,16 @@ public interface IStep01DataLoader
     Task FailAsync(NavChangeSignal signal, Exception error, CancellationToken ct = default);
 
     /// <summary>
+    /// Fails every run orphaned at step 1 — locked before <paramref name="startedBefore"/>
+    /// by a process that has since ended. Clears the stale locks and keeps the dedup anchors,
+    /// so the next NAV sync raises those funds again and they are reprocessed.
+    /// </summary>
+    /// <param name="startedBefore">When the current process started.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>How many orphaned runs were failed.</returns>
+    Task<int> FailOrphanedRunsAsync(DateTimeOffset startedBefore, CancellationToken ct = default);
+
+    /// <summary>
     /// Reads a finished run's output back for display. A read, never a trigger — opening a
     /// view must not start anything.
     /// </summary>
