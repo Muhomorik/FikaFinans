@@ -155,6 +155,83 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         return new StepOutput(JsonSerializer.Serialize(funds, JsonOptions.Default), funds);
     }
 
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> CompleteStep01Async(Isin isin, CancellationToken ct = default)
+        => FreeAsync(isin, StepId.DataLoader, error: null, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> FailStep01Async(Isin isin, string error, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(error);
+
+        return FreeAsync(isin, StepId.DataLoader, error, ct);
+    }
+
+    /// <summary>
+    /// The one way a run ends, whichever step it ends in: the row goes back to free, and
+    /// only a success moves the dedup anchor.
+    /// </summary>
+    /// <param name="step">Names the step in the log; the row is written the same either way.</param>
+    /// <param name="error"><c>null</c> for a success; otherwise stored on the row.</param>
+    private async Task<IsinProgressEntity?> FreeAsync(
+        Isin isin, StepId step, string? error, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        var existing = await _isinProgress
+            .GetAsync(IsinProgressPartition, isin.Value, ct)
+            .ConfigureAwait(false);
+
+        // Nothing to free. Logged rather than thrown: the run is over either way, and a
+        // throw here would mask whatever ended it.
+        if (existing is null)
+        {
+            _logger.Info("Progress free skipped — isin={0} has no row at {1}", isin.Value, step);
+            return null;
+        }
+
+        var succeeded = error is null;
+
+        var freed = new IsinProgressEntity
+        {
+            PartitionKey = existing.PartitionKey,
+            RowKey = existing.RowKey,
+            Isin = existing.Isin,
+            State = IsinProgressState.Free,
+            RunId = existing.RunId,
+            NavDate = existing.NavDate,
+            CurrentStep = existing.CurrentStep,
+            // A failed run keeps the previous anchor, so the next signal for this trading
+            // date is not deduplicated away. No NavDate means nothing to advance to.
+            LatestProcessedNavDate = succeeded
+                ? existing.NavDate ?? existing.LatestProcessedNavDate
+                : existing.LatestProcessedNavDate,
+            ProcessingStartedAt = null,
+            LastError = error,
+            // Counts failures in a row: a success resets it along with the error.
+            AttemptCount = succeeded ? 0 : existing.AttemptCount + 1,
+            Step01Json = existing.Step01Json,
+            Step02Json = existing.Step02Json,
+            Step03Json = existing.Step03Json,
+            Step04Json = existing.Step04Json,
+            Step05Json = existing.Step05Json,
+            Step06Json = existing.Step06Json,
+            Step07Json = existing.Step07Json,
+            Step08Json = existing.Step08Json,
+            Step09Json = existing.Step09Json,
+        };
+
+        await _isinProgress.UpsertAsync(freed, ct).ConfigureAwait(false);
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress free done — isin={0}, {1}, {2}, runId={3}, {4} ms",
+            isin.Value, step, succeeded ? "completed" : "failed", existing.RunId?.Value,
+            stopwatch.ElapsedMilliseconds);
+
+        return freed;
+    }
+
     /// <summary>
     /// The <c>Step{N}Json</c> column <paramref name="step"/> owns — the read counterpart of
     /// the write in <see cref="WithStepOutput"/>.

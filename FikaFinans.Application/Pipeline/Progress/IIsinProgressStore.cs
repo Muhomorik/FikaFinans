@@ -48,4 +48,22 @@ public interface IIsinProgressStore
     /// <returns><c>null</c> when no row carries output for that run and step.</returns>
     Task<StepOutput?> ReadStepOutputAsync(
         StepId step, PipelineRunId runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a successful run at step 1 — step 1 is the chain tail. Frees the row and
+    /// advances the durable dedup anchor to the run's trading date.
+    /// </summary>
+    /// <remarks>Only the chain tail completes. Removed once step 2 takes the tail over.</remarks>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> CompleteStep01Async(Isin isin, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a run that failed in step 1. Frees the row and records why, leaving the dedup
+    /// anchor where it was so the next signal retries the fund.
+    /// </summary>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <param name="error">Why the step failed; stored on the row.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> FailStep01Async(Isin isin, string error, CancellationToken ct = default);
 }

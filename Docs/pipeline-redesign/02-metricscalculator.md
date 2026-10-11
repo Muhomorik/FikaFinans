@@ -76,8 +76,8 @@ Every new type carries the step number, the way step 1's do. All
 | Config provider | — step 1 has no config | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` |
 | Cloud function | `Step01DataLoaderFunction` *(sketch)* | `Step02MetricsCalculatorFunction` |
 | Row — start | `StartStep01Async` — formerly `ClaimAsync` | `StartStep02Async` |
-| Row — complete | `CompleteStep01Async` *(new)* — only while step 1 is the chain tail | `CompleteStep02Async` |
-| Row — fail | `FailStep01Async` *(new)* | `FailStep02Async` |
+| Row — complete | `CompleteStep01Async` — only while step 1 is the chain tail | `CompleteStep02Async` |
+| Row — fail | `FailStep01Async` | `FailStep02Async` |
 
 The last three are methods on `IIsinProgressStore`, one set per step,
 for the same reason `IPipelineSignals` has one overload per step: a step
