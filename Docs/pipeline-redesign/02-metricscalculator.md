@@ -521,14 +521,13 @@ Cloud is not covered — decided when the cloud host is built.
 
 ### Emit
 
-**TODO:** add `Step02DoneSignal` *(new)* — fund identifier, trading date,
-run id, no payload. Same shape as step 1's, implementing
-`IStepDoneSignal`. Named by the producing step's number, as decided on
-step 1's page.
+`Step02DoneSignal` — fund identifier, trading date, run id, no payload.
+Same shape as step 1's, implementing `IStepDoneSignal`. Named by the
+producing step's number, as decided on step 1's page.
 
-**TODO:** add its overload to `IPipelineSignals`, and implement it on
-`LocalRxPipelineSignalBus`. The build breaks until both are done, which
-is what the overloads-not-generic choice was for.
+Its overload is on `IPipelineSignals` and implemented on
+`LocalRxPipelineSignalBus` — the overloads-not-generic choice means any
+other implementation fails to build until it adds one too.
 
 Nothing changes on `IPipelineSignalStreams` — it already carries every
 `IStepDoneSignal`.
@@ -553,7 +552,7 @@ does.
 ```mermaid
 flowchart LR
   s1["Step 1<br/>DataLoader"] -->|"Step01DoneSignal"| s2["Step 2<br/>MetricsCalculator<br/>chain tail — completes"]
-  s2 -->|"Step02DoneSignal (new)"| tab["step 2 tab<br/>reads only"]
+  s2 -->|"Step02DoneSignal"| tab["step 2 tab<br/>reads only"]
   s2 -.->|"later — step 4's page decides"| next["next step"]
   s1 -->|writes| row[("per-ISIN row")]
   row -->|"reads Step01Json"| s2
@@ -579,7 +578,7 @@ of step 1's:
 | The tab | Does |
 | --- | --- |
 | Listens to step events | filtered to `StepId.MetricsCalculator`, projected onto status, duration, error |
-| Listens to `Step02DoneSignal` *(new)* | to learn the run id, then reads that run's output |
+| Listens to `Step02DoneSignal` | to learn the run id, then reads that run's output |
 | Reads | through the step 2 handler's `ReadOutputAsync`, never the repository directly |
 | Runs | **nothing** on a signal — only the debug button, as above |
 
@@ -597,7 +596,7 @@ committed before the next starts.
 | 1 | Rename `ClaimAsync` to `StartStep01Async` — no behaviour change | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore`, `Step01DataLoaderHandler` |
 | 2 | `CompleteStep01Async` + `FailStep01Async` — complete advances the anchor, fail does not | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
 | 3 | Step 1 completes after its emit and fails from any phase that throws, so a fund is not locked after one signal | `Step01DataLoaderHandler`, `PipelineFrontDoor` |
-| 4 | `Step02DoneSignal` *(new)* and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
+| 4 | `Step02DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
 | 5 | `IStep02MetricsConfigProvider` in Application, `JsonBackedStep02MetricsConfigProvider` in Infrastructure | Application, Infrastructure, `InfrastructureModule` |
 | 6 | `StartStep02Async`, `CompleteStep02Async`, `FailStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
 | 7 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape — first phase starts step 2 then reads `Step01Json`; save wraps the record in a one-fund envelope. Not wired yet | Application, `Pipeline/Steps` |
