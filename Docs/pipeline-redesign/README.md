@@ -17,8 +17,10 @@
 
 # Pipeline Redesign
 
-**This folder describes a design that does not exist yet.** Nothing here
-is a record of current behaviour.
+**This folder started as a design.** Steps 1 and 2 are now implemented
+for the local (WPF) host — each page's status line says how far; every
+other page is still design only, and no page is a record of current
+behaviour beyond what its status says.
 
 One file per pipeline step, describing how that step changes to become
 signal-driven, per-fund, and hostable outside the desktop app — so the

@@ -1,6 +1,9 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design only. Nothing here is implemented.
+  STATUS: partly implemented for the local (WPF) host. The signal path exists — front
+  door, handler, done-signal, and the row's start / fail. Some TODOs and (new) markers
+  below are already done and not yet reconciled with the code; others, such as the
+  bucketing port, are still open. The cloud host is not built.
 -->
 
 # Step 1 — DataLoader

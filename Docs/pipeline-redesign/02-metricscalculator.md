@@ -1,6 +1,7 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design only. Nothing here is implemented.
+  STATUS: implemented for the local (WPF) host, 2026-10-11. The cloud host is not
+  built; the open questions at the end still stand.
 -->
 
 # Step 2 — MetricsCalculator
@@ -19,6 +20,10 @@
 behind `IMetricsCalculatorAgent`, surfaced in the desktop app as
 `Step2MetricsCalculatorViewModel`. This page covers only what the move to
 signal-driven, per-fund processing changes.
+
+Locally, that move is done: a NAV signal runs step 1, step 1's
+done-signal runs step 2, and step 2 completes or fails the run. What is
+left is listed under "Open questions".
 
 ## What step 2 needs from step 1
 
@@ -607,10 +612,12 @@ loader stays for steps 4–9. The step-event projection both tabs share
 lives on `StepViewModel`. No XAML changes. The three view states from step 1's page — populated, in
 flight, not processed — apply unchanged.
 
-## TODO summary
+## Implementation record
 
-In implementation order — one change per row, each reviewed and
-committed before the next starts.
+**Done**, in this order — one change per row, each reviewed and
+committed before the next started. Rows describe the change as it
+landed; a later row may have reworked an earlier one (row 9 removed
+step 1's complete from row 3).
 
 | # | Work | Touches |
 | --- | --- | --- |
@@ -620,7 +627,7 @@ committed before the next starts.
 | 4 | `Step02DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
 | 5 | `IStep02MetricsConfigProvider` in Application, `JsonBackedStep02MetricsConfigProvider` in Infrastructure | Application, Infrastructure, `InfrastructureModule` |
 | 6 | `StartStep02Async`, `CompleteStep02Async`, `FailStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
-| 7 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape — first phase starts step 2 then reads `Step01Json`; save wraps the record in a one-fund envelope. Not wired yet | Application, `Pipeline/Steps` |
+| 7 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape — first phase starts step 2, the load reads `Step01Json`, the agent phase calls the new domain-input `IMetricsCalculatorAgent.RunInMemory`. Not wired yet | Application, `Pipeline/Steps`, `MetricsCalculatorAgent` |
 | 8 | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry`, the front door's twin; registration — handler per-dependency, entry point single-instance, like step 1's | Application, `Pipeline`, `InfrastructureModule` |
 | 9 | Subscription `Step01DoneSignal` → entry point, beside step 1's — and, in the same change, step 2 takes completion over: `CompleteStep01Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` |
 | 10 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
@@ -628,7 +635,7 @@ committed before the next starts.
 | 11b | `ListOrphanedStep01Async`, `ListOrphanedStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
 | 11c | `FailOrphanedRunsAsync` on both handlers — fail each orphaned run; the next NAV sync reprocesses it | both handlers |
 | 11d | Each step tab calls it the first time it is opened in a session | step 1 and step 2 tabs, `StepViewModel`, `MainWindowViewModel` |
-| — | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
+| — | **Not done:** carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
 
 The per-fund read was dropped: the run-wide read already returns one
 fund.
@@ -647,8 +654,18 @@ not settled here.
   did not already have to move.
 - **Orphaned-run recovery in cloud.** Local recovery runs when a tab is
   first opened; cloud has no tab and needs a timeout-based stale-lock
-  reset. Decided when the cloud host is
-  built.
+  reset. Decided when the cloud host is built.
+- **Step outputs too large for Azure Tables.** One fund's `Step01Json`
+  or `Step02Json` measured about 84 000 characters in the first local
+  run — most of it `NavBuckets`. A Tables string property holds 64 KB,
+  about 32 000 characters, so the columns do not fit a Tables entity as
+  they are. SQLite is unaffected. Splitting the column, compressing it,
+  or moving outputs to blobs are the candidates; decided when the cloud
+  store is built.
+- **How an entry point gets a fresh handler per signal.** Both entry
+  points take a `Func<>` factory today, because each handler keeps one
+  run's state in fields. Raised as unwanted; not yet decided what
+  replaces it.
 - **How the envelope is stored on the row** — whole one-fund output in
   each step column, or a separate envelope column. Options laid out
   under "What the row does not carry".
