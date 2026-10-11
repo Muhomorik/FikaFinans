@@ -45,14 +45,30 @@ public sealed class PipelineFrontDoor : IPipelineFrontDoor
             if (!await step01.BeginProcessingAsync(signal, ct).ConfigureAwait(false))
                 return;
 
-            await step01.LoadFundAsync(signal, ct).ConfigureAwait(false);
-            await step01.AssembleAgentInputAsync(signal, ct).ConfigureAwait(false);
-            await step01.RunAgentAsync(signal, ct).ConfigureAwait(false);
+            try
+            {
+                await step01.LoadFundAsync(signal, ct).ConfigureAwait(false);
+                await step01.AssembleAgentInputAsync(signal, ct).ConfigureAwait(false);
+                await step01.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
-            // Write, then emit. The reverse order can tell step 2 to read output that was
-            // never stored.
-            await step01.PersistAsync(signal, ct).ConfigureAwait(false);
-            await step01.EmitDoneAsync(signal, ct).ConfigureAwait(false);
+                // Write, then emit. The reverse order can tell step 2 to read output that was
+                // never stored.
+                await step01.PersistAsync(signal, ct).ConfigureAwait(false);
+                await step01.EmitDoneAsync(signal, ct).ConfigureAwait(false);
+
+                // Step 1 is the chain tail, so its success ends the run and frees the fund.
+                // Moves to step 2 once step 2 consumes the done-signal.
+                await step01.CompleteAsync(signal, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The row is ours from the start onward, so any failure past it frees the
+                // fund for a retry. Cancellation is left out: the row stays in flight
+                // until it is restarted.
+                await step01.FailAsync(signal, ex, ct).ConfigureAwait(false);
+
+                throw;
+            }
 
             stopwatch.Stop();
 

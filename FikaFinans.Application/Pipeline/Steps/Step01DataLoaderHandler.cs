@@ -382,7 +382,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         catch (Exception ex)
         {
             // Rethrown, unlike the claim: EmitDoneAsync must not tell step 2 to read an
-            // output that was never stored. The row stays in flight for the janitor.
+            // output that was never stored. The caller fails the run, which frees the row.
             _logger.Error(
                 ex, "Step 1 persist failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
 
@@ -427,13 +427,81 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         catch (Exception ex)
         {
             // The output is stored, but step 2 was never told. Rethrown so the caller can
-            // fail the fund; the row stays in flight rather than looking complete.
+            // fail the run — the anchor stays put, so the next signal redoes the fund.
             _logger.Error(
                 ex, "Step 1 emit failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
 
             Report(StepEventKind.Failed, signal.Isin, ex.Message);
 
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task CompleteAsync(NavChangeSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // Completing a row this run never held would free another run's fund.
+        if (_progressRow is null)
+            throw new InvalidOperationException("BeginProcessingAsync must run before CompleteAsync.");
+
+        _logger.Debug("Step 1 complete — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+        try
+        {
+            _progressRow = await _progress
+                .CompleteStep01Async(signal.Isin, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 1 completed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — the row stays in flight until it is restarted.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Not reported: the step's work succeeded and EmitDoneAsync already said so.
+            // Rethrown so the caller can fail the run instead of leaving the row in flight.
+            _logger.Error(
+                ex, "Step 1 complete failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task FailAsync(NavChangeSignal signal, Exception error, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+        ArgumentNullException.ThrowIfNull(error);
+
+        // No row of ours to free: the start was refused — another run holds the fund — or
+        // never ran. Failing it anyway would release that other run's lock.
+        if (_progressRow is null)
+        {
+            _logger.Debug("Step 1 fail skipped — isin={0} was never started", signal.Isin.Value);
+            return;
+        }
+
+        _logger.Debug("Step 1 fail — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+
+        try
+        {
+            _progressRow = await _progress
+                .FailStep01Async(signal.Isin, error.Message, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 1 failed — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
+        }
+        catch (Exception ex)
+        {
+            // Swallowed, cancellation included: the caller is already handling the failure
+            // that brought it here, and a throw would replace it. The row stays in flight.
+            _logger.Error(
+                ex, "Step 1 fail could not be recorded — isin={0}, runId={1}", signal.Isin.Value, _runId.Value);
         }
     }
 }
