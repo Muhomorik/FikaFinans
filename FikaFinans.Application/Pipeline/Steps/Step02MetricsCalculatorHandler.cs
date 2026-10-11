@@ -1,0 +1,418 @@
+using System.Diagnostics;
+
+using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Configs;
+using FikaFinans.Application.Pipeline.Progress;
+using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Application.Storage.Bank.Entities;
+using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Identifiers;
+using FikaFinans.Domain.Pipeline;
+using NLog;
+
+namespace FikaFinans.Application.Pipeline.Steps;
+
+/// <summary>
+/// Default <see cref="IStep02MetricsCalculator"/>. Everything it reads is already on the
+/// fund's progress row or behind the config provider, and it keeps one fund's run in
+/// fields, so it must not be shared between funds.
+/// </summary>
+public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
+{
+    private readonly IIsinProgressStore _progress;
+    private readonly IStep02MetricsConfigProvider _configProvider;
+    private readonly IMetricsCalculatorAgent _agent;
+    private readonly IPipelineSignals _signals;
+    private readonly IStepEventPublisher _stepEvents;
+    private readonly ILogger _logger;
+
+    /// <summary>This fund's record as step 1 stored it; null until it loads.</summary>
+    private FundRecord? _fund;
+
+    /// <summary>The settings the agent runs with; null until assembled.</summary>
+    private MetricsCalculatorConfig? _config;
+
+    /// <summary>What the agent produced, kept for the phases that persist and emit it.</summary>
+    private FundRecord? _agentOutput;
+
+    /// <summary>This fund's progress row as this run last wrote it; null until it is started.</summary>
+    private IsinProgressEntity? _progressRow;
+
+    /// <summary>Runs from the start, so a reported duration covers every phase.</summary>
+    private readonly Stopwatch _stepDuration = new();
+
+    public Step02MetricsCalculatorHandler(
+        IIsinProgressStore progress,
+        IStep02MetricsConfigProvider configProvider,
+        IMetricsCalculatorAgent agent,
+        IPipelineSignals signals,
+        IStepEventPublisher stepEvents,
+        ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+        ArgumentNullException.ThrowIfNull(configProvider);
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(signals);
+        ArgumentNullException.ThrowIfNull(stepEvents);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _progress = progress;
+        _configProvider = configProvider;
+        _agent = agent;
+        _signals = signals;
+        _stepEvents = stepEvents;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> BeginProcessingAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        _logger.Debug(
+            "Step 2 begin — isin={0}, navDate={1:yyyy-MM-dd}, runId={2}",
+            signal.Isin.Value, signal.NavDate, signal.RunId.Value);
+
+        try
+        {
+            // A start, not step 1's claim: that one clears the row, and step 1's output on
+            // it is what this step is about to read.
+            _progressRow = await _progress
+                .StartStep02Async(signal.Isin, signal.RunId, ct)
+                .ConfigureAwait(false);
+
+            if (_progressRow is null)
+            {
+                // Delivery is at-least-once, so a signal can outlive its run — the run has
+                // ended, or a newer one holds the fund. Either way nothing here is ours.
+                _logger.Info(
+                    "Step 2 skipped — isin={0}, runId={1} is no longer the fund's run",
+                    signal.Isin.Value, signal.RunId.Value);
+
+                return false;
+            }
+
+            _logger.Debug("Step 2 started — isin={0}", signal.Isin.Value);
+
+            _stepDuration.Restart();
+            Report(StepEventKind.Started, signal.Isin);
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(
+                ex, "Step 2 start failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task LoadFundAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        _logger.Debug("Step 2 load — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            // The run-wide read is enough: step 1 mints a run id per fund, so the run's
+            // output holds this fund's record and nothing else.
+            var step01 = await _progress
+                .ReadStepOutputAsync(StepId.DataLoader, signal.RunId, ct)
+                .ConfigureAwait(false);
+
+            // The start already proved the run is ours, so an empty column is not a late
+            // signal — step 1 stored no record, which happens when its agent drops the fund.
+            // A failure, so it shows on the row and the next signal retries the fund.
+            _fund = step01?.Funds.FirstOrDefault(f => f.Isin == signal.Isin)
+                ?? throw new InvalidOperationException(
+                    $"Step 1 stored no record for ISIN {signal.Isin.Value} in run {signal.RunId.Value}.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown: without the record there is nothing for the agent to enrich.
+            _logger.Error(ex, "Step 2 load failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task AssembleAgentInputAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        _logger.Debug("Step 2 assemble — isin={0}", signal.Isin.Value);
+
+        try
+        {
+            // The record arrives assembled — step 1 did every fetch and join. Only the
+            // config is left, and the provider decides what a missing one means.
+            _config = await _configProvider.GetConfigAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown: running on settings the user did not choose would look like a
+            // normal result and be wrong.
+            _logger.Error(ex, "Step 2 assemble failed — isin={0}", signal.Isin.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<FundRecord> RunAgentAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // Both are set by the phases this one runs after. Reaching here without them is a
+        // caller running the phases out of order, not a condition to recover from.
+        if (_fund is null)
+            throw new InvalidOperationException("LoadFundAsync must run before RunAgentAsync.");
+
+        if (_config is null)
+            throw new InvalidOperationException("AssembleAgentInputAsync must run before RunAgentAsync.");
+
+        _logger.Debug("Step 2 compute — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            // Pure: no I/O, no clock. Returns an enriched copy with every earlier field
+            // preserved, so the append-only rule holds without anything done here.
+            _agentOutput = _agent.ProcessFund(_fund, _config);
+
+            return Task.FromResult(_agentOutput);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Step 2 compute failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task PersistAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        if (_agentOutput is null)
+            throw new InvalidOperationException("RunAgentAsync must run before PersistAsync.");
+
+        if (_progressRow is null)
+            throw new InvalidOperationException("BeginProcessingAsync must run before PersistAsync.");
+
+        _logger.Debug("Step 2 persist — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            // The save takes a whole output and keeps only this fund's record, so the
+            // record goes in a one-fund envelope. The envelope's other fields are left
+            // empty: the store drops them, and how the envelope is carried on the row is
+            // still open on the design page.
+            var output = new DataLoaderOutput
+            {
+                GeneratedAt = string.Empty,
+                IsoWeek = string.Empty,
+                Family = string.Empty,
+                RunId = signal.RunId,
+                ConfigVersion = string.Empty,
+                Funds = [_agentOutput],
+                FrozenPositions = Array.Empty<FrozenPosition>(),
+                DataQuality = new DataQuality(),
+            };
+
+            _progressRow = await _progress
+                .SaveStepOutputAsync(signal.Isin, StepId.MetricsCalculator, signal.RunId, output, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 2 persisted — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rethrown: EmitDoneAsync must not announce an output that was never stored.
+            // The caller fails the run, which frees the row.
+            _logger.Error(ex, "Step 2 persist failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task EmitDoneAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        _logger.Debug("Step 2 emit — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            // Identity only, no payload, same as step 1's: a reader takes the record back
+            // off the row, so nothing travelling here can disagree with what was stored.
+            await _signals
+                .PublishAsync(new Step02DoneSignal(signal.Isin, signal.NavDate, signal.RunId), ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 2 emitted — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            // The last phase of the step's own work, so the step is done for this fund.
+            Report(StepEventKind.Succeeded, signal.Isin);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The output is stored, but nobody was told. Rethrown so the caller can fail
+            // the run — the anchor stays put, so the next signal redoes the fund.
+            _logger.Error(ex, "Step 2 emit failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task CompleteAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+
+        // Completing a row this run never held would free another run's fund.
+        if (_progressRow is null)
+            throw new InvalidOperationException("BeginProcessingAsync must run before CompleteAsync.");
+
+        _logger.Debug("Step 2 complete — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            _progressRow = await _progress
+                .CompleteStep02Async(signal.Isin, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 2 completed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — the row stays in flight until it is restarted.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Not reported: the step's work succeeded and EmitDoneAsync already said so.
+            // Rethrown so the caller can fail the run instead of leaving the row in flight.
+            _logger.Error(
+                ex, "Step 2 complete failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task FailAsync(Step01DoneSignal signal, Exception error, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+        ArgumentNullException.ThrowIfNull(error);
+
+        // No row of ours to free: the start was refused — a newer run holds the fund — or
+        // never ran. Failing it anyway would release that other run's lock.
+        if (_progressRow is null)
+        {
+            _logger.Debug("Step 2 fail skipped — isin={0} was never started", signal.Isin.Value);
+            return;
+        }
+
+        _logger.Debug("Step 2 fail — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+        try
+        {
+            _progressRow = await _progress
+                .FailStep02Async(signal.Isin, error.Message, ct)
+                .ConfigureAwait(false);
+
+            _logger.Debug("Step 2 failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+        }
+        catch (Exception ex)
+        {
+            // Swallowed, cancellation included: the caller is already handling the failure
+            // that brought it here, and a throw would replace it. The row stays in flight.
+            _logger.Error(
+                ex, "Step 2 fail could not be recorded — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<StepOutput?> ReadOutputAsync(PipelineRunId runId, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 2 read — runId={0}", runId.Value);
+
+        try
+        {
+            return await _progress
+                .ReadStepOutputAsync(StepId.MetricsCalculator, runId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A read feeds a view, so a failure costs a display rather than a run. Null lets
+            // the caller show its "nothing here" state instead of surfacing a crash.
+            _logger.Error(ex, "Step 2 read failed — runId={0}", runId.Value);
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reports this step's progress for one fund. Elapsed time is measured from the start,
+    /// so it spans every phase rather than the one that happened to report.
+    /// </summary>
+    /// <param name="kind">Started carries no duration; there is nothing elapsed yet.</param>
+    /// <param name="isin">The fund the tick is about.</param>
+    /// <param name="message">Why it failed, for a failure; otherwise null.</param>
+    private void Report(StepEventKind kind, Isin isin, string? message = null)
+        => _stepEvents.Publish(new StepEvent(
+            StepId.MetricsCalculator,
+            kind,
+            isin,
+            message,
+            kind == StepEventKind.Started ? null : _stepDuration.Elapsed));
+}

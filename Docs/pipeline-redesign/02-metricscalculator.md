@@ -119,8 +119,8 @@ order "write, then emit" itself:
 
 | Step 1 phase | Step 2 equivalent | Difference |
 | --- | --- | --- |
-| `BeginProcessingAsync` — **starts** step 1 on the row, which also clears it | start step 2 on the row — refused unless it still carries the signal's run id → stop; then read `Step01Json` | starts without clearing — see "Start, do not claim" below |
-| `LoadFundAsync` — fetch identity, holdings, pins | take this fund's record out of what Begin read | no I/O |
+| `BeginProcessingAsync` — **starts** step 1 on the row, which also clears it | start step 2 on the row — refused unless it still carries the signal's run id → stop | starts without clearing — see "Start, do not claim" below |
+| `LoadFundAsync` — fetch identity, holdings, pins | read `Step01Json` by the signal's run id and take this fund's record out; none → throw | one store read instead of three fetches |
 | `AssembleAgentInputAsync` — compute buckets, snapshot | load the step 2 config through the config provider | config only; the record is already assembled |
 | `RunAgentAsync` — `IDataLoaderAgent.RunInMemory` | `IMetricsCalculatorAgent.ProcessFund` | already on the interface, already pure |
 | `PersistAsync` — `Step01Json` | `Step02Json` | same store call, different `StepId` |
@@ -143,7 +143,7 @@ only the few lines that connect a transport to it differ per host.
 flowchart TB
   subgraph app["Application — shared by both hosts"]
     door["Step02MetricsCalculatorEntry (new)<br/>one Step01DoneSignal in"]
-    h["Step02MetricsCalculatorHandler (new)<br/>start → read Step01Json → ProcessFund → save → emit → complete"]
+    h["Step02MetricsCalculatorHandler<br/>start → read Step01Json → ProcessFund → save → emit → complete"]
     agent["IMetricsCalculatorAgent.ProcessFund"]
     door --> h --> agent
   end
@@ -256,11 +256,18 @@ Refused → log and return false, the way step 1's refused start does.
 The lock step 1 took still covers the whole chain for that fund; step 2
 only records that the chain has reached it.
 
-The read of `Step01Json` follows the start, in the same first phase. A
-null read after a granted start is not a late signal: step 1 wrote no
-record — its save leaves the column null when the agent dropped the
-fund. Whether step 2 then fails the fund or completes it with nothing
-written is open (see "Open questions").
+The read of `Step01Json` comes in the next phase, `LoadFundAsync`, so
+the first phase stays a pure gate — exactly step 1's shape. A null read
+after a granted start is not a late signal: step 1 wrote no record — its
+save leaves the column null when the agent dropped the fund.
+
+**Decided: a missing record fails the fund.** The read throws, and like
+any other phase failure the entry point fails step 2: `LastError` shows
+why, the anchor stays put, and the next signal retries. Keeping the read
+out of the first phase is what makes that work — the entry point only
+fails what happens after a granted start. If dropped funds turn out to
+be routine (outside the company filter, say), completing with nothing
+written is the alternative.
 
 ### Manual trigger — WPF only
 
@@ -632,11 +639,6 @@ not settled here.
   but it is step 10's page to decide.
 - **Where the bucketing config lives** once step 1 owns the bucketing —
   through a config provider either way; which one is step 1's call.
-- **Step 2 finds no record after a granted start.** Step 1 leaves
-  `Step01Json` null when its agent dropped the fund, yet still emits.
-  Step 2 can fail the fund — anchor kept, retried on every signal — or
-  complete it with nothing written. Which one depends on whether a
-  dropped fund is an error or a normal "out of scope".
 - **Who consumes step 2's done-signal.** Nobody for now; step 2 is the
   tail. Step 4 is the natural consumer if step 3 resolves as a barrier
   off the per-fund chain — step 4's page owns the decision.
