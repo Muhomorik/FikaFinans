@@ -770,7 +770,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1–6 done; the rest not started. One change per row, each reviewed and
+Rows 1–7 done; the rest not started. One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -783,7 +783,7 @@ rest do.
 | 4 | ✅ "List every fund" read on `IFundMetadataProvider` — `ListMetadataAsync(company, isoWeek)`, SQLite implementation: the one-ISIN query without the ISIN, same company filter, same mapping; empty list where the one-ISIN read returns null. The CSV provider returns every row of the week's export, and its one-ISIN read now goes through it | `IFundMetadataProvider`, `YieldRaccoonSqliteMetadataProvider`, `YieldRaccoonCsvBackedMetadataProvider` (must implement it too), their tests | — |
 | 5 | ✅ Context store — local implementation, keyed per the decision; see "Where it is stored". Tables-shaped, as [storage-migration-plan.md](../storage-migration-plan.md) sets for every store, in the same layers as the progress rows: `IMacroContextStore` (get by weekly summary `runId`, newest for a week or earlier, save) over `IMacroContextRepository` and `MacroContextEntity`; SQLite side `SqliteMacroContextRepository` and `MacroContextRow` (a `TableEntity`) on the same database context as `IsinProgressRow`. A new table needs the `.db` rebuilt — that plan's schema rule | Application, Infrastructure, `BankDbContext`, `InfrastructureModule` | — |
 | 6 | ✅ `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
-| 7 | `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
+| 7 | ✅ `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired. Load reads `Step02Json`, asks the loader for the week's reports and looks the context up by their weekly summary `runId`; no reports → the newest stored context up to the week, logged when it is an earlier week; neither → the fund fails. Assemble and the agent run on a miss only; the compute goes through `MacroContextSingleFlight` (one per process, keyed by the weekly summary `runId`), re-checks the store, then calls the LLM and saves. An empty category universe fails the fund rather than storing an empty context. The tab's read is left to row 10 | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | `IStep03MacroAnalystEntry` + entry point; registration as step 2's | Application, `InfrastructureModule` | row 7 |
 | 9 | Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |
 | 10 | Step 3's tab goes passive — listens, reads the week's context, keeps the debug button; recovers orphaned runs on first open | `Step3MacroAnalystViewModel`, no XAML | row 9 |
