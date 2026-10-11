@@ -59,19 +59,7 @@ public sealed class YieldRaccoonSqliteMetadataProvider : IFundMetadataProvider
         var stopwatch = Stopwatch.StartNew();
         _logger.Trace("YR metadata read starting — isin={0} db={1}", isin.Value, _dbPath);
 
-        var connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = _dbPath,
-            Mode = SqliteOpenMode.ReadOnly,
-            // Don't hold a pooled handle on YR's file between reads.
-            Pooling = false
-        }.ConnectionString;
-
-        var options = new DbContextOptionsBuilder<YieldRaccoonReadDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-
-        await using var db = new YieldRaccoonReadDbContext(options);
+        await using var db = OpenReadOnly();
 
         var profile = await db.FundProfiles
             .AsNoTracking()
@@ -86,13 +74,7 @@ public sealed class YieldRaccoonSqliteMetadataProvider : IFundMetadataProvider
             return null;
         }
 
-        // The export filename's company token is lower-cased while CompanyName
-        // preserves original case, so this match is deliberately case-insensitive.
-        // An empty company is no filter at all — the reading NavSyncOptions documents,
-        // NavChangeDetector implements, and YR's own profile query gives a null
-        // @company parameter.
-        if (!string.IsNullOrWhiteSpace(company.Value) &&
-            !string.Equals(profile.CompanyName, company.Value, StringComparison.OrdinalIgnoreCase))
+        if (!InScope(profile, company))
         {
             _logger.Trace(
                 "YR metadata read done — isin={0} belongs to '{1}', not '{2}'; treated as out of scope",
@@ -104,6 +86,69 @@ public sealed class YieldRaccoonSqliteMetadataProvider : IFundMetadataProvider
 
         return Map(profile);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FundMetadata>> ListMetadataAsync(
+        Company company, IsoWeek isoWeek, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_dbPath))
+        {
+            _logger.Trace("YR metadata list skipped — no database path configured");
+            return [];
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        _logger.Trace("YR metadata list starting — company='{0}' db={1}", company.Value, _dbPath);
+
+        await using var db = OpenReadOnly();
+
+        // The whole table, filtered here rather than in SQL: the company match is the
+        // one-ISIN read's case-insensitive rule, and the table is one row per fund.
+        var profiles = await db.FundProfiles
+            .AsNoTracking()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var funds = profiles
+            .Where(p => InScope(p, company))
+            .Select(Map)
+            .ToList();
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "YR metadata list done — {0} of {1} funds in scope for '{2}', {3} ms",
+            funds.Count, profiles.Count, company.Value, stopwatch.ElapsedMilliseconds);
+
+        return funds;
+    }
+
+    private YieldRaccoonReadDbContext OpenReadOnly()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            // Don't hold a pooled handle on YR's file between reads.
+            Pooling = false
+        }.ConnectionString;
+
+        var options = new DbContextOptionsBuilder<YieldRaccoonReadDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        return new YieldRaccoonReadDbContext(options);
+    }
+
+    /// <summary>
+    /// The company filter both reads share. The export filename's company token is
+    /// lower-cased while <c>CompanyName</c> preserves original case, so the match is
+    /// deliberately case-insensitive. An empty company is no filter at all — the reading
+    /// NavSyncOptions documents, NavChangeDetector implements, and YR's own profile query
+    /// gives a null <c>@company</c> parameter.
+    /// </summary>
+    private static bool InScope(FundProfile profile, Company company) =>
+        string.IsNullOrWhiteSpace(company.Value) ||
+        string.Equals(profile.CompanyName, company.Value, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Projects a YR profile row onto <see cref="FundMetadata"/>. Almost every YR

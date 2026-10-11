@@ -49,4 +49,25 @@ public interface IFundMetadataProvider
     /// <paramref name="ct"/> was signalled during the read.
     /// </exception>
     Task<FundMetadata?> GetMetadataAsync(Isin isin, Company company, IsoWeek isoWeek, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads every fund's metadata in the company's scope as of the given week — the
+    /// one-ISIN read without the ISIN. Step 3 takes its category universe from it.
+    /// </summary>
+    /// <param name="company">
+    /// The company whose funds are in scope, filtered exactly as
+    /// <see cref="GetMetadataAsync"/> filters.
+    /// </param>
+    /// <param name="isoWeek">
+    /// The week to read, honoured on the same terms as <see cref="GetMetadataAsync"/>.
+    /// </param>
+    /// <param name="ct">Cancels the underlying read.</param>
+    /// <returns>
+    /// Every fund the source holds in scope, or an empty list when it holds none — an
+    /// ordinary outcome, not an error.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="ct"/> was signalled during the read.
+    /// </exception>
+    Task<IReadOnlyList<FundMetadata>> ListMetadataAsync(Company company, IsoWeek isoWeek, CancellationToken ct = default);
 }

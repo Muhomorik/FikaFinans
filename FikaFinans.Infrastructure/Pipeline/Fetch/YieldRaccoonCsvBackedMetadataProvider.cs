@@ -36,16 +36,27 @@ public sealed class YieldRaccoonCsvBackedMetadataProvider : IFundMetadataProvide
     public async Task<FundMetadata?> GetMetadataAsync(
         Isin isin, Company company, IsoWeek isoWeek, CancellationToken ct = default)
     {
+        var funds = await ListMetadataAsync(company, isoWeek, ct).ConfigureAwait(false);
+        return funds.FirstOrDefault(m => m.Isin == isin);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The export is already one company's, so every row in it is in scope.
+    /// </remarks>
+    public async Task<IReadOnlyList<FundMetadata>> ListMetadataAsync(
+        Company company, IsoWeek isoWeek, CancellationToken ct = default)
+    {
         // The export filename's company segment is lower-cased; the column
         // inside preserves original case.
         var path = _paths.MetadataCsv(company.Value.ToLowerInvariant(), isoWeek.Value);
 
         // A missing export is an ordinary outcome — that company/week was never
-        // exported — so the fund reads as absent rather than throwing.
+        // exported — so it reads as no funds rather than throwing.
         if (!File.Exists(path))
         {
             _logger.Trace("YR metadata CSV not found — {0}", path);
-            return null;
+            return [];
         }
 
         // Read async so cancellation lands at the IO boundary; the parser itself
@@ -53,6 +64,6 @@ public sealed class YieldRaccoonCsvBackedMetadataProvider : IFundMetadataProvide
         var csv = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
         using var reader = new StringReader(csv);
 
-        return _parser.Parse(reader).FirstOrDefault(m => m.Isin == isin);
+        return _parser.Parse(reader);
     }
 }

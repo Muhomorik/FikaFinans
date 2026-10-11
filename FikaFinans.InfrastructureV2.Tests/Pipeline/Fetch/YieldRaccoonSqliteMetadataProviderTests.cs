@@ -226,4 +226,73 @@ public sealed class YieldRaccoonSqliteMetadataProviderTests
     }
 
     #endregion
+
+    #region ListMetadataAsync
+
+    [Test]
+    [TestOf(nameof(YieldRaccoonSqliteMetadataProvider.ListMetadataAsync))]
+    public async Task ListMetadataAsync_Company_ReturnsOnlyThatCompanysFunds()
+    {
+        // Act
+        var result = await _sut.ListMetadataAsync(Company.From("Schroder"), IsoWeek.From("2026-W18"));
+
+        // Assert — mapped by the same projection as the one-ISIN read.
+        Assert.That(result, Has.Count.EqualTo(1));
+        Assert.Multiple(() =>
+        {
+            Assert.That(result[0].Isin.Value, Is.EqualTo(KnownIsin));
+            Assert.That(result[0].Category, Is.EqualTo("Tillväxtmarknader"));
+        });
+    }
+
+    [Test]
+    [TestOf(nameof(YieldRaccoonSqliteMetadataProvider.ListMetadataAsync))]
+    public async Task ListMetadataAsync_CompanyCasingDiffers_ReturnsItsFunds()
+    {
+        // Act
+        var result = await _sut.ListMetadataAsync(Company.From("schroder"), IsoWeek.From("2026-W18"));
+
+        // Assert
+        Assert.That(result.Select(m => m.Isin.Value), Is.EqualTo(new[] { KnownIsin }));
+    }
+
+    [Test]
+    [TestOf(nameof(YieldRaccoonSqliteMetadataProvider.ListMetadataAsync))]
+    public async Task ListMetadataAsync_EmptyCompany_ReturnsEveryFund()
+    {
+        // Act — an empty company is no filter, as in the one-ISIN read.
+        var result = await _sut.ListMetadataAsync(new Company(string.Empty), IsoWeek.From("2026-W18"));
+
+        // Assert
+        Assert.That(result.Select(m => m.Isin.Value), Is.EquivalentTo(new[] { KnownIsin, "LU0000000002" }));
+    }
+
+    [Test]
+    [TestOf(nameof(YieldRaccoonSqliteMetadataProvider.ListMetadataAsync))]
+    public async Task ListMetadataAsync_UnknownCompany_ReturnsEmpty()
+    {
+        // Act
+        var result = await _sut.ListMetadataAsync(Company.From("Initech"), IsoWeek.From("2026-W18"));
+
+        // Assert
+        Assert.That(result, Is.Empty);
+    }
+
+    [Test]
+    [TestOf(nameof(YieldRaccoonSqliteMetadataProvider.ListMetadataAsync))]
+    public async Task ListMetadataAsync_EmptyDbPath_ReturnsEmpty()
+    {
+        // Arrange
+        var fixture = new Fixture().Customize(new AutoMoqCustomization());
+        fixture.Inject(new NavSyncOptions { YieldRaccoonDbPath = string.Empty });
+        var sut = fixture.Create<YieldRaccoonSqliteMetadataProvider>();
+
+        // Act
+        var result = await sut.ListMetadataAsync(Company.From("Schroder"), IsoWeek.From("2026-W18"));
+
+        // Assert
+        Assert.That(result, Is.Empty);
+    }
+
+    #endregion
 }
