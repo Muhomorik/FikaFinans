@@ -1,5 +1,6 @@
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Macro;
+using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Application.Pipeline.Steps;
 
@@ -69,4 +70,12 @@ public interface IStep03MacroAnalyst
     /// <param name="ct">Cancellation token.</param>
     /// <returns>How many orphaned runs were failed.</returns>
     Task<int> FailOrphanedRunsAsync(DateTimeOffset startedBefore, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the week's context back for display: the newest stored for
+    /// <paramref name="isoWeek"/> or an earlier week — the same lookup a fund of that week
+    /// falls back on. A read, never a trigger — opening a view must not start anything.
+    /// </summary>
+    /// <returns><c>null</c> when nothing is stored, or the store could not be read.</returns>
+    Task<MacroContext?> ReadContextAsync(IsoWeek isoWeek, CancellationToken ct = default);
 }

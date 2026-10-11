@@ -1,8 +1,9 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design only, 2026-10-11. Nothing on this page is implemented. The
+  STATUS: implemented for the local (WPF) host, 2026-10-11 — every row of
+  "Proposed implementation order" is done; the cloud host is not. The
   shape of the step is decided — per-fund hop, per-week work (B), see "Not a
-  barrier any more"; the rest of the open questions are at the end. Decided:
+  barrier any more"; the open questions left are at the end. Decided:
   the agent's logic and contract do not change; the handler loads, the agent
   computes in memory, and RunInMemoryAsync moves onto IMacroAnalystAgent with
   a typed IsoWeek — the same split as step 2.
@@ -271,7 +272,7 @@ Same six phases as steps 1 and 2, same split so the entry point orders
 | `PersistAsync` — `Step02Json` | `Step03Json` — the fund record from `Step02Json`, unchanged | same store call, same payload shape, nothing added |
 | `EmitDoneAsync` — `Step02DoneSignal` | `Step03DoneSignal` | new signal type, new overload |
 | `CompleteAsync` / `FailAsync` | same, step 3's row methods | the tail moves here |
-| `ReadOutputAsync` | the week's context, not the fund's column | a per-week read — see the tab section |
+| `ReadOutputAsync` | `ReadContextAsync(week)` — the week's context, not the fund's column: the newest stored up to the week | a per-week read — see the tab section |
 
 A hit makes phases 3 and 4 no-ops. Keeping them as phases anyway means
 the entry point stays a near-copy of step 2's, and the miss path — the
@@ -760,7 +761,7 @@ catalysts, themes — which is the same for every fund in the week.
 | The tab | Does |
 | --- | --- |
 | Listens to step events | filtered to `StepId.MacroAnalyst` — status, duration, error, as step 2's tab |
-| Listens to `Step03DoneSignal` | to learn the run, then reads the context that run used |
+| Listens to `Step03DoneSignal` | to learn the week from its trading date, then reads that week's context — the newest stored up to it, which is what the run used unless a newer one landed since |
 | Reads | through the step 3 handler's read, never the store directly |
 | Runs | nothing on a signal — only the debug button |
 
@@ -770,7 +771,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1–9 done; the rest not started. One change per row, each reviewed and
+All rows done (2026-10-11). One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -786,7 +787,7 @@ rest do.
 | 7 | ✅ `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired. Load reads `Step02Json`, asks the loader for the week's reports and looks the context up by their weekly summary `runId`; no reports → the newest stored context up to the week, logged when it is an earlier week; neither → the fund fails. Assemble and the agent run on a miss only; the compute goes through `MacroContextSingleFlight` (one per process, keyed by the weekly summary `runId`), re-checks the store, then calls the LLM and saves. An empty category universe fails the fund rather than storing an empty context. The tab's read is left to row 10 | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | ✅ `IStep03MacroAnalystEntry` + entry point; registration as step 2's — handler per dependency, entry point and `MacroContextSingleFlight` single instance | Application, `InfrastructureModule` | row 7 |
 | 9 | ✅ Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed, with step 2's `CompleteAsync`; the store's complete tests moved to step 3 | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |
-| 10 | Step 3's tab goes passive — listens, reads the week's context, keeps the debug button; recovers orphaned runs on first open | `Step3MacroAnalystViewModel`, no XAML | row 9 |
+| 10 | ✅ Step 3's tab goes passive — listens, reads the week's context, keeps the debug button; recovers orphaned runs on first open. The read is the handler's `ReadContextAsync(week)`: the newest stored context up to the week — the same lookup the fallback uses, since the row does not record which context a run used. The debug button shows what `RunAsync` returned, marked "not stored" | `Step3MacroAnalystViewModel`, no XAML | row 9 |
 
 Row 9 is the first that spends money on a signal. Until then, nothing
 calls the LLM except the button and Run All.

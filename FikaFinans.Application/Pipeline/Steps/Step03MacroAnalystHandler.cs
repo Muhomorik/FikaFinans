@@ -484,6 +484,30 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
         return failed;
     }
 
+    /// <inheritdoc />
+    public async Task<MacroContext?> ReadContextAsync(IsoWeek isoWeek, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 3 read — week {0}", isoWeek);
+
+        try
+        {
+            return await _contexts.GetNewestAsync(isoWeek, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A read feeds a view, so a failure costs a display rather than a run. Null lets
+            // the caller show its "nothing here" state instead of surfacing a crash.
+            _logger.Error(ex, "Step 3 read failed — week {0}", isoWeek);
+
+            return null;
+        }
+    }
+
     /// <summary>
     /// The lookup in the step 3 plan's order: the week's reports name the context to look
     /// for; without them, the newest stored context of the week or earlier stands in.

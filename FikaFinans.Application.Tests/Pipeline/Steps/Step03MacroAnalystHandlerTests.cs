@@ -514,6 +514,39 @@ public sealed class Step03MacroAnalystHandlerTests
         Assert.That(failed, Is.EqualTo(1));
     }
 
+    // ── ReadContextAsync ──────────────────────────────────────────────
+
+    [Test]
+    public async Task ReadContextAsync_ReturnsTheNewestContextUpToTheWeek()
+    {
+        // Arrange
+        var lastWeek = MakeContext("2026-W22", "ws-run-22");
+        _contexts
+            .Setup(x => x.GetNewestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(lastWeek);
+
+        // Act
+        var context = await CreateSut().ReadContextAsync(Week);
+
+        // Assert
+        Assert.That(context, Is.SameAs(lastWeek));
+    }
+
+    [Test]
+    public async Task ReadContextAsync_StoreThrows_ReturnsNull()
+    {
+        // Arrange — a read feeds a view; a failure costs the display, not a crash.
+        _contexts
+            .Setup(x => x.GetNewestAsync(Week, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("no such table: MacroContexts"));
+
+        // Act
+        var context = await CreateSut().ReadContextAsync(Week);
+
+        // Assert
+        Assert.That(context, Is.Null);
+    }
+
     // ── Builders ──────────────────────────────────────────────────────
 
     private static FundRecord MakeFund(string isin, string category) => new()
