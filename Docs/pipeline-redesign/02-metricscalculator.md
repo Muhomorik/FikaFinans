@@ -243,7 +243,7 @@ Step 1's start — `IIsinProgressStore.StartStep01Async`, formerly
 every step column**: that is how a new run starts clean. Step 2 calling
 it would wipe the `Step01Json` it is about to read.
 
-Step 2 has its own start, `StartStep02Async` *(new)*. It is a check and
+Step 2 has its own start, `StartStep02Async`. It is a check and
 a mark, never a clear:
 
 | Does | Why |
@@ -461,8 +461,8 @@ reports — succeeded or failed. Each step gets its own method for each on
 
 | Method | Called by | Row after |
 | --- | --- | --- |
-| `CompleteStep{N}Async` *(new)* | the chain tail only, once its emit is done | free; `LatestProcessedNavDate` advanced to the run's trading date; `LastError` cleared |
-| `FailStep{N}Async` *(new)* | any step, from any phase that throws | free; anchor **not** advanced; `LastError` set — the next signal retries the fund |
+| `CompleteStep{N}Async` | the chain tail only, once its emit is done | free; `LatestProcessedNavDate` advanced to the run's trading date; `LastError` cleared |
+| `FailStep{N}Async` | any step, from any phase that throws | free; anchor **not** advanced; `LastError` set — the next signal retries the fund |
 
 **Decided: only the step currently last on the signal path completes.**
 A step that is not the tail has nothing to complete — its save has

@@ -66,4 +66,34 @@ public interface IIsinProgressStore
     /// <param name="error">Why the step failed; stored on the row.</param>
     /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
     Task<IsinProgressEntity?> FailStep01Async(Isin isin, string error, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that this ISIN's run has reached step 2. A check and a mark, never a clear:
+    /// step 1's output is step 2's input, so unlike <see cref="StartStep01Async"/> every
+    /// column survives.
+    /// </summary>
+    /// <param name="isin">The fund whose row is marked.</param>
+    /// <param name="runId">The run the step-1 signal named; the row must still carry it.</param>
+    /// <returns>
+    /// The row as it now stands — or <c>null</c> when it is not this run's to continue: no
+    /// row, the run already ended, or a newer run has started since. Means: do not start.
+    /// </returns>
+    Task<IsinProgressEntity?> StartStep02Async(Isin isin, PipelineRunId runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a successful run at step 2 — step 2 is the chain tail. Frees the row and
+    /// advances the durable dedup anchor to the run's trading date.
+    /// </summary>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> CompleteStep02Async(Isin isin, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a run that failed in step 2. Frees the row and records why, leaving the dedup
+    /// anchor where it was so the next signal retries the fund.
+    /// </summary>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <param name="error">Why the step failed; stored on the row.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> FailStep02Async(Isin isin, string error, CancellationToken ct = default);
 }

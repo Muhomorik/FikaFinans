@@ -167,6 +167,84 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         return FreeAsync(isin, StepId.DataLoader, error, ct);
     }
 
+    /// <inheritdoc />
+    public async Task<IsinProgressEntity?> StartStep02Async(
+        Isin isin, PipelineRunId runId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        var existing = await _isinProgress
+            .GetAsync(IsinProgressPartition, isin.Value, ct)
+            .ConfigureAwait(false);
+
+        // Step 1's start is the lock for the whole chain, so step 2 only continues a run
+        // that still holds it. A free row or another run id both mean the signal is late.
+        var stillOurs = existing is { State: IsinProgressState.Processing }
+            && string.Equals(existing.RunId?.Value, runId.Value, StringComparison.Ordinal);
+
+        if (!stillOurs)
+        {
+            _logger.Trace(
+                "Progress start refused — isin={0} at {1}, runId={2}, row: {3} runId={4}",
+                isin.Value, StepId.MetricsCalculator, runId.Value,
+                existing?.State.ToString() ?? "missing", existing?.RunId?.Value);
+            return null;
+        }
+
+        var started = WithCurrentStep(existing!, StepId.MetricsCalculator);
+
+        await _isinProgress.UpsertAsync(started, ct).ConfigureAwait(false);
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress start done — isin={0}, {1}, runId={2}, {3} ms",
+            isin.Value, StepId.MetricsCalculator, runId.Value, stopwatch.ElapsedMilliseconds);
+
+        return started;
+    }
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> CompleteStep02Async(Isin isin, CancellationToken ct = default)
+        => FreeAsync(isin, StepId.MetricsCalculator, error: null, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> FailStep02Async(Isin isin, string error, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(error);
+
+        return FreeAsync(isin, StepId.MetricsCalculator, error, ct);
+    }
+
+    /// <summary>
+    /// Copies a row, moving only <c>CurrentStep</c> to <paramref name="step"/> — every
+    /// other column survives, which the full-row-replace upsert would otherwise drop.
+    /// </summary>
+    private static IsinProgressEntity WithCurrentStep(IsinProgressEntity row, StepId step) => new()
+    {
+        PartitionKey = row.PartitionKey,
+        RowKey = row.RowKey,
+        Isin = row.Isin,
+        State = row.State,
+        RunId = row.RunId,
+        NavDate = row.NavDate,
+        CurrentStep = step.Value,
+        LatestProcessedNavDate = row.LatestProcessedNavDate,
+        ProcessingStartedAt = row.ProcessingStartedAt,
+        LastError = row.LastError,
+        AttemptCount = row.AttemptCount,
+        Step01Json = row.Step01Json,
+        Step02Json = row.Step02Json,
+        Step03Json = row.Step03Json,
+        Step04Json = row.Step04Json,
+        Step05Json = row.Step05Json,
+        Step06Json = row.Step06Json,
+        Step07Json = row.Step07Json,
+        Step08Json = row.Step08Json,
+        Step09Json = row.Step09Json,
+    };
+
     /// <summary>
     /// The one way a run ends, whichever step it ends in: the row goes back to free, and
     /// only a success moves the dedup anchor.
