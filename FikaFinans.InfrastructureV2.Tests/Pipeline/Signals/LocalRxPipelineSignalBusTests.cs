@@ -54,25 +54,45 @@ public sealed class LocalRxPipelineSignalBusTests
     }
 
     [Test]
+    public async Task PublishAsync_Step03Done_PushesSignalToSubscribers()
+    {
+        // Arrange
+        using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
+        var received = new List<IStepDoneSignal>();
+        using var sub = sut.Signals.Subscribe(received.Add);
+        var signal = new Step03DoneSignal(FundIsin, Date, RunId);
+
+        // Act
+        await sut.PublishAsync(signal);
+
+        // Assert
+        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+    }
+
+    [Test]
     public async Task Signals_FilteredByType_KeepsStepsApart()
     {
-        // Arrange — step 2 listens for step 1's signal on the same stream it publishes
-        // its own to, so its own must never look like a trigger.
+        // Arrange — each step listens for its predecessor's signal on the same stream it
+        // publishes its own to, so its own must never look like a trigger.
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
         var step01 = new List<Step01DoneSignal>();
         var step02 = new List<Step02DoneSignal>();
+        var step03 = new List<Step03DoneSignal>();
         using var sub01 = sut.Signals.OfType<Step01DoneSignal>().Subscribe(step01.Add);
         using var sub02 = sut.Signals.OfType<Step02DoneSignal>().Subscribe(step02.Add);
+        using var sub03 = sut.Signals.OfType<Step03DoneSignal>().Subscribe(step03.Add);
 
         // Act
         await sut.PublishAsync(new Step01DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step02DoneSignal(FundIsin, Date, RunId));
+        await sut.PublishAsync(new Step03DoneSignal(FundIsin, Date, RunId));
 
         // Assert
         Assert.Multiple(() =>
         {
             Assert.That(step01, Has.Count.EqualTo(1));
             Assert.That(step02, Has.Count.EqualTo(1));
+            Assert.That(step03, Has.Count.EqualTo(1));
         });
     }
 
@@ -84,5 +104,15 @@ public sealed class LocalRxPipelineSignalBusTests
 
         // Act & Assert
         Assert.ThrowsAsync<ArgumentNullException>(() => sut.PublishAsync((Step02DoneSignal)null!));
+    }
+
+    [Test]
+    public void PublishAsync_NullStep03Done_ThrowsArgumentNullException()
+    {
+        // Arrange
+        using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
+
+        // Act & Assert
+        Assert.ThrowsAsync<ArgumentNullException>(() => sut.PublishAsync((Step03DoneSignal)null!));
     }
 }

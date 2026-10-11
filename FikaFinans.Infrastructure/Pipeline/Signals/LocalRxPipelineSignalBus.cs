@@ -38,6 +38,10 @@ public sealed class LocalRxPipelineSignalBus : IPipelineSignals, IPipelineSignal
     public Task PublishAsync(Step02DoneSignal signal, CancellationToken ct = default)
         => PublishCoreAsync(signal, ct);
 
+    /// <inheritdoc />
+    public Task PublishAsync(Step03DoneSignal signal, CancellationToken ct = default)
+        => PublishCoreAsync(signal, ct);
+
     /// <summary>
     /// The one publish path. Every overload lands here, so ordering and logging stay
     /// identical across steps.
