@@ -755,7 +755,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1 and 2a done; the rest not started. One change per row, each reviewed and
+Rows 1, 2a and 2b done; the rest not started. One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -763,7 +763,7 @@ rest do.
 | --- | --- | --- | --- |
 | 1 | ✅ Analytics loader, file-backed — reads the three files into the typed runs; no validation, the agent keeps it. `IWeeklyAnalyticsReportsProvider.GetAsync(IsoWeek)` returning `WeeklyAnalyticsReports`, or nothing when any of the three files is missing or the files hold another week | Application, Infrastructure, `InfrastructureModule` | — |
 | 2a | ✅ The prompts record, the prompts provider in Application, and its file-backed implementation in Infrastructure — takes over the folder read and embedded-default extraction from the agent's constructor. Read fresh on every call; an empty prompt file throws. The agent keeps its own copy of the extraction until 2b | Application, Infrastructure, `InfrastructureModule` | — |
-| 2b | `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time; the agent keeps `IPathsService`; the constructor's three template parameters are removed. No logic change. Tests for the in-memory call in a **new file** | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
+| 2b | ✅ `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time — through the 2a provider, which the constructor now takes in place of the three template parameters; the agent keeps `IPathsService`. No logic change. Tests for the in-memory call in a **new file**, `MacroAnalystAgentRunInMemoryTests`; shared builders in `MacroAnalystTestData` | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
 | 3 | `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 4 | "List every fund" read on `IFundMetadataProvider`, SQLite implementation — the one-ISIN query without the ISIN, same company filter, same mapping | `IFundMetadataProvider`, `YieldRaccoonSqliteMetadataProvider`, `YieldRaccoonCsvBackedMetadataProvider` (must implement it too), their tests | — |
 | 5 | Context store — local implementation, keyed per the decision | Application, Infrastructure | key choice |

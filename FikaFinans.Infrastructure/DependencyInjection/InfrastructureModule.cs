@@ -369,7 +369,8 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.Register(ctx => new MacroAnalystAgent(
                 paths: ctx.Resolve<IPathsService>(),
-                llm: ctx.Resolve<IMacroLlmClient>()))
+                llm: ctx.Resolve<IMacroLlmClient>(),
+                prompts: ctx.Resolve<IStep03MacroAnalystPromptsProvider>()))
             .As<IMacroAnalystAgent>()
             .SingleInstance();
 

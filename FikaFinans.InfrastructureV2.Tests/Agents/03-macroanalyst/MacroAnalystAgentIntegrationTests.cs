@@ -1,5 +1,6 @@
 using FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Configs;
 using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
@@ -10,6 +11,7 @@ using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Domain.Macro;
 using Microsoft.Extensions.Configuration;
+using NLog;
 using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOptions;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MacroAnalyst;
@@ -69,9 +71,13 @@ public sealed class MacroAnalystAgentIntegrationTests
         var dl = MakeSyntheticDataLoaderOutput(summary.PeriodIsoWeek);
 
         var llm = new FoundryMacroLlmClient(_projectClient, _modelId);
-        var sut = new MacroAnalystAgent(new TestPathsService(), llm);
+        var promptsProvider = new FileBackedStep03MacroAnalystPromptsProvider(
+            LogManager.GetLogger(nameof(FileBackedStep03MacroAnalystPromptsProvider)), new TestPathsService());
+        var prompts = await promptsProvider.GetPromptsAsync();
+        var sut = new MacroAnalystAgent(new TestPathsService(), llm, promptsProvider);
 
-        var ctx = await sut.RunInMemoryAsync(summary, chain, targets, dl, summary.PeriodIsoWeek);
+        var ctx = await sut.RunInMemoryAsync(
+            summary, chain, targets, dl, IsoWeek.From(summary.PeriodIsoWeek), prompts);
 
         Assert.Multiple(() =>
         {

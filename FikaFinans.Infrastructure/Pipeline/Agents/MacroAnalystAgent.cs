@@ -1,6 +1,6 @@
-using System.Reflection;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Macro;
@@ -25,48 +25,27 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
 
     private readonly IPathsService _paths;
     private readonly IMacroLlmClient _llm;
-    private readonly string _systemPromptTemplate;
-    private readonly string _userPromptTemplate;
-    private readonly string _retryPromptTemplate;
+    private readonly IStep03MacroAnalystPromptsProvider _prompts;
 
     /// <param name="paths">
-    /// Resolves the input and output files for <see cref="RunAsync"/>, and the prompt folder
-    /// when a template is not passed in.
+    /// Resolves the input and output files for <see cref="RunAsync"/> only.
     /// </param>
     /// <param name="llm">The model behind the single macro call and its one retry.</param>
-    /// <param name="systemPromptTemplate">
-    /// The three templates come as a set: pass all of them, or leave any one null to load
-    /// every template from <see cref="IPathsService.MacroAnalystPromptsDir"/>. Missing files
-    /// there are first extracted from the embedded defaults.
+    /// <param name="prompts">
+    /// Supplies the templates for <see cref="RunAsync"/> only, read at call time;
+    /// <see cref="RunInMemoryAsync"/> takes them as a parameter.
     /// </param>
-    /// <param name="userPromptTemplate">See <paramref name="systemPromptTemplate"/>.</param>
-    /// <param name="retryPromptTemplate">See <paramref name="systemPromptTemplate"/>.</param>
     public MacroAnalystAgent(
         IPathsService paths,
         IMacroLlmClient llm,
-        string? systemPromptTemplate = null,
-        string? userPromptTemplate = null,
-        string? retryPromptTemplate = null)
+        IStep03MacroAnalystPromptsProvider prompts)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(llm);
+        ArgumentNullException.ThrowIfNull(prompts);
         _paths = paths;
         _llm = llm;
-
-        if (systemPromptTemplate is null || userPromptTemplate is null || retryPromptTemplate is null)
-        {
-            var promptDir = _paths.MacroAnalystPromptsDir;
-            EnsureDefaultPrompts(promptDir);
-            _systemPromptTemplate = systemPromptTemplate ?? File.ReadAllText(Path.Combine(promptDir, "system.md"));
-            _userPromptTemplate   = userPromptTemplate   ?? File.ReadAllText(Path.Combine(promptDir, "user-template.md"));
-            _retryPromptTemplate  = retryPromptTemplate  ?? File.ReadAllText(Path.Combine(promptDir, "retry.md"));
-        }
-        else
-        {
-            _systemPromptTemplate = systemPromptTemplate;
-            _userPromptTemplate   = userPromptTemplate;
-            _retryPromptTemplate  = retryPromptTemplate;
-        }
+        _prompts = prompts;
     }
 
     /// <inheritdoc />
@@ -87,9 +66,11 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
             File.ReadAllText(_paths.AnalyticsRotationTargetsJson), AnalyticsJsonOptions.Default)
             ?? throw new InvalidDataException("Failed to deserialize analytics-rotation-targets.json");
 
+        var prompts = await _prompts.GetPromptsAsync(ct);
+
         try
         {
-            var ctx = await RunInMemoryAsync(summary, chain, targets, dataLoader, isoWeek, ct);
+            var ctx = await RunInMemoryAsync(summary, chain, targets, dataLoader, IsoWeek.From(isoWeek), prompts, ct);
             WriteJson(_paths.MacroAnalystOutput(isoWeek, runId), ctx);
             return ctx;
         }
@@ -100,39 +81,33 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         }
     }
 
-    /// <summary>
-    /// Step 3 over inputs already read — reads nothing and writes nothing. Validates the
-    /// bundle, calls the LLM, and returns the context with catalysts and themes filtered to
-    /// the categories in <paramref name="dataLoader"/>.
-    /// </summary>
-    /// <param name="dataLoader">
-    /// Step 1's output; only its funds' categories and its ISO week are read.
-    /// </param>
-    /// <param name="isoWeek">Stamped on the context and on each rotation theme's id.</param>
+    /// <inheritdoc />
     /// <exception cref="MacroAnalystValidationException">
     /// An input has status Failed, the reports' weeks or FK chain disagree, the reports'
     /// week is not <paramref name="dataLoader"/>'s, or the LLM's response is invalid twice.
     /// </exception>
-    /// <remarks>Not on the interface — <see cref="RunAsync"/> and the tests call it.</remarks>
     public async Task<MacroContext> RunInMemoryAsync(
         WeeklySummaryRun summary,
         SubstitutionChainRun chain,
         OpportunityScanRun targets,
         DataLoaderOutput dataLoader,
-        string isoWeek,
+        IsoWeek isoWeek,
+        Step03MacroAnalystPrompts prompts,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(prompts);
+
         var warnings = new List<string>();
         ValidateInputs(summary, chain, targets, dataLoader, warnings);
 
         var categoryUniverse = ExtractCategories(dataLoader);
 
-        var systemPrompt = _systemPromptTemplate;
-        var userPrompt = BuildUserPrompt(summary, chain, targets, categoryUniverse);
+        var systemPrompt = prompts.SystemPrompt;
+        var userPrompt = BuildUserPrompt(prompts.UserPromptTemplate, summary, chain, targets, categoryUniverse);
 
-        var raw = await CallWithRetryAsync(systemPrompt, userPrompt, ct);
+        var raw = await CallWithRetryAsync(systemPrompt, userPrompt, prompts.RetryPromptTemplate, ct);
 
-        var ctx = BuildContext(raw, summary, chain, targets, categoryUniverse, isoWeek, warnings);
+        var ctx = BuildContext(raw, summary, chain, targets, categoryUniverse, isoWeek.Value, warnings);
         return ctx;
     }
 
@@ -195,7 +170,8 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
             .OrderBy(c => c, StringComparer.Ordinal)
             .ToList();
 
-    private string BuildUserPrompt(
+    private static string BuildUserPrompt(
+        string userPromptTemplate,
         WeeklySummaryRun summary,
         SubstitutionChainRun chain,
         OpportunityScanRun targets,
@@ -206,7 +182,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         var chainJson    = JsonSerializer.Serialize(chain,   AnalyticsJsonOptions.Default);
         var targetsJson  = JsonSerializer.Serialize(targets, AnalyticsJsonOptions.Default);
 
-        return _userPromptTemplate
+        return userPromptTemplate
             .Replace("{iso_week}",                  summary.PeriodIsoWeek)
             .Replace("{weekly_summary_run_id}",     summary.RunId)
             .Replace("{substitution_chain_run_id}", chain.RunId)
@@ -218,7 +194,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
     }
 
     private async Task<RawMacroResponse> CallWithRetryAsync(
-        string systemPrompt, string userPrompt, CancellationToken ct)
+        string systemPrompt, string userPrompt, string retryPromptTemplate, CancellationToken ct)
     {
         var firstRaw = await _llm.CompleteAsync(systemPrompt, userPrompt, ct);
         if (TryParse(firstRaw, out var firstParsed, out var firstError))
@@ -226,7 +202,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
 
         var retryPrompt = userPrompt
             + "\n\n---\n\n"
-            + _retryPromptTemplate.Replace("{error_message}", firstError ?? "unknown");
+            + retryPromptTemplate.Replace("{error_message}", firstError ?? "unknown");
 
         var secondRaw = await _llm.CompleteAsync(systemPrompt, retryPrompt, ct);
         if (TryParse(secondRaw, out var secondParsed, out var secondError))
@@ -384,28 +360,5 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
             error = message,
         };
         File.WriteAllText(path, JsonSerializer.Serialize(payload, DataLoaderJsonOptions.Default));
-    }
-
-    // Extracts the three embedded default prompt files to promptDir if they are absent.
-    // Users can edit the extracted files; re-deploying will not overwrite them.
-    private static void EnsureDefaultPrompts(string promptDir)
-    {
-        Directory.CreateDirectory(promptDir);
-        var asm = typeof(MacroAnalystAgent).Assembly;
-        ExtractIfMissing(asm, promptDir, "system.md",        "Defaults.Prompts.MacroAnalyst.system.md");
-        ExtractIfMissing(asm, promptDir, "user-template.md", "Defaults.Prompts.MacroAnalyst.user-template.md");
-        ExtractIfMissing(asm, promptDir, "retry.md",         "Defaults.Prompts.MacroAnalyst.retry.md");
-    }
-
-    private static void ExtractIfMissing(Assembly asm, string dir, string fileName, string resourceName)
-    {
-        var target = Path.Combine(dir, fileName);
-        if (File.Exists(target)) return;
-        using var stream = asm.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded resource '{resourceName}' not found in {asm.GetName().Name}. " +
-                "Ensure the .md files are included as EmbeddedResource in the Infrastructure project.");
-        using var fs = File.Create(target);
-        stream.CopyTo(fs);
     }
 }
