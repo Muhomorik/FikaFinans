@@ -481,8 +481,8 @@ public sealed class InfrastructureModule : Autofac.Module
     }
 
     /// <summary>
-    /// The redesigned step 3 — only what is step 3's own, as for step 2. Filled in one row
-    /// at a time; nothing resolves these until the handler lands.
+    /// The redesigned step 3 — only what is step 3's own, as for step 2. It shares step 1's
+    /// progress store, buses and metadata provider, registered there.
     /// </summary>
     private static void RegisterStep03Services(ContainerBuilder builder)
     {
@@ -500,11 +500,43 @@ public sealed class InfrastructureModule : Autofac.Module
             .As<IStep03MacroAnalystPromptsProvider>()
             .SingleInstance();
 
-        // The week's computed contexts — SQLite locally; Tables or blob in Azure.
+        // The week's computed contexts — the app's database locally; the backend's Azure
+        // table in cloud.
         builder.Register(ctx => new RepositoryBackedMacroContextStore(
                 LogManager.GetLogger(nameof(RepositoryBackedMacroContextStore)),
                 ctx.Resolve<IMacroContextRepository>()))
             .As<IMacroContextStore>()
+            .SingleInstance();
+
+        // One per process: every handler must share it, or two funds missing together each
+        // pay for an LLM call.
+        builder.RegisterType<MacroContextSingleFlight>()
+            .AsSelf()
+            .SingleInstance();
+
+        // Deliberately not SingleInstance, same as steps 1 and 2: it carries one run's
+        // state in fields — record, reports, context, progress row.
+        builder.Register(ctx => new Step03MacroAnalystHandler(
+                logger: LogManager.GetLogger(nameof(Step03MacroAnalystHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                reports: ctx.Resolve<IWeeklyAnalyticsReportsProvider>(),
+                contexts: ctx.Resolve<IMacroContextStore>(),
+                metadata: ctx.Resolve<IFundMetadataProvider>(),
+                promptsProvider: ctx.Resolve<IStep03MacroAnalystPromptsProvider>(),
+                agent: ctx.Resolve<IMacroAnalystAgent>(),
+                singleFlight: ctx.Resolve<MacroContextSingleFlight>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep03MacroAnalyst>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step03MacroAnalystEntry(
+                LogManager.GetLogger(nameof(Step03MacroAnalystEntry)),
+                ctx.Resolve<Func<IStep03MacroAnalyst>>()))
+            .As<IStep03MacroAnalystEntry>()
             .SingleInstance();
     }
 
