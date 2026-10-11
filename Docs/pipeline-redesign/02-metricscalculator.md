@@ -104,7 +104,7 @@ registration differs.
 | `IPipelineSignals` | `LocalRxPipelineSignalBus`, step 1's overload only | same bus, plus step 2's overload | queue publisher *(new)* |
 | `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class — claim renamed to step 1's start, plus start / complete / fail per step and a stuck-row query | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
-| `IStep02MetricsConfigProvider` *(new)* | — none; the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` *(new)* — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
+| `IStep02MetricsConfigProvider` | — none; the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
 
 No fetch seam. Step 2 never talks to YieldRaccoon — everything it needs
 is already on the row. That makes it the cheapest step in the chain to
@@ -278,18 +278,18 @@ plan's "unify the run paths" slice routes them through the runner.
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | **Step 1's fund record** — identity, buckets, snapshot, holding, layer | `01-dataloader-{iso_week}-{run_id}.json` (button) or the in-memory record (runner) | `Step01Json` on this fund's row, matched by run id | same, Tables |
-| **Config** — stale-snapshot window, fee horizon | `config-02-metrics.json` via `IPathsService`, falling back to defaults when absent — read separately by the agent's `Run` and by `StreamingPipelineGateway.LoadMetricsConfig` | through the config provider *(new)*, JSON-backed — same file | through the same provider, other source |
+| **Config** — stale-snapshot window, fee horizon | `config-02-metrics.json` via `IPathsService`, falling back to defaults when absent — read separately by the agent's `Run` and by `StreamingPipelineGateway.LoadMetricsConfig` | through the config provider, JSON-backed — same file | through the same provider, other source |
 
 ### Config through a seam
 
 **Decided: the step reads its config through
-`IStep02MetricsConfigProvider` *(new)*, never a file.** The same move as step 1's fetch seams — the
+`IStep02MetricsConfigProvider`, never a file.** The same move as step 1's fetch seams — the
 handler knows it needs a `MetricsCalculatorConfig`, not that it lives
 in a JSON file under the inputs folder.
 
 ```mermaid
 flowchart LR
-  h["Step02MetricsCalculatorHandler"] --> p["IStep02MetricsConfigProvider (new)"]
+  h["Step02MetricsCalculatorHandler"] --> p["IStep02MetricsConfigProvider"]
   p -->|local| json["config-02-metrics.json<br/>via IPathsService"]
   p -->|cloud| other["other source<br/>open"]
 ```

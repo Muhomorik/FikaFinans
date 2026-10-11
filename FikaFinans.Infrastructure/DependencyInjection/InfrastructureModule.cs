@@ -6,6 +6,7 @@ using FikaFinans.Application.Bank;
 using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
+using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Application.Pipeline.Progress;
@@ -22,6 +23,7 @@ using FikaFinans.Infrastructure.Foundry;
 using FikaFinans.Infrastructure.Paths;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Agents;
+using FikaFinans.Infrastructure.Pipeline.Configs;
 using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Fetch;
 using FikaFinans.Infrastructure.Pipeline.Progress;
@@ -430,6 +432,21 @@ public sealed class InfrastructureModule : Autofac.Module
 
         RegisterNavSyncServices(builder);
         RegisterStep01Services(builder);
+        RegisterStep02Services(builder);
+    }
+
+    /// <summary>
+    /// The redesigned step 2. It shares step 1's progress store and buses, registered there;
+    /// only what is step 2's own lands here, so an Azure deployment swaps it the same way.
+    /// </summary>
+    private static void RegisterStep02Services(ContainerBuilder builder)
+    {
+        // The JSON file the tab's config editor writes locally; another source in Azure.
+        builder.Register(ctx => new JsonBackedStep02MetricsConfigProvider(
+                LogManager.GetLogger(nameof(JsonBackedStep02MetricsConfigProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IStep02MetricsConfigProvider>()
+            .SingleInstance();
     }
 
     /// <summary>
