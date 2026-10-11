@@ -233,11 +233,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .SelectMany(batch => batch.DistinctBy(s => s.Isin))
             .Subscribe(signal => RunFrontDoorAsync(frontDoor, signal));
         _disposables.Add(navSub);
+
+        // Step 1's done-signal: the local stand-in for step 2's queue trigger. No coalescing
+        // buffer, unlike the NAV stream — step 1 emits once per run per fund.
+        var pipelineSignals = _scope.Resolve<IPipelineSignalStreams>();
+        var step02Entry = _scope.Resolve<IStep02MetricsCalculatorEntry>();
+        var step02Sub = pipelineSignals.Signals
+            .OfType<Step01DoneSignal>()
+            .Subscribe(done => RunStep02Async(step02Entry, done));
+        _disposables.Add(step02Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2-9 still
-    /// run through <see cref="IPipelineRunner"/> from the Run All button.
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — step 2 follows
+    /// through <see cref="RunStep02Async"/>; steps 3-10 still run through
+    /// <see cref="IPipelineRunner"/> from the Run All button.
     /// </summary>
     /// <remarks>
     /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
@@ -258,6 +268,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 1 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-1 done-signal to step 2's entry point, off the Rx callback — the bus
+    /// publishes inside step 1's emit, so running step 2 inline would hold step 1 up.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
+    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
+    /// </remarks>
+    private void RunStep02Async(IStep02MetricsCalculatorEntry step02Entry, Step01DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step02Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 2 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 2 failed for {Isin}", signal.Isin.Value);
             }
         });
 

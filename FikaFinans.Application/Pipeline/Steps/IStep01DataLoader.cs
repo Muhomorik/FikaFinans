@@ -33,12 +33,6 @@ public interface IStep01DataLoader
     Task EmitDoneAsync(NavChangeSignal signal, CancellationToken ct = default);
 
     /// <summary>
-    /// Ends the run successfully: frees the fund's row and advances its dedup anchor. Only
-    /// while step 1 is the chain tail — called after the emit, never before.
-    /// </summary>
-    Task CompleteAsync(NavChangeSignal signal, CancellationToken ct = default);
-
-    /// <summary>
     /// Ends a run that threw after the start: frees the fund's row and records why, so the
     /// next signal retries it. Never throws — it runs while another failure is in flight.
     /// </summary>

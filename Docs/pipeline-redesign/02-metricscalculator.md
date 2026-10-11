@@ -76,7 +76,7 @@ Every new type carries the step number, the way step 1's do. All
 | Config provider | — step 1 has no config | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` |
 | Cloud function | `Step01DataLoaderFunction` *(sketch)* | `Step02MetricsCalculatorFunction` |
 | Row — start | `StartStep01Async` — formerly `ClaimAsync` | `StartStep02Async` |
-| Row — complete | `CompleteStep01Async` — only while step 1 is the chain tail | `CompleteStep02Async` |
+| Row — complete | — removed once step 2 became the chain tail | `CompleteStep02Async` |
 | Row — fail | `FailStep01Async` | `FailStep02Async` |
 
 The last three are methods on `IIsinProgressStore`, one set per step,
@@ -181,7 +181,7 @@ survives:
 // sketch
 pipelineSignals.Signals                          // IPipelineSignalStreams
     .OfType<Step01DoneSignal>()
-    .Subscribe(done => RunStep02Async(step02Entry, done));  // (new)
+    .Subscribe(done => RunStep02Async(step02Entry, done));
 ```
 
 Wiring only. `MainWindowViewModel` holds it because that is where step
@@ -458,7 +458,8 @@ record out; the call stays.
 
 Step 1's claim sets the row to processing, and on the signal path
 nothing sets it back. `ReleaseIsinProgressAsync` exists, but only the
-universe-wide `PipelineRunner` calls it. Two consequences, live today:
+universe-wide `PipelineRunner` calls it. Two consequences, before the
+complete and fail below were added:
 
 | Case | What happens |
 | --- | --- |
@@ -479,11 +480,13 @@ A step that is not the tail has nothing to complete — its save has
 already moved `CurrentStep` on — so it has a fail method and no complete
 method.
 
-The tail moves as the chain grows: step 1 today, step 2 once it lands
-— and step 2 stays the tail until a later step consumes its
-done-signal. So in the change that wires step 2, `CompleteStep01Async`
-is removed and `CompleteStep02Async` takes over — one step completes,
-never two.
+The tail moves as the chain grows. It was step 1 until step 2 was wired;
+in that same change `CompleteStep01Async` was removed and
+`CompleteStep02Async` took over — one step completes, never two. Step 2
+stays the tail until a later step consumes its done-signal.
+
+Step 1 still fails the run itself when one of its phases throws —
+including its emit, after which step 2 never runs to free the row.
 
 **Fix step 1 first**, as its own small change: it is broken today
 whether or not step 2 exists. The gateway's `ReleaseIsinProgressAsync`

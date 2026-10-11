@@ -292,11 +292,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
         await sut.CompleteAsync(Signal);
 
         // Assert
-        Assert.Multiple(() =>
-        {
-            _progress.Verify(x => x.CompleteStep02Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
-            _progress.Verify(x => x.CompleteStep01Async(It.IsAny<Isin>(), It.IsAny<CancellationToken>()), Times.Never);
-        });
+        _progress.Verify(x => x.CompleteStep02Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

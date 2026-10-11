@@ -35,18 +35,10 @@ public sealed class PipelineFrontDoorTests
     private PipelineFrontDoor CreateSut() => _fixture.Create<PipelineFrontDoor>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_CompletesAfterEmit()
+    public async Task HandleAsync_AllPhasesSucceed_EmitsAndLeavesTheRowToStep2()
     {
-        // Arrange
-        var calls = new List<string>();
-        _step01
-            .Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("emit"))
-            .Returns(Task.CompletedTask);
-        _step01
-            .Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("complete"))
-            .Returns(Task.CompletedTask);
+        // Arrange — step 2 is the chain tail, so step 1's success ends with the emit: the
+        // row stays in flight for step 2 to complete.
 
         // Act
         await CreateSut().HandleAsync(Signal);
@@ -54,7 +46,8 @@ public sealed class PipelineFrontDoorTests
         // Assert
         Assert.Multiple(() =>
         {
-            Assert.That(calls, Is.EqualTo(new[] { "emit", "complete" }));
+            _step01.Verify(x => x.PersistAsync(Signal, It.IsAny<CancellationToken>()), Times.Once);
+            _step01.Verify(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()), Times.Once);
             _step01.Verify(x => x.FailAsync(
                 It.IsAny<NavChangeSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
         });
@@ -74,7 +67,7 @@ public sealed class PipelineFrontDoorTests
         // Assert
         Assert.Multiple(() =>
         {
-            _step01.Verify(x => x.CompleteAsync(
+            _step01.Verify(x => x.LoadFundAsync(
                 It.IsAny<NavChangeSignal>(), It.IsAny<CancellationToken>()), Times.Never);
             _step01.Verify(x => x.FailAsync(
                 It.IsAny<NavChangeSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -100,18 +93,17 @@ public sealed class PipelineFrontDoorTests
             _step01.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
             _step01.Verify(x => x.EmitDoneAsync(
                 It.IsAny<NavChangeSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-            _step01.Verify(x => x.CompleteAsync(
-                It.IsAny<NavChangeSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         });
     }
 
     [Test]
-    public void HandleAsync_CompleteThrows_FailsWithThatErrorAndRethrows()
+    public void HandleAsync_EmitThrows_FailsWithThatErrorAndRethrows()
     {
-        // Arrange
-        var boom = new InvalidOperationException("store unreachable");
+        // Arrange — the output is stored but step 2 was never told, so nothing will
+        // complete the run; step 1 must free the row itself.
+        var boom = new InvalidOperationException("bus unreachable");
         _step01
-            .Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
+            .Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .ThrowsAsync(boom);
 
         // Act
@@ -126,7 +118,7 @@ public sealed class PipelineFrontDoorTests
     }
 
     [Test]
-    public void HandleAsync_Cancelled_NeitherCompletesNorFails()
+    public void HandleAsync_Cancelled_DoesNotFail()
     {
         // Arrange
         _step01
@@ -137,12 +129,7 @@ public sealed class PipelineFrontDoorTests
         Assert.ThrowsAsync<OperationCanceledException>(() => CreateSut().HandleAsync(Signal));
 
         // Assert
-        Assert.Multiple(() =>
-        {
-            _step01.Verify(x => x.CompleteAsync(
-                It.IsAny<NavChangeSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-            _step01.Verify(x => x.FailAsync(
-                It.IsAny<NavChangeSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
-        });
+        _step01.Verify(x => x.FailAsync(
+            It.IsAny<NavChangeSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

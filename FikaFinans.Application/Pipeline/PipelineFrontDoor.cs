@@ -56,15 +56,15 @@ public sealed class PipelineFrontDoor : IPipelineFrontDoor
                 await step01.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step01.EmitDoneAsync(signal, ct).ConfigureAwait(false);
 
-                // Step 1 is the chain tail, so its success ends the run and frees the fund.
-                // Moves to step 2 once step 2 consumes the done-signal.
-                await step01.CompleteAsync(signal, ct).ConfigureAwait(false);
+                // No complete: step 2 is the chain tail, so the row stays in flight until
+                // step 2 completes or fails the run.
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The row is ours from the start onward, so any failure past it frees the
-                // fund for a retry. Cancellation is left out: the row stays in flight
-                // until it is restarted.
+                // fund for a retry — including a failed emit, after which step 2 never runs
+                // to free it. Cancellation is left out: the row stays in flight until it is
+                // restarted.
                 await step01.FailAsync(signal, ex, ct).ConfigureAwait(false);
 
                 throw;
