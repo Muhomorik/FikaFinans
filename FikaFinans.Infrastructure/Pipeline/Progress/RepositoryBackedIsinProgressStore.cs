@@ -164,6 +164,11 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep01Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default)
+        => ListOrphanedAsync(StepId.DataLoader, startedBefore, ct);
+
+    /// <inheritdoc />
     public async Task<IsinProgressEntity?> StartStep02Async(
         Isin isin, PipelineRunId runId, CancellationToken ct = default)
     {
@@ -211,6 +216,41 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         ArgumentException.ThrowIfNullOrEmpty(error);
 
         return FreeAsync(isin, StepId.MetricsCalculator, error, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep02Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default)
+        => ListOrphanedAsync(StepId.MetricsCalculator, startedBefore, ct);
+
+    /// <summary>
+    /// The rows still locked at <paramref name="step"/> by a run that started before
+    /// <paramref name="startedBefore"/>, whichever step is asking.
+    /// </summary>
+    private async Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedAsync(
+        StepId step, DateTimeOffset startedBefore, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+
+        // A lock with no start time counts as orphaned: every path that takes a lock stamps
+        // the time, so a missing one cannot belong to this process — and left out, the fund
+        // would stay locked for good.
+        var orphaned = rows
+            .Where(r => r.State == IsinProgressState.Processing
+                && r.CurrentStep == step.Value
+                && (r.ProcessingStartedAt is null || r.ProcessingStartedAt < startedBefore))
+            .ToList();
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress orphaned list — {0}, startedBefore={1:u}, {2} row(s), {3} ms",
+            step, startedBefore, orphaned.Count, stopwatch.ElapsedMilliseconds);
+
+        return orphaned;
     }
 
     /// <summary>

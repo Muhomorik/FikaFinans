@@ -59,6 +59,18 @@ public interface IIsinProgressStore
     Task<IsinProgressEntity?> FailStep01Async(Isin isin, string error, CancellationToken ct = default);
 
     /// <summary>
+    /// Lists the orphaned runs at step 1: rows still holding a lock at step 1 that was taken
+    /// before <paramref name="startedBefore"/> — by a process that has since ended, so
+    /// nothing will ever complete or fail them.
+    /// </summary>
+    /// <param name="startedBefore">
+    /// When the current process started. Locks taken since may belong to runs still going.
+    /// </param>
+    /// <returns>The orphaned rows; empty when there are none.</returns>
+    Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep01Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default);
+
+    /// <summary>
     /// Records that this ISIN's run has reached step 2. A check and a mark, never a clear:
     /// step 1's output is step 2's input, so unlike <see cref="StartStep01Async"/> every
     /// column survives.
@@ -87,4 +99,16 @@ public interface IIsinProgressStore
     /// <param name="error">Why the step failed; stored on the row.</param>
     /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
     Task<IsinProgressEntity?> FailStep02Async(Isin isin, string error, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists the orphaned runs at step 2: rows still holding a lock at step 2 that was taken
+    /// before <paramref name="startedBefore"/> — by a process that has since ended, so
+    /// nothing will ever complete or fail them.
+    /// </summary>
+    /// <param name="startedBefore">
+    /// When the current process started. Locks taken since may belong to runs still going.
+    /// </param>
+    /// <returns>The orphaned rows; empty when there are none.</returns>
+    Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep02Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default);
 }

@@ -102,7 +102,7 @@ registration differs.
 | --- | --- | --- | --- |
 | `IPipelineSignalStreams` | `LocalRxPipelineSignalBus` — only step 1's tab subscribes | same bus — also the step 2 subscription | — nothing subscribes |
 | `IPipelineSignals` | `LocalRxPipelineSignalBus`, step 1's overload only | same bus, plus step 2's overload | queue publisher *(new)* |
-| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class — claim renamed to step 1's start, plus start / complete / fail per step and a stuck-row query | the same class over Tables |
+| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class — claim renamed to step 1's start, plus start / complete / fail and an orphaned-run list per step | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
 | `IStep02MetricsConfigProvider` | — none; the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
 
@@ -249,7 +249,7 @@ a mark, never a clear:
 | Does | Why |
 | --- | --- |
 | Refuses unless the row is in flight **and** names the signal's run id | the late-signal drop — no row, or a newer run's start, both answer "not mine" |
-| Moves `CurrentStep` to 2 | a fund that dies inside step 2 is then found by step 2's tab, not step 1's — see "Stuck rows" |
+| Moves `CurrentStep` to 2 | a run orphaned inside step 2 is then recovered by step 2's tab, not step 1's — see "Orphaned runs" |
 | Leaves the step columns and `ProcessingStartedAt` alone | `Step01Json` is step 2's input; step 1's start time is what the session-start check reads |
 
 Refused → log and return false, the way step 1's refused start does.
@@ -464,7 +464,7 @@ complete and fail below were added:
 | Case | What happens |
 | --- | --- |
 | Step 1 succeeds | row stays in flight forever — the next NAV signal for that fund is refused at the claim, and the dedup anchor never advances |
-| Step 1 fails | same — its comment says the janitor will reset it, but no janitor exists |
+| Step 1 fails | same — its comment said a janitor would reset it, but no janitor existed |
 
 A step ends one of two ways, the same two `StepEventKind` already
 reports — succeeded or failed. Each step gets its own method for each on
@@ -493,42 +493,47 @@ whether or not step 2 exists. The gateway's `ReleaseIsinProgressAsync`
 is no help — it is universe-shaped (the whole step 1 output plus a
 failed set) and lives on the old path.
 
-### Stuck rows — restart when the tab opens (WPF only)
+### Orphaned runs — recovery when the tab is first opened (WPF only)
 
-A crash or app shutdown mid-run still leaves a row in flight, because no
-code gets to complete or fail the step. The "janitor" step 1's comments promise —
-a background job that resets rows stuck too long — does not exist.
+A crash or app shutdown mid-run leaves an **orphaned run**: its process
+ended before the step completed or failed, so nothing will ever finish
+it. Its row keeps a **stale lock** — still marked processing — and step
+1's start refuses every new NAV signal for that fund. The "janitor" step
+1's comments once promised — a background job resetting old locks —
+never existed.
 
-**Decided, local only: each step tab restarts its own stuck funds when
-it opens** — the rows whose `CurrentStep` is that tab's step. Step 2's
-tab restarts funds that died in step 2, step 1's those that died in
-step 1. That split holds because every step's start moves
-`CurrentStep` to its own number — without step 2's start, a fund dying
-inside step 2 would still read as step 1. For each such row still in
-flight:
+**Decided, local only: each step tab recovers its own orphaned runs the
+first time it is opened in a session** — the rows whose `CurrentStep`
+is that tab's step. Step 2's tab recovers runs orphaned in step 2, step
+1's those orphaned in step 1. That split holds because every step's
+start moves `CurrentStep` to its own number — without step 2's start, a
+run orphaned inside step 2 would still read as step 1. Until the tab is
+opened, those funds stay locked. For each row still in flight:
 
 | Check | Then |
 | --- | --- |
-| step 1 started it **before this app session started** | its run is dead — nothing from an earlier process can still be running. Fail the step through that step's `FailStep{N}Async`, recording it as abandoned, then publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` |
+| step 1 started it **before this app session started** | orphaned — nothing from an earlier process can still be running. Fail the step through that step's `FailStep{N}Async`, recording it as orphaned, then publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` to reprocess it |
 | started during this session | leave it — it may genuinely be running right now |
 
-The reset is a fail on purpose: it does exactly what a reset must —
-frees the row, keeps the anchor, records why — so it needs no method of
-its own.
+| Piece | Name |
+| --- | --- |
+| Store — list a step's orphaned runs | `ListOrphanedStep01Async`, `ListOrphanedStep02Async` — one per step, like start / complete / fail |
+| Handler — fail each, then reprocess | `ReprocessOrphanedRunsAsync` *(new)* on `IStep01DataLoader` and `IStep02MetricsCalculator`; the tab only calls it |
 
-The restart goes back through the front door like any other signal, so
-it always starts at step 1, whichever step the run died in. The dedup
-anchor is untouched by the reset.
+Clearing the stale lock is a fail on purpose: it does exactly what the
+recovery needs — frees the row, keeps the dedup anchor, records why — so
+it needs no method of its own.
+
+Reprocessing goes back through the front door like any other signal, so
+it always starts at step 1, whichever step the run was orphaned in.
 
 **A deliberate exception** to the rule on step 1's page that opening a
-view is only a read. It is limited to rows the session-start check
-proves dead, so a view still never starts work that is already
-underway.
+view is only a read. It is limited to runs the session-start check
+proves orphaned, so a view still never touches work that is underway.
 
 The fail must land before the signal: step 1's start refuses a row
-still in flight, so a re-published signal against a row not yet failed
-would just be dropped. Finding the rows needs a store query step 2 does not
-otherwise use — every in-flight row at a given step.
+still in flight, so a reprocessing signal against a row not yet failed
+would just be dropped.
 
 Cloud is not covered — decided when the cloud host is built.
 
@@ -575,8 +580,8 @@ flowchart LR
 ## What a frontend reads when the user opens the view
 
 Same as step 1: opening the tab is a read of `Step02Json`, never a
-trigger — with the one exception of restarting funds proven dead (see
-"Stuck rows").
+trigger — with the one exception of orphaned-run recovery on the first
+opening (see "Orphaned runs").
 
 `Step2MetricsCalculatorViewModel` used to go through
 `IsinProgressOutputLoader` with a column selector, then fall back to
@@ -614,7 +619,10 @@ committed before the next starts.
 | 8 | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry`, the front door's twin; registration — handler per-dependency, entry point single-instance, like step 1's | Application, `Pipeline`, `InfrastructureModule` |
 | 9 | Subscription `Step01DoneSignal` → entry point, beside step 1's — and, in the same change, step 2 takes completion over: `CompleteStep01Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` |
 | 10 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
-| 11 | Each step tab restarts its own stuck funds on open — `CurrentStep` is its step, step 1 started before this session; failed first through that step's fail, then re-published as `NavChangeSignal`. Needs an in-flight-rows-by-step query | step 1 and step 2 tabs, `IIsinProgressStore`, `INavSignalPublisher` |
+| 11a | This page: orphaned-run recovery, its terms and its timing | this page |
+| 11b | `ListOrphanedStep01Async`, `ListOrphanedStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
+| 11c | `ReprocessOrphanedRunsAsync` on both handlers — fail each orphaned run, then publish one `NavChangeSignal` batch | both handlers, `INavSignalPublisher` |
+| 11d | Each step tab calls it the first time it is opened in a session | step 1 and step 2 tabs, `StepViewModel`, `MainWindowViewModel` |
 | — | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
 
 The per-fund read was dropped: the run-wide read already returns one
@@ -632,8 +640,9 @@ not settled here.
   step 1's in `MainWindowViewModel` for now. Both move out together in
   the "extract the coordinator" slice; step 2 adds nothing that slice
   did not already have to move.
-- **Crash recovery in cloud.** Local restarts on tab open; cloud has no
-  tab and needs a timeout-based reset. Decided when the cloud host is
+- **Orphaned-run recovery in cloud.** Local recovery runs when a tab is
+  first opened; cloud has no tab and needs a timeout-based stale-lock
+  reset. Decided when the cloud host is
   built.
 - **How the envelope is stored on the row** — whole one-fund output in
   each step column, or a separate envelope column. Options laid out

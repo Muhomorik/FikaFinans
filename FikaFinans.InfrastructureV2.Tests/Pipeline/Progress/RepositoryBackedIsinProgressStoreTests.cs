@@ -401,6 +401,124 @@ public sealed class RepositoryBackedIsinProgressStoreTests
             () => sut.FailStep02Async(new Isin(FundIsin), string.Empty));
     }
 
+    // ── ListOrphanedStep01Async / ListOrphanedStep02Async ─────────────
+
+    private static readonly DateTimeOffset SessionStart = new(2026, 6, 6, 9, 0, 0, TimeSpan.Zero);
+
+    [Test]
+    public async Task ListOrphanedStep01Async_StartedBeforeSession_ReturnsRow()
+    {
+        // Arrange
+        await SeedRowAsync("LU0000000011", IsinProgressState.Processing, step: 1, startedAt: SessionStart.AddHours(-1));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned.Select(r => r.Isin), Is.EqualTo(new[] { "LU0000000011" }));
+    }
+
+    [Test]
+    public async Task ListOrphanedStep01Async_StartedDuringSession_LeavesItOut()
+    {
+        // Arrange — may genuinely be running right now.
+        await SeedRowAsync("LU0000000012", IsinProgressState.Processing, step: 1, startedAt: SessionStart.AddMinutes(5));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned, Is.Empty);
+    }
+
+    [Test]
+    public async Task ListOrphanedStep01Async_AtStep2_LeavesItOut()
+    {
+        // Arrange — step 2's tab recovers that one.
+        await SeedRowAsync("LU0000000013", IsinProgressState.Processing, step: 2, startedAt: SessionStart.AddHours(-1));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned, Is.Empty);
+    }
+
+    [Test]
+    public async Task ListOrphanedStep01Async_Free_LeavesItOut()
+    {
+        // Arrange
+        await SeedRowAsync("LU0000000014", IsinProgressState.Free, step: 1, startedAt: null);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned, Is.Empty);
+    }
+
+    [Test]
+    public async Task ListOrphanedStep01Async_ProcessingWithoutStartTime_ReturnsRow()
+    {
+        // Arrange — every path that marks a row processing stamps the time, so a missing
+        // one cannot come from this session; leaving it out would lock the fund for good.
+        await SeedRowAsync("LU0000000015", IsinProgressState.Processing, step: 1, startedAt: null);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned.Select(r => r.Isin), Is.EqualTo(new[] { "LU0000000015" }));
+    }
+
+    [Test]
+    public async Task ListOrphanedStep01Async_NoRows_ReturnsEmpty()
+    {
+        // Arrange
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep01Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned, Is.Empty);
+    }
+
+    [Test]
+    public async Task ListOrphanedStep02Async_MixedRows_ReturnsOnlyStep2RunsStartedBeforeSession()
+    {
+        // Arrange
+        await SeedRowAsync("LU0000000021", IsinProgressState.Processing, step: 2, startedAt: SessionStart.AddHours(-1));
+        await SeedRowAsync("LU0000000022", IsinProgressState.Processing, step: 1, startedAt: SessionStart.AddHours(-1));
+        await SeedRowAsync("LU0000000023", IsinProgressState.Processing, step: 2, startedAt: SessionStart.AddMinutes(5));
+        await SeedRowAsync("LU0000000024", IsinProgressState.Free, step: 2, startedAt: null);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep02Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned.Select(r => r.Isin), Is.EqualTo(new[] { "LU0000000021" }));
+    }
+
+    private Task SeedRowAsync(string isin, IsinProgressState state, int step, DateTimeOffset? startedAt)
+        => _repo.UpsertAsync(new IsinProgressEntity
+        {
+            PartitionKey = Partition,
+            RowKey = isin,
+            Isin = isin,
+            State = state,
+            RunId = new PipelineRunId($"run-{isin}"),
+            NavDate = Date2,
+            CurrentStep = step,
+            ProcessingStartedAt = startedAt,
+        });
+
     private Task SeedInFlightAsync(
         DateTimeOffset? navDate, DateTimeOffset? anchor, string? lastError = null, int attemptCount = 0)
         => _repo.UpsertAsync(new IsinProgressEntity
