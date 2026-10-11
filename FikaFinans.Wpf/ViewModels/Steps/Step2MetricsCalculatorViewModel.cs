@@ -78,6 +78,19 @@ public sealed class Step2MetricsCalculatorViewModel : StepViewModel
         await LoadOutputAsync();
     }
 
+    /// <summary>
+    /// Fails the runs orphaned at step 2, so the next NAV sync reprocesses those funds.
+    /// </summary>
+    protected override async Task OnFirstOpenedAsync()
+    {
+        if (_step02 is null) return;
+
+        var failed = await _step02.FailOrphanedRunsAsync(SessionStartedAt);
+
+        if (failed > 0)
+            OutputSummaryText = $"{failed} orphaned run(s) failed — reprocessed on the next NAV sync";
+    }
+
     public override Task LoadOutputAsync() => LoadOutputAsync(RunId);
 
     private async Task LoadOutputAsync(PipelineRunId runId)

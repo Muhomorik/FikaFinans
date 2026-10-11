@@ -69,6 +69,19 @@ public sealed class Step1DataLoaderViewModel : StepViewModel
         await LoadOutputAsync();
     }
 
+    /// <summary>
+    /// Fails the runs orphaned at step 1, so the next NAV sync reprocesses those funds.
+    /// </summary>
+    protected override async Task OnFirstOpenedAsync()
+    {
+        if (_step01 is null) return;
+
+        var failed = await _step01.FailOrphanedRunsAsync(SessionStartedAt);
+
+        if (failed > 0)
+            OutputSummaryText = $"{failed} orphaned run(s) failed — reprocessed on the next NAV sync";
+    }
+
     public override Task LoadOutputAsync() => LoadOutputAsync(RunId);
 
     private async Task LoadOutputAsync(PipelineRunId runId)

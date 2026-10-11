@@ -30,6 +30,14 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
     private bool _errorsExpanded;
     private int _perFundProcessed;
     private int _perFundTotal;
+    private bool _opened;
+
+    /// <summary>
+    /// When this app process started. A lock taken before it belongs to a process that has
+    /// ended, which is what makes a run orphaned rather than still running.
+    /// </summary>
+    protected static DateTimeOffset SessionStartedAt { get; } =
+        new(System.Diagnostics.Process.GetCurrentProcess().StartTime);
 
     public abstract int StepNumber { get; }
     public abstract string AgentName { get; }
@@ -261,6 +269,33 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
     /// no-op; each step VM overrides with its own deserialize + summary logic.
     /// </summary>
     public virtual Task LoadOutputAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// Called by <see cref="FikaFinans.Wpf.ViewModels.MainWindowViewModel"/> each time this
+    /// tab is selected; runs <see cref="OnFirstOpenedAsync"/> on the first call of the session
+    /// only. Never throws — the caller does not await it.
+    /// </summary>
+    public async Task OnOpenedAsync()
+    {
+        if (_opened) return;
+        _opened = true;
+
+        try
+        {
+            await OnFirstOpenedAsync();
+        }
+        catch (Exception ex)
+        {
+            // Caught here: nothing awaits this, so an escaping exception would be lost.
+            Logger?.Error(ex, "Step {0} first-open work failed", StepNumber);
+        }
+    }
+
+    /// <summary>
+    /// Work a tab does once per session, the first time it is opened. Base implementation is
+    /// a no-op; the signal-driven steps recover their orphaned runs here.
+    /// </summary>
+    protected virtual Task OnFirstOpenedAsync() => Task.CompletedTask;
 
     /// <summary>
     /// Called by <see cref="FikaFinans.Wpf.ViewModels.MainWindowViewModel"/> to await

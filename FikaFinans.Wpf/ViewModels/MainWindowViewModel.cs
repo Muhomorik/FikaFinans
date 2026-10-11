@@ -102,6 +102,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 tab.RefreshCommand.Execute(null);
             }
+
+            // Step tabs sit at the index of their step number. Each runs its first-open work
+            // once per session — steps 1 and 2 recover their orphaned runs there. Not awaited:
+            // OnOpenedAsync catches everything itself.
+            if (_stepsByNumber is not null && _stepsByNumber.TryGetValue(value, out var step))
+                _ = step.OnOpenedAsync();
         }
     }
 
