@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
@@ -34,7 +33,7 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
     private Company _family = new(string.Empty);
 
     /// <summary>Week of the trading date that raised the run.</summary>
-    private IsoWeek _isoWeek = new(string.Empty);
+    private IsoWeek _isoWeek = IsoWeek.Empty;
 
     /// <summary>This fund's record as step 1 stored it; empty until it loads.</summary>
     private IReadOnlyList<FundRecord> _funds = Array.Empty<FundRecord>();
@@ -137,7 +136,7 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
         try
         {
-            _isoWeek = ToIsoWeek(signal.NavDate);
+            _isoWeek = IsoWeek.FromDate(signal.NavDate);
 
             _family = new Company(_options.CompanyFilter);
 
@@ -403,21 +402,6 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
             return null;
         }
-    }
-
-    /// <summary>
-    /// Returns the ISO-8601 week label that a trading date falls in — the same rule as
-    /// step 1's, so both steps stamp the same week on the same run.
-    /// </summary>
-    /// <param name="navDate">Read in its own offset; converting to UTC can move the week.</param>
-    /// <returns>A label in <c>YYYY-Www</c> form, for example <c>2026-W18</c>.</returns>
-    private static IsoWeek ToIsoWeek(DateTimeOffset navDate)
-    {
-        var date = navDate.Date;
-
-        return IsoWeek.From(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{ISOWeek.GetYear(date):D4}-W{ISOWeek.GetWeekOfYear(date):D2}"));
     }
 
     /// <summary>

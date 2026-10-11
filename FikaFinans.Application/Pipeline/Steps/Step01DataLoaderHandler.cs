@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Fetch;
@@ -40,7 +39,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
     private Company _family = new(string.Empty);
 
     /// <summary>Week of the trading date that raised the signal.</summary>
-    private IsoWeek _isoWeek = new(string.Empty);
+    private IsoWeek _isoWeek = IsoWeek.Empty;
 
     /// <summary>Names this run in the output and every log line; empty until the fund loads.</summary>
     private PipelineRunId _runId = new(string.Empty);
@@ -169,7 +168,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
 
         try
         {
-            _isoWeek = ToIsoWeek(signal.NavDate);
+            _isoWeek = IsoWeek.FromDate(signal.NavDate);
 
             _family = new Company(_options.CompanyFilter);
 
@@ -252,20 +251,6 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
             isin,
             message,
             kind == StepEventKind.Started ? null : _stepDuration.Elapsed));
-
-    /// <summary>
-    /// Returns the ISO-8601 week label that a trading date falls in.
-    /// </summary>
-    /// <param name="navDate">Read in its own offset; converting to UTC can move the week.</param>
-    /// <returns>A label in <c>YYYY-Www</c> form, for example <c>2026-W18</c>.</returns>
-    private static IsoWeek ToIsoWeek(DateTimeOffset navDate)
-    {
-        var date = navDate.Date;
-
-        return IsoWeek.From(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{ISOWeek.GetYear(date):D4}-W{ISOWeek.GetWeekOfYear(date):D2}"));
-    }
 
     /// <inheritdoc />
     public async Task AssembleAgentInputAsync(NavChangeSignal signal, CancellationToken ct = default)
