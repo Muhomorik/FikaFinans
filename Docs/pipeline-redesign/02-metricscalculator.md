@@ -20,36 +20,47 @@ behind `IMetricsCalculatorAgent`, surfaced in the desktop app as
 `Step2MetricsCalculatorViewModel`. This page covers only what the move to
 signal-driven, per-fund processing changes.
 
-Step 1 did the hard part: the fetch seam, the progress-store seam, the
-done-signal family and the phase-split handler all exist now. Step 2 is
-the first step that *consumes* a done-signal rather than a
-`NavChangeSignal`, so it is where the "carry only the signal, read from
-the row" model gets exercised for real.
+## What step 2 needs from step 1
 
-## Where step 1 left things
+How step 1 produces any of this is on
+[01-dataloader.md](./01-dataloader.md). This section only states what
+step 2 takes from it.
 
-What exists today and is reused as-is:
+### Trigger
 
-| Piece | Built for step 1 | What step 2 does with it |
+[`Step01DoneSignal`](../../FikaFinans.Application/Pipeline/Signals/Step01DoneSignal.cs)
+— one per fund, emitted after `Step01Json` is written.
+
+| Field | Step 2 uses it to |
+| --- | --- |
+| `Isin` | name the fund — log lines, step events, the row the output lands on |
+| `NavDate` | carry the trading date forward onto its own done-signal |
+| `RunId` | read `Step01Json` for this run only — and tell a late signal from a live one |
+
+### Input — `Step01Json` on the fund's row
+
+One `FundRecord`, read back by run id. `ProcessFund` reads part of it
+and copies the rest through untouched:
+
+| Part of the record | Read | What for |
 | --- | --- | --- |
-| [`Step01DoneSignal`](../../FikaFinans.Application/Pipeline/Signals/Step01DoneSignal.cs) | step 1's output signal | **its input** |
-| [`IPipelineSignals`](../../FikaFinans.Application/Pipeline/Signals/IPipelineSignals.cs) | one overload, step 1's | gains a second overload, for step 2's done-signal |
-| [`IPipelineSignalStreams`](../../FikaFinans.Application/Pipeline/Signals/IPipelineSignalStreams.cs) | one stream of every `IStepDoneSignal` | step 2 subscribes and filters to `Step01DoneSignal` — nothing on the interface changes |
-| [`IIsinProgressStore`](../../FikaFinans.Application/Pipeline/Progress/IIsinProgressStore.cs) | claim, save, run-wide read | read and save reused; step 2 must **not** claim (see below). Gains a per-fund release and a stuck-row query |
-| [`IStepEventPublisher`](../../FikaFinans.Application/Pipeline/IStepEventPublisher.cs) | step 1's progress ticks | same, with `StepId.MetricsCalculator` |
-| [`IStep01DataLoader`](../../FikaFinans.Application/Pipeline/Steps/IStep01DataLoader.cs) + [`Step01DataLoaderHandler`](../../FikaFinans.Application/Pipeline/Steps/Step01DataLoaderHandler.cs) | phase-split, per-fund handler with run state in fields | **the template** — step 2 gets its own pair in the same shape |
-| [`PipelineFrontDoor`](../../FikaFinans.Application/Pipeline/PipelineFrontDoor.cs) | drives step 1's phases per `NavChangeSignal` | **does not reach step 2** — nothing drives step 2 off a done-signal yet |
+| `NavBuckets` — last three | `Return2wPct` | `windows_positive_count`, `windows_total` |
+| `NavBuckets` — latest | `CurrentDrawdownPct`, `AnnVolatility2wPct`, `Sharpe2w`, `PeriodEnd` | the 2-week metrics; `PeriodEnd` for the stale-snapshot check |
+| `Snapshot` | every field — 12-week and 1-year Sharpe, volatility, compound return, max drawdown, `AsOfDate` | the rolling metrics; `null` when step 1 had no snapshot |
+| `Metadata.TotalFee` | yes | `total_fee_pct`, net-of-fee return |
+| `Isin`, rest of `Metadata`, `CurrentlyHeld`, `CurrentValueKr`, `CostBasisKr`, `Layer` | no | copied through — append-only |
 
-And what runs step 2 today, which this page replaces:
+**Run-level envelope** — cash available, frozen positions, run-level
+warnings. Step 2 reads none of it and carries it through; how it is
+stored on the row is still open (see "What the row does not carry").
 
-| Path | How it reaches step 2 | Input from | Output to |
-| --- | --- | --- | --- |
-| Per-tab "Run this step" button | `Step2MetricsCalculatorViewModel` → `IMetricsCalculatorAgent.Run(isoWeek, runId)` | step 1's JSON **file**, via `IPathsService` | step 2's JSON file |
-| Streaming runner | `PipelineRunner` calls `ProcessFund` per fund, in memory | the fund record handed over in memory | `Step02Json`, via `StreamingPipelineGateway`'s block write |
+Two expectations on step 1, both already met by its page:
 
-Neither reads `Step01Json`. Locally the column is written and then
-ignored — the exact gap the parent plan's "what travels on a hop" section
-describes.
+- **Missing is `null`, never zero.** A missing snapshot, a NaN Sharpe or
+  too little history arrives as `null`; step 2's data-quality flags
+  depend on telling those apart.
+- **One fund per run.** Step 1 mints a run id per fund, so a read by run
+  id returns exactly this fund. Step 2's read relies on it.
 
 ## Names
 
@@ -79,13 +90,13 @@ owned by [backend-nav-sync-plan.md](../backend-nav-sync-plan.md).
 Same rule as step 1: the step depends on interfaces, only the
 registration differs.
 
-| Interface | Local | Cloud |
-| --- | --- | --- |
-| `IPipelineSignalStreams` | `LocalRxPipelineSignalBus` | — nothing subscribes |
-| `IPipelineSignals` | `LocalRxPipelineSignalBus` | queue publisher *(new)* |
-| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite | the same class over Tables |
-| `IStepEventPublisher` | `LocalRxStepEventBus` | still open — the parent plan's run-lifecycle question |
-| `IStep02MetricsConfigProvider` *(new)* | `JsonBackedStep02MetricsConfigProvider` *(new)* — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
+| Interface | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| `IPipelineSignalStreams` | `LocalRxPipelineSignalBus` — only step 1's tab subscribes | same bus — also the step 2 subscription | — nothing subscribes |
+| `IPipelineSignals` | `LocalRxPipelineSignalBus`, step 1's overload only | same bus, plus step 2's overload | queue publisher *(new)* |
+| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class, plus a per-fund release and a stuck-row query | the same class over Tables |
+| `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
+| `IStep02MetricsConfigProvider` *(new)* | — none; the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` *(new)* — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
 
 No fetch seam. Step 2 never talks to YieldRaccoon — everything it needs
 is already on the row. That makes it the cheapest step in the chain to
@@ -140,13 +151,13 @@ flowchart TB
   h -. "step events + Step02DoneSignal" .-> vm
 ```
 
-| Piece | Lives in | Shared with cloud |
-| --- | --- | --- |
-| The calculation — `ProcessFund` | Infrastructure, behind `IMetricsCalculatorAgent` | yes |
-| `Step02MetricsCalculatorHandler` — the phases | Application, beside step 1's | yes |
-| `Step02MetricsCalculatorEntry` — runs the phases in order, the front door's twin | Application, beside `PipelineFrontDoor` | yes |
-| Signal → entry point | `MainWindowViewModel` locally, a Function class in cloud | no — transport wiring |
-| The tab | WPF | no — display only |
+| Piece | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| The calculation — `ProcessFund` | `MetricsCalculatorAgent`, called by `PipelineRunner` | same agent, called by the handler | same agent — shared |
+| The phases | — no handler; `PipelineRunner` calls the agent inline | `Step02MetricsCalculatorHandler`, Application, beside step 1's | same class — shared |
+| Runs the phases in order, the front door's twin | — | `Step02MetricsCalculatorEntry`, Application, beside `PipelineFrontDoor` | same class — shared |
+| Signal → entry point | — no signal; Run All drives step 2 through `PipelineRunner` | Rx subscription in `MainWindowViewModel` — wiring only | `Step02MetricsCalculatorFunction`, queue trigger — wiring only |
+| The tab | reads via `IsinProgressOutputLoader` with a disk fallback; button runs the agent | passive — listens, reads through the handler; debug button kept | — no UI |
 
 The entry point is a twin of `PipelineFrontDoor`, not an extension of
 it: one signal type in, one step's phases out, a fresh handler per
@@ -201,10 +212,11 @@ Whichever wins there, step 2 takes.
 
 `Step01DoneSignal` — fund identifier, trading date, run id. No payload.
 
-| | Producer | Transport | How the step is reached |
+| | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| Local | `Step01DataLoaderHandler.EmitDoneAsync` → `IPipelineSignals` | `LocalRxPipelineSignalBus` | subscribe to `IPipelineSignalStreams.Signals`, filter to step 1 |
-| Cloud | the same handler, queue-backed publisher | `%Step02Queue%` | **nothing subscribes** — the Functions host invokes the step per message |
+| Producer | — no signal; step 2 runs after step 1 inside the same `PipelineRunner` pass, or from the tab's button | `Step01DataLoaderHandler.EmitDoneAsync` → `IPipelineSignals` | the same handler, queue-backed publisher |
+| Transport | the fund record, in memory | `LocalRxPipelineSignalBus` | `%Step02Queue%` |
+| How the step is reached | `PipelineRunner` calls `ProcessFund` per fund | subscribe to `IPipelineSignalStreams.Signals`, filter to step 1 | **nothing subscribes** — the Functions host invokes the step per message |
 
 Delivery is at-least-once, as for step 1. Two cases matter:
 
@@ -264,10 +276,11 @@ flowchart LR
   p -->|cloud| other["other source<br/>open"]
 ```
 
-| | Local | Cloud |
-| --- | --- | --- |
-| Implementation | `JsonBackedStep02MetricsConfigProvider` — the file the tab's config editor already edits | not chosen — app settings, a table row and blob storage are all plausible |
-| Source of truth | unchanged | the open question already on step 1's page |
+| | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| Implementation | none — the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each open the file | `JsonBackedStep02MetricsConfigProvider` — the file the tab's config editor already edits | not chosen — app settings, a table row and blob storage are all plausible |
+| Source of truth | `config-02-metrics.json` | unchanged | the open question already on step 1's page |
+| Missing config | silent fallback to defaults, decided twice | decided once, in the provider | decided once, in the provider — fall back or fail |
 
 The provider is the step's only way to its config. The tab's config
 editor keeps writing the same file, so locally nothing visible changes.
@@ -399,9 +412,10 @@ worth knowing it will read `false` by construction.
 
 One write, then one signal. Same order as step 1, same reason.
 
-| Written | The call | Where it lands | Local | Cloud |
-| --- | --- | --- | --- | --- |
-| This fund's enriched record | `IIsinProgressStore.SaveStepOutputAsync` with `StepId.MetricsCalculator` | `Step02Json` on this fund's row; `CurrentStep` advances to 2 | SQLite | Azure Tables |
+| Written | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| This fund's enriched record | `Step02Json` via `StreamingPipelineGateway`'s block write (runner), or the `02-metrics-{iso_week}-{run_id}.json` file (button) | `IIsinProgressStore.SaveStepOutputAsync` with `StepId.MetricsCalculator` → `Step02Json`, `CurrentStep` advances to 2 — SQLite | same call — Azure Tables |
+| Row release | `ReleaseIsinProgressAsync` once, at the end of the whole `PipelineRunner` pass; **nothing** on the signal path | per-fund release by the chain tail — step 2, see "Release" | same |
 
 No NAV rows, no mirror — step 2 writes only its column.
 
