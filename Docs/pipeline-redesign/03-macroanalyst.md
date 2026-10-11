@@ -1,8 +1,8 @@
 <!--
   Authoring rules: see README.md in this folder.
   STATUS: design only, 2026-10-11. Nothing on this page is implemented. The
-  shape of the step — per-fund hop, per-week work — is proposed, not decided;
-  see "Not a barrier any more" and the open questions at the end. Decided:
+  shape of the step is decided — per-fund hop, per-week work (B), see "Not a
+  barrier any more"; the rest of the open questions are at the end. Decided:
   the agent's logic and contract do not change; the handler loads, the agent
   computes in memory, and RunInMemoryAsync moves onto IMacroAnalystAgent with
   a typed IsoWeek — the same split as step 2.
@@ -143,12 +143,13 @@ Both are half right: step 3 is a hop in the per-fund chain, but its
 | LLM calls per week | one | one — the first fund of the week computes, the rest read | one |
 | Per-fund chain | step 2 → step 4; steps 5 and 6 look the context up | step 2 → step 3 → step 4, as the queue layout already says | step 2 → wait → step 3 → step 4 |
 | Bundle not there yet | steps 5 and 6 find nothing — fund fails at step 5 | fund fails at step 3, retried on the next signal | — |
-| `Step03Json` | stays null | records which context this fund's run used | — |
+| `Step03Json` | stays null | the fund record, passed through from `Step02Json` — the chain's rule | — |
 | Fits signal-driven runs | yes | yes | **no** — there is never an "every fund" |
 | Needs a trigger nobody has | yes — bundle arrival has no signal today, locally or in cloud | no | — |
 
-**Proposed: B.** Not decided — it belongs in the parent plan's barrier
-question, and is recorded there below.
+**Decided (2026-10-11): B.** The LLM call runs when first needed, not
+on a schedule. This answers the parent plan's barrier question for step
+3 only; step 9 still needs its own answer.
 
 Why B over A:
 
@@ -161,10 +162,9 @@ Why B over A:
   bundle — a timer, a webhook, a refresh job. None exists, and the
   analytics plan leaves that choice open. B runs when the first fund
   of the week needs the context.
-- **It makes the audit trail per fund.** `Step03Json` can name the
-  context a fund's run was built on, so a later reader knows which
-  bundle drove step 5's alignment and step 6's catalyst — even after
-  the next week's context replaces it.
+- **It keeps every column filled.** Step 4 reads `Step03Json`, as every
+  step reads its predecessor's column. Under A that column would stay
+  empty and step 4 would be the one step reading two columns back.
 - **It copies step 2.** Handler, entry point, start / complete / fail,
   done-signal, orphaned-run recovery — the same pieces, so the step
   files keep diffing cleanly against each other.
@@ -174,8 +174,8 @@ twice. See "Get or compute" under Agent work.
 
 C is listed only to rule it out.
 
-**The rest of this page assumes B.** Where A would differ, the section
-says so.
+**The rest of this page builds on B.** A few sections still note where
+A would have differed, for the record.
 
 ## What step 3 needs from step 2
 
@@ -190,15 +190,21 @@ says so.
 | `NavDate` | pick the week whose context applies; carry the trading date forward onto its own done-signal |
 | `RunId` | gate the start — and tell a late signal from a live one |
 
-### Input — nothing on the fund's row
+### Input — `Step02Json` on the fund's row
 
-Unlike step 2, step 3 reads **no column**. `Step02Json` is not its
-input; it is step 4's. Step 3's start only checks the row still names
-the signal's run id, and everything the agent needs lives outside the
-row (see "Input data").
+One `FundRecord`, read back by run id, the same read step 2 makes of
+`Step01Json`. Step 3 **reads none of it** and writes it to `Step03Json`
+unchanged — the append-only chain in
+[pipeline-plan.md](../../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md):
+each step reads its predecessor's output and adds fields, and step 3
+has no per-fund field to add. Step 4 then reads `Step03Json`, as the
+step-output rule in
+[backend-nav-sync-plan.md](../backend-nav-sync-plan.md) has every step
+read its predecessor's column.
 
+Everything the agent needs lives outside the row (see "Input data").
 That is why its work can be shared: two funds in the same week give the
-step identical inputs.
+agent identical inputs.
 
 ## Names
 
@@ -214,7 +220,7 @@ Every new type carries the step number, as steps 1 and 2 do. All
 | Config provider | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` | `IStep03MacroAnalystPromptsProvider` + `FileBackedStep03MacroAnalystPromptsProvider` — placeholders; step 3 has no config file, its prompts play the same role |
 | What the provider returns | `MetricsCalculatorConfig` | `Step03MacroAnalystPrompts` — the three prompt templates as one record |
 | Analytics input | — | a loader for the three reports, as the typed runs the agent takes — the analytics plan's source, name not chosen there; `IAnalyticsBundleProvider` is a placeholder |
-| Universe for the agent | — | `IUniverseSnapshotProvider` — placeholder; returns the `DataLoaderOutput` the agent reads categories from; its source is open |
+| Universe for the agent | — | no new type — a "list every fund" read on the existing `IFundMetadataProvider`; the handler wraps it in a `DataLoaderOutput` |
 | Agent call | `IMetricsCalculatorAgent.RunInMemory` | `IMacroAnalystAgent.RunInMemoryAsync` — exists on the class, moves onto the interface |
 | Week's context, stored | — | `IMacroContextStore` — placeholder |
 | Cloud function | `Step02MetricsCalculatorFunction` *(sketch)* | `Step03MacroAnalystFunction` |
@@ -240,7 +246,7 @@ owned by [backend-nav-sync-plan.md](../backend-nav-sync-plan.md).
 | `IIsinProgressStore` | start / complete / fail / orphaned for steps 1–2 | plus step 3's; step 2 loses its complete | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
 | Analytics source *(new)* | — none; the agent reads three files through `IPathsService` | file-backed — the same three files | KanelBrief HTTP API, live or cached — the analytics plan's open A/B |
-| Universe snapshot *(new)* | — none; step 1's universe-wide output | open — see "The category universe" | open |
+| `IFundMetadataProvider` — the all-funds read | — none; step 1's universe-wide output file | `YieldRaccoonSqliteMetadataProvider`, plus a list query | REST-backed provider *(new)* — needs a YieldRaccoon list endpoint |
 | `IMacroAnalystAgent` | `RunAsync` only, called by `PipelineRunner` and the tab | plus `RunInMemoryAsync`, called by the handler | same |
 | Prompts provider *(new)* | — none; the agent's constructor reads `MacroAnalystPromptsDir` | file-backed — the same folder via `IPathsService`, embedded defaults extracted when missing | another source — embedded defaults, app settings or blob; open |
 | Context store *(new)* | — none; the agent writes `03-macro-{iso_week}-{run_id}.json` | SQLite | Tables or blob — open |
@@ -259,10 +265,10 @@ Same six phases as steps 1 and 2, same split so the entry point orders
 | Step 2 phase | Step 3 equivalent | Difference |
 | --- | --- | --- |
 | `BeginProcessingAsync` — start step 2 on the row | start step 3 on the row — refused unless it still names the signal's run id | none |
-| `LoadFundAsync` — read `Step01Json` | **look up the week's context** in the store | a lookup by week, not a read by run id — and a hit skips the next two phases |
-| `AssembleAgentInputAsync` — load the config | on a miss: load the week's three analytics runs, the universe snapshot, and the prompts through the provider | the prompts are step 3's config read; two more reads beside it |
+| `LoadFundAsync` — read `Step01Json` | read `Step02Json` by run id, as step 2 reads `Step01Json` — **and look up the week's context** in the store | the read is the same; the lookup is new, and a hit skips the next two phases |
+| `AssembleAgentInputAsync` — load the config | on a miss: load the week's three analytics runs, every fund's metadata (wrapped as the universe `DataLoaderOutput`), and the prompts through the provider | the prompts are step 3's config read; two more reads beside it |
 | `RunAgentAsync` — `IMetricsCalculatorAgent.RunInMemory` | on a miss: `IMacroAnalystAgent.RunInMemoryAsync`, then store the result | an LLM call; one per week, not one per fund |
-| `PersistAsync` — `Step02Json` | `Step03Json` — what it holds is open, see "What `Step03Json` holds" | different payload shape |
+| `PersistAsync` — `Step02Json` | `Step03Json` — the fund record from `Step02Json`, unchanged | same store call, same payload shape, nothing added |
 | `EmitDoneAsync` — `Step02DoneSignal` | `Step03DoneSignal` | new signal type, new overload |
 | `CompleteAsync` / `FailAsync` | same, step 3's row methods | the tail moves here |
 | `ReadOutputAsync` | the week's context, not the fund's column | a per-week read — see the tab section |
@@ -380,20 +386,24 @@ finds nothing to read. Same limitation step 2's button has, same cure —
 the parent plan's "unify the run paths" slice routes both through the
 runner.
 
-**Proposed: the button also bypasses the store.** A debug run that
-quietly reused a cached context would not be debugging the LLM call.
-Whether a button run should *replace* the stored context — a manual
-"recompute this week" — is open.
+**Decided (2026-10-11): the button neither reads nor writes the
+store.** It calls `RunAsync`, file in and file out, and nothing else —
+the same rule step 2's page already set for its button ("for debugging
+the calculation in isolation"), and the parent plan's "a debug button
+is also allowed debug semantics". A run that reused a cached context
+would not be debugging the LLM call; a run that replaced it would
+change what every later fund reads. A manual "recompute this week" is
+not this button's job.
 
 ## Input data — what the step reads
 
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | **The week's analytics bundle** — weekly summary, substitution chain, rotation targets | three files via `IPathsService` (`AnalyticsWeeklySummaryJson` and siblings), fixed names, latest copy only — read inside `RunAsync` | the loader — file-backed, same files, deserialised into `WeeklySummaryRun`, `SubstitutionChainRun`, `OpportunityScanRun` | the loader — KanelBrief API, live or cached |
-| **A universe `DataLoaderOutput`** — the agent reads every fund's `Metadata.Category` from it, and checks its `IsoWeek` | step 1's universe-wide output | **no source yet** — see below | **no source yet** |
+| **A universe `DataLoaderOutput`** — the agent reads every fund's `Metadata.Category` from it, and checks its `IsoWeek` | step 1's universe-wide output file | built by the handler from every fund's metadata — YieldRaccoon SQLite, see below | same, from YieldRaccoon's API — endpoint not built yet |
 | **Prompts** — system, user template, retry | three files in `MacroAnalystPromptsDir`, extracted from embedded resources on first use — read by the agent's constructor | through the prompts provider, file-backed — same folder, same files, so editing a prompt still works | through the prompts provider — source open |
 | **Foundry project + model id** | settings, `az login` | unchanged | app settings, managed identity |
-| The fund's row | — | **not read**, beyond the start's gate | same |
+| **The fund's record** — `Step02Json` | the in-memory record, inside `PipelineRunner` | read by run id, passed through to `Step03Json` unchanged | same, Tables |
 
 The loader **only loads**. The FK-chain, status and same-week checks
 stay in `MacroAnalystAgent.ValidateInputs`, which runs inside
@@ -428,14 +438,42 @@ every category, and whose `IsoWeek` is the week being analysed. So the
 question is not "where is a category list" but **"where is a universe
 `DataLoaderOutput`"**.
 
-Candidates, none chosen:
+**Decided (2026-10-11): step 3 reads every fund's metadata from
+YieldRaccoon itself, on a miss.** The same source step 1 reads, through
+the same seam — `IFundMetadataProvider` gets a "list every fund in the
+company filter" read beside its one-ISIN read. The handler wraps the
+result in a `DataLoaderOutput` stamped with the week, the way the
+agent's tests already build one by hand (`MakeDataLoaderOutput` in
+`MacroAnalystAgentTests`).
 
-| Candidate | Gives the agent | Cost |
+| | Local | Cloud |
 | --- | --- | --- |
-| Gather the latest `Step01Json` from every progress row into one output | real fund records — the closest thing to what step 1 used to hand it | no new fetch — but covers only funds whose row still holds a record; a step 1 start clears it, and a fund that has never run is missing |
-| Fetch metadata for every fund in the company filter and build the output | real metadata, complete universe | a list query the fetch seam does not have; one more call against the producer's rate limit, once a week |
-| A FikaFinans-kept universe snapshot, refreshed by step 1 | complete once every fund has run once | a new store, written on every step 1 run |
-| Synthetic records carrying only a category | the minimum the agent reads | a `DataLoaderOutput` that is not one — every other field empty; fragile if the agent ever reads more |
+| Where it is read | YieldRaccoon's SQLite file (`NavSyncOptions.YieldRaccoonDbPath`, set in Settings → NavSync), opened read-only | YieldRaccoon's backend API |
+| What is read | every `FundProfiles` row whose `CompanyName` matches the company filter — empty filter means all | a fund-profile list endpoint, filtered by company |
+| Implementation | `YieldRaccoonSqliteMetadataProvider` — the registered provider; the list read is the one-ISIN query without the ISIN | a REST-backed provider *(new)* |
+| Exists today | the table and the mapping — only the list query is new | **no** — the backend has no read endpoints yet; step 1's one-ISIN read waits on the same gap, so both land together |
+
+Two consequences, accepted:
+
+- **Current state, not the week's.** `FundProfiles` holds one row per
+  fund with no history, so the categories are the funds as they are
+  now. Right for a run raised by today's NAV; it only matters for
+  replaying an old week.
+- **One read per week, not per fund.** It runs only on a miss, beside
+  the LLM call it feeds.
+
+Not passed from step 1: step 1 sees one fund per run, so it has only
+that fund's category. Making it carry the universe would move the same
+list read into step 1 and run it on every NAV signal instead of once a
+week.
+
+Rejected, for the record:
+
+| Alternative | Why not |
+| --- | --- |
+| Gather the latest `Step01Json` from every progress row | covers only funds whose row still holds a record; a step 1 start clears it, and a fund that has never run is missing — the gaps move with timing |
+| A FikaFinans-kept universe snapshot, refreshed by step 1 | complete only once every fund has run once; a new store written on every step 1 run |
+| Synthetic records carrying only a category | a `DataLoaderOutput` that is not one — fragile if the agent ever reads more |
 
 ### Which week's context a fund uses
 
@@ -460,17 +498,35 @@ its week can be computed yet — a policy on the lookup, not on the agent:
 | Policy | Monday's fund |
 | --- | --- |
 | Exact week only | fails at step 3 with "no analytics bundle for 2026-W41"; retried on its next signal — which may be days away |
-| Fall back to the newest **stored** context of an earlier week | runs on last week's context, and `Step03Json` records that it did; the agent never sees a mismatched pair |
+| Fall back to the newest **stored** context of an earlier week | runs on last week's context; the agent never sees a mismatched pair |
 | Wait | no way to wait on a queue hop without holding a Function |
 
-The fallback keeps the chain moving and is honest about it, without
-touching the agent. **Open.** Either way it is decided once, in the
-step, not in each consumer.
+**Decided (2026-10-11): fall back to an earlier week.** The fallback
+keeps the chain moving and is honest about it, without touching the
+agent. It is decided once, in the step, not in each consumer.
+
+In order, for a fund whose week is W:
+
+| # | Finds | Does |
+| --- | --- | --- |
+| 1 | a stored context for W | uses it — the normal hit |
+| 2 | the loaded bundle **is** for W | computes W's context — the normal miss |
+| 3 | the bundle is for an earlier week, and a context for an earlier week is stored | uses the newest stored one |
+| 4 | the bundle is for an earlier week, nothing earlier stored | computes the context **for the bundle's week** — the agent gets a matched pair, stamped with the bundle's week, never with W — stores it, and uses it |
+| 5 | no bundle at all, or the bundle is for a week **after** W | fails the fund — nothing honest to use |
+
+Whenever the context used is not W's, the step logs which week it is.
+The fund record has no field for it, and step 3 adds none — the
+context carries its own `IsoWeek` and source run ids. Once W's bundle lands, the
+next fund of week W misses at row 1, finds a W bundle at row 2, and
+computes — so the fallback ends by itself.
 
 ## Pre-processing — assemble the agent input
 
-Only on a miss. Two reads — the three analytics runs and the universe
-output — and nothing to join: the agent takes them as they come.
+Only on a miss. Three reads — the three analytics runs, every fund's
+metadata, and the prompts — and one wrap: the metadata goes into a
+`DataLoaderOutput` stamped with the week. Nothing to join beyond that;
+the agent takes them as they come.
 
 Compare step 2, which had nothing to assemble, and step 1, which had a
 whole calculator port. Step 3's cost is not here; it is the LLM call.
@@ -559,14 +615,27 @@ only ever reads.
 
 ### What the context is keyed by
 
-| Key | A correction from KanelBrief | A category change |
-| --- | --- | --- |
-| ISO week | ignored until someone clears it | ignored |
-| Weekly summary's `runId` | new key — recomputed on the next miss | ignored |
-| Summary `runId` + a hash of the category list | recomputed | recomputed |
+**Decided (2026-10-11): by the run ids it was built from — the weekly
+summary's `runId` at the head.** Not a new choice; it is what the
+existing documents already say:
 
-`MacroContext` already carries `SourceRunIds`, so the second costs
-nothing to record. **Open** which one is the key.
+- [analytics-json-schema.md](../../FikaFinans.InfrastructureV2.Tests/docs/inputs/analytics-json-schema.md)
+  — `runId` is the unique identifier of a run, and the three reports
+  for a week form a chain hanging off `WeeklySummaryRun.runId`. That one
+  GUID identifies the bundle.
+- [the step 3 contract](../../FikaFinans.InfrastructureV2.Tests/docs/03-macroanalyst.md)
+  — `source_run_ids` exists so any output traces back to the exact
+  upstream runs. `MacroContext.SourceRunIds` already carries all three.
+
+The ISO week is stored beside it, for the lookup and the earlier-week
+fallback — a week can have more than one context if KanelBrief
+republishes, and the newest bundle's wins.
+
+| | Consequence |
+| --- | --- |
+| KanelBrief republishes a corrected report | new `runId` — the next fund misses and recomputes |
+| A fund changes category | not a new key — the change is picked up with next week's bundle |
+| Every step 3 run | reads the bundle's identity first, to know which key to look up — a small read, not the whole bundle's use |
 
 ## Post-processing — write and emit
 
@@ -584,20 +653,24 @@ reason the parent plan keeps the mirrored NAV history off it.
 
 ### What `Step03Json` holds
 
-`SaveStepOutputAsync` takes a `DataLoaderOutput` and stores this fund's
-`FundRecord`. Step 3 adds nothing to `FundRecord` — the contract's
-macro fields are per week, not per fund. So the column's shape is open:
+**Decided (2026-10-11): the fund record from `Step02Json`, unchanged.**
+Already documented, not a new choice:
 
-| Option | Holds | For |
-| --- | --- | --- |
-| Reference | the key of the context this run used — week, source run ids | small; the audit trail; steps 5 and 6 follow it to the store |
-| Copy | the whole `MacroContext` | self-contained row; a few kilobytes per fund, well under the Tables cap that step 2's outputs already break |
-| Pass-through | the fund record unchanged, as every other column does | keeps `SaveStepOutputAsync` as is — but says nothing about which context was used |
-| Null | nothing, as today | — loses the main reason for B |
+- [pipeline-plan.md](../../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md)
+  — the append-only chain: each step reads its predecessor's output and
+  adds fields, never modifying earlier ones.
+- [backend-nav-sync-plan.md](../backend-nav-sync-plan.md) §"Step
+  Outputs" — each step writes its own column on the fund's row, and the
+  next step reads it.
 
-Reference or copy both need a second save shape on
-`IIsinProgressStore`; the existing one only knows fund records.
-**Open** — decide with step 5's page, since step 5 is the first reader.
+Step 3 adds nothing to `FundRecord` — the contract's macro fields are
+per week, not per fund — so its column is a pass-through.
+`SaveStepOutputAsync` takes it as it is, the same one-fund envelope step
+2 saves. No second save shape on the store.
+
+The context is not copied onto the row and the row does not reference
+it. Which context steps 5 and 6 match a fund against is their pages'
+decision.
 
 ### Complete and fail — the tail moves
 
@@ -671,7 +744,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 ## Proposed implementation order
 
 Not started. One change per row, each reviewed and committed before the
-next, as for step 2. Rows 1–3 do not depend on the open questions; the
+next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
 | # | Work | Touches | Blocked on |
@@ -680,9 +753,9 @@ rest do.
 | 2a | The prompts record, the prompts provider in Application, and its file-backed implementation in Infrastructure — takes over the folder read and embedded-default extraction from the agent's constructor | Application, Infrastructure, `InfrastructureModule` | — |
 | 2b | `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time; the agent keeps `IPathsService`; the constructor's three template parameters are removed. No logic change. Tests for the in-memory call in a **new file** | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
 | 3 | `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
-| 4 | Universe snapshot source — the `DataLoaderOutput` the agent reads categories from | progress store, fetch seam or a new store | "The category universe" |
+| 4 | "List every fund" read on `IFundMetadataProvider`, SQLite implementation — the one-ISIN query without the ISIN, same company filter, same mapping | `IFundMetadataProvider`, `YieldRaccoonSqliteMetadataProvider`, `YieldRaccoonCsvBackedMetadataProvider` (must implement it too), their tests | — |
 | 5 | Context store — local implementation, keyed per the decision | Application, Infrastructure | key choice |
-| 6 | `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async`; the save shape for `Step03Json` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | "What `Step03Json` holds" |
+| 6 | `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 7 | `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | `IStep03MacroAnalystEntry` + entry point; registration as step 2's | Application, `InfrastructureModule` | row 7 |
 | 9 | Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |
@@ -700,22 +773,20 @@ contract, it stops and the change is raised here as a question first.
 Raised by this page; they belong in the parent plan's Open Questions,
 not settled here.
 
-- **The shape of step 3.** Per-fund hop doing per-week work (B,
-  proposed), a weekly job outside the chain (A), or neither. This is
-  the parent plan's "barrier steps versus the queue chain" question,
-  answered for step 3 only; step 9 needs its own answer, and it is a
-  harder one — its passes genuinely compare funds with each other.
-- **Where the universe `DataLoaderOutput` comes from.** Gathered from
-  the progress rows, built from a metadata list fetch, kept as its own
-  snapshot, or synthetic. The agent needs one to filter categories, and
-  per-fund step 1 no longer produces it.
-- **What a fund does before its week's bundle exists.** The agent only
-  ever computes an exact-week match. Fail the fund until the bundle
-  lands, or fall back to the newest stored context of an earlier week
-  and record that on the row.
-- **What the context is keyed by.** Week, the bundle's run ids, or run
-  ids plus the category list. Decides whether a KanelBrief correction or
-  a recategorised fund triggers a recompute.
+- **The shape of step 3.** ✅ **Resolved 2026-10-11 — B**, per-fund hop
+  doing per-week work. This answers the parent plan's "barrier steps
+  versus the queue chain" question for step 3 only; step 9 needs its own
+  answer, and it is a harder one — its passes genuinely compare funds
+  with each other.
+- **Where the universe `DataLoaderOutput` comes from.** ✅ **Resolved
+  2026-10-11** — a "list every fund" read on `IFundMetadataProvider`,
+  YieldRaccoon SQLite locally. Still open on the producer's side: the
+  list endpoint in YieldRaccoon's backend for cloud.
+- **What a fund does before its week's bundle exists.** ✅ **Resolved
+  2026-10-11** — fall back to an earlier week's context, logged; see "Which week's context a fund uses".
+- **What the context is keyed by.** ✅ **Resolved 2026-10-11** — the
+  run ids it was built from, weekly summary's `runId` at the head, as
+  the analytics schema and the step 3 contract already document.
 - **Compute once in cloud.** Local single-flight is in-process. Two
   Functions can miss together; the Tables-shaped storage contract has
   no concurrency token. Accept the occasional double call, or add a
@@ -723,8 +794,10 @@ not settled here.
 - **Failure cost.** A missing bundle or an LLM outage fails every fund
   of the week, each retrying the call. Remember the failure for a while,
   or accept the cost.
-- **What `Step03Json` holds.** Reference, copy, pass-through or null —
-  decided with step 5, its first reader.
+- **What `Step03Json` holds.** ✅ **Resolved 2026-10-11** — the fund
+  record from `Step02Json`, unchanged, per the append-only chain and the
+  step-output rule. Raised for step 5's page instead: which context steps
+  5 and 6 match a fund against, since the row does not say.
 - **Where the context is stored.** A new store in both hosts — SQLite
   locally; Tables or blob in cloud. Its lifetime is per week and must
   outlive every run, like the NAV mirror's.
@@ -734,9 +807,9 @@ not settled here.
   gives. Also whether a missing prompt falls back to the embedded
   default or fails, decided once in the provider as step 2's config
   provider does.
-- **Whether the debug button can replace the stored context.** A
-  manual recompute is useful; a debug run that silently changes what
-  every later fund reads is not.
+- **Whether the debug button can replace the stored context.** ✅
+  **Resolved 2026-10-11** — no; it stays file in, file out, as step 2's
+  button does.
 - **The analytics source's backing** — live API or cache — stays with
   [analytics-json-migration-plan.md](../analytics-json-migration-plan.md).
   Step 3 needs only a loader. That plan's move of validation out of the

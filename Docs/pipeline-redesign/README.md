@@ -67,7 +67,7 @@ already settled; it may not settle one on its own.
 | --- | --- | --- |
 | 1 | DataLoader | [01-dataloader.md](./01-dataloader.md) |
 | 2 | MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
-| 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — design only; proposes a per-fund hop doing per-week work |
+| 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — design only; a per-fund hop doing per-week work |
 | 4 | SignalScorer | not written |
 | 5 | MacroAligner | not written |
 | 6 | CatalystTagger | not written |
