@@ -770,7 +770,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1–5 done; the rest not started. One change per row, each reviewed and
+Rows 1–6 done; the rest not started. One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -782,7 +782,7 @@ rest do.
 | 3 | ✅ `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 4 | ✅ "List every fund" read on `IFundMetadataProvider` — `ListMetadataAsync(company, isoWeek)`, SQLite implementation: the one-ISIN query without the ISIN, same company filter, same mapping; empty list where the one-ISIN read returns null. The CSV provider returns every row of the week's export, and its one-ISIN read now goes through it | `IFundMetadataProvider`, `YieldRaccoonSqliteMetadataProvider`, `YieldRaccoonCsvBackedMetadataProvider` (must implement it too), their tests | — |
 | 5 | ✅ Context store — local implementation, keyed per the decision; see "Where it is stored". Tables-shaped, as [storage-migration-plan.md](../storage-migration-plan.md) sets for every store, in the same layers as the progress rows: `IMacroContextStore` (get by weekly summary `runId`, newest for a week or earlier, save) over `IMacroContextRepository` and `MacroContextEntity`; SQLite side `SqliteMacroContextRepository` and `MacroContextRow` (a `TableEntity`) on the same database context as `IsinProgressRow`. A new table needs the `.db` rebuilt — that plan's schema rule | Application, Infrastructure, `BankDbContext`, `InfrastructureModule` | — |
-| 6 | `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
+| 6 | ✅ `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 7 | `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | `IStep03MacroAnalystEntry` + entry point; registration as step 2's | Application, `InfrastructureModule` | row 7 |
 | 9 | Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |

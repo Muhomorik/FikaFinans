@@ -169,42 +169,9 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         => ListOrphanedAsync(StepId.DataLoader, startedBefore, ct);
 
     /// <inheritdoc />
-    public async Task<IsinProgressEntity?> StartStep02Async(
+    public Task<IsinProgressEntity?> StartStep02Async(
         Isin isin, PipelineRunId runId, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
-
-        var stopwatch = Stopwatch.StartNew();
-
-        var existing = await _isinProgress
-            .GetAsync(IsinProgressPartition, isin.Value, ct)
-            .ConfigureAwait(false);
-
-        // Step 1's start is the lock for the whole chain, so step 2 only continues a run
-        // that still holds it. A free row or another run id both mean the signal is late.
-        var stillOurs = existing is { State: IsinProgressState.Processing }
-            && string.Equals(existing.RunId?.Value, runId.Value, StringComparison.Ordinal);
-
-        if (!stillOurs)
-        {
-            _logger.Trace(
-                "Progress start refused — isin={0} at {1}, runId={2}, row: {3} runId={4}",
-                isin.Value, StepId.MetricsCalculator, runId.Value,
-                existing?.State.ToString() ?? "missing", existing?.RunId?.Value);
-            return null;
-        }
-
-        var started = WithCurrentStep(existing!, StepId.MetricsCalculator);
-
-        await _isinProgress.UpsertAsync(started, ct).ConfigureAwait(false);
-
-        stopwatch.Stop();
-        _logger.Trace(
-            "Progress start done — isin={0}, {1}, runId={2}, {3} ms",
-            isin.Value, StepId.MetricsCalculator, runId.Value, stopwatch.ElapsedMilliseconds);
-
-        return started;
-    }
+        => ContinueRunAsync(isin, runId, StepId.MetricsCalculator, ct);
 
     /// <inheritdoc />
     public Task<IsinProgressEntity?> CompleteStep02Async(Isin isin, CancellationToken ct = default)
@@ -222,6 +189,69 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
     public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep02Async(
         DateTimeOffset startedBefore, CancellationToken ct = default)
         => ListOrphanedAsync(StepId.MetricsCalculator, startedBefore, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> StartStep03Async(
+        Isin isin, PipelineRunId runId, CancellationToken ct = default)
+        => ContinueRunAsync(isin, runId, StepId.MacroAnalyst, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> CompleteStep03Async(Isin isin, CancellationToken ct = default)
+        => FreeAsync(isin, StepId.MacroAnalyst, error: null, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> FailStep03Async(Isin isin, string error, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(error);
+
+        return FreeAsync(isin, StepId.MacroAnalyst, error, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep03Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default)
+        => ListOrphanedAsync(StepId.MacroAnalyst, startedBefore, ct);
+
+    /// <summary>
+    /// The one way a run moves on to a later step, whichever step is starting: a check that
+    /// the run still holds the row, and a mark of the step it has reached.
+    /// </summary>
+    private async Task<IsinProgressEntity?> ContinueRunAsync(
+        Isin isin, PipelineRunId runId, StepId step, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        var existing = await _isinProgress
+            .GetAsync(IsinProgressPartition, isin.Value, ct)
+            .ConfigureAwait(false);
+
+        // Step 1's start is the lock for the whole chain, so a later step only continues a
+        // run that still holds it. A free row or another run id both mean the signal is late.
+        var stillOurs = existing is { State: IsinProgressState.Processing }
+            && string.Equals(existing.RunId?.Value, runId.Value, StringComparison.Ordinal);
+
+        if (!stillOurs)
+        {
+            _logger.Trace(
+                "Progress start refused — isin={0} at {1}, runId={2}, row: {3} runId={4}",
+                isin.Value, step, runId.Value,
+                existing?.State.ToString() ?? "missing", existing?.RunId?.Value);
+            return null;
+        }
+
+        var started = WithCurrentStep(existing!, step);
+
+        await _isinProgress.UpsertAsync(started, ct).ConfigureAwait(false);
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress start done — isin={0}, {1}, runId={2}, {3} ms",
+            isin.Value, step, runId.Value, stopwatch.ElapsedMilliseconds);
+
+        return started;
+    }
 
     /// <summary>
     /// The rows still locked at <paramref name="step"/> by a run that started before

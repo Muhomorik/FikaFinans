@@ -111,4 +111,45 @@ public interface IIsinProgressStore
     /// <returns>The orphaned rows; empty when there are none.</returns>
     Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep02Async(
         DateTimeOffset startedBefore, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that this ISIN's run has reached step 3. A check and a mark, never a clear:
+    /// step 2's output is step 3's input, so every column survives.
+    /// </summary>
+    /// <param name="isin">The fund whose row is marked.</param>
+    /// <param name="runId">The run the step-2 signal named; the row must still carry it.</param>
+    /// <returns>
+    /// The row as it now stands — or <c>null</c> when it is not this run's to continue: no
+    /// row, the run already ended, or a newer run has started since. Means: do not start.
+    /// </returns>
+    Task<IsinProgressEntity?> StartStep03Async(Isin isin, PipelineRunId runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a successful run at step 3 — step 3 is the chain tail once it is subscribed.
+    /// Frees the row and advances the durable dedup anchor to the run's trading date.
+    /// </summary>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> CompleteStep03Async(Isin isin, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends a run that failed in step 3. Frees the row and records why, leaving the dedup
+    /// anchor where it was so the next signal retries the fund.
+    /// </summary>
+    /// <param name="isin">The fund whose row is freed.</param>
+    /// <param name="error">Why the step failed; stored on the row.</param>
+    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
+    Task<IsinProgressEntity?> FailStep03Async(Isin isin, string error, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists the orphaned runs at step 3: rows still holding a lock at step 3 that was taken
+    /// before <paramref name="startedBefore"/> — by a process that has since ended, so
+    /// nothing will ever complete or fail them.
+    /// </summary>
+    /// <param name="startedBefore">
+    /// When the current process started. Locks taken since may belong to runs still going.
+    /// </param>
+    /// <returns>The orphaned rows; empty when there are none.</returns>
+    Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep03Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default);
 }
