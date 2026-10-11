@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using System.Windows.Input;
 using DevExpress.Mvvm;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Services;
 using NLog;
@@ -207,6 +208,44 @@ public abstract class StepViewModel : ViewModelBase, IDisposable
             return;
         }
         _configEditorService?.Edit(path);
+    }
+
+    /// <summary>
+    /// Projects one tick of a signal-driven step onto the tab's state, in the formats
+    /// <c>MainWindowViewModel.OnStepEvent</c> already uses so both paths look the same.
+    /// </summary>
+    /// <remarks>
+    /// Unlike that router, a populated <c>Isin</c> sets the status here rather than only
+    /// bumping a counter: a per-fund step has no universe-wide tick to carry it.
+    /// </remarks>
+    protected void ApplyStepEvent(StepEvent tick)
+    {
+        switch (tick.Kind)
+        {
+            case StepEventKind.Started:
+                Status = StepStatus.Running;
+                IsRunning = true;
+                HasError = false;
+                ErrorText = string.Empty;
+                break;
+
+            case StepEventKind.Succeeded:
+                Status = StepStatus.Ok;
+                IsRunning = false;
+                LastRunText = DateTime.Now.ToString("HH:mm:ss");
+                if (tick.Duration is { } ok)
+                    DurationText = $"{ok.TotalSeconds:N1} s";
+                break;
+
+            case StepEventKind.Failed:
+                Status = StepStatus.Error;
+                IsRunning = false;
+                HasError = true;
+                ErrorText = tick.Message ?? "unknown error";
+                if (tick.Duration is { } failed)
+                    DurationText = $"{failed.TotalSeconds:N1} s";
+                break;
+        }
     }
 
     protected virtual string? GetConfigPath() => null;

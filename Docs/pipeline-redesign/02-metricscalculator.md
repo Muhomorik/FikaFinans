@@ -578,15 +578,12 @@ Same as step 1: opening the tab is a read of `Step02Json`, never a
 trigger — with the one exception of restarting funds proven dead (see
 "Stuck rows").
 
-`Step2MetricsCalculatorViewModel.LoadOutputAsync` today goes through
-`IsinProgressOutputLoader` with a column selector, then falls back to
-step 2's JSON file on disk. Step 1's ViewModel has already moved off
-both onto its handler's `ReadOutputAsync`, and it follows the step
-rather than running it — subscribing to step events for its `StepId` and
-to its own done-signal to know which run id to read.
-
-**TODO:** the same move for step 2 — the tab becomes **passive**, a copy
-of step 1's:
+`Step2MetricsCalculatorViewModel` used to go through
+`IsinProgressOutputLoader` with a column selector, then fall back to
+step 2's JSON file on disk. It now does what step 1's ViewModel does:
+it follows the step rather than running it — subscribing to step events
+for its `StepId` and to its own done-signal to know which run id to
+read. The tab is **passive**, a copy of step 1's:
 
 | The tab | Does |
 | --- | --- |
@@ -595,8 +592,9 @@ of step 1's:
 | Reads | through the step 2 handler's `ReadOutputAsync`, never the repository directly |
 | Runs | **nothing** on a signal — only the debug button, as above |
 
-`IsinProgressOutputLoader` and the disk fallback leave the tab. No XAML
-changes. The three view states from step 1's page — populated, in
+`IsinProgressOutputLoader` and the disk fallback have left the tab — the
+loader stays for steps 4–9. The step-event projection both tabs share
+lives on `StepViewModel`. No XAML changes. The three view states from step 1's page — populated, in
 flight, not processed — apply unchanged.
 
 ## TODO summary

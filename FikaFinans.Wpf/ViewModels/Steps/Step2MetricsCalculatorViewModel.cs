@@ -1,11 +1,11 @@
-using System.IO;
 using System.Reactive.Concurrency;
-using System.Text.Json;
+using System.Reactive.Linq;
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Agents;
-using FikaFinans.Application.Storage.Bank;
-using FikaFinans.Domain.Funds;
-using FikaFinans.Infrastructure.Pipeline.Json;
+using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Application.Pipeline.Steps;
+using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Services;
 using NLog;
 
@@ -15,7 +15,7 @@ public sealed class Step2MetricsCalculatorViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
     private readonly IMetricsCalculatorAgent? _agent;
-    private readonly IIsinProgressRepository? _isinProgress;
+    private readonly IStep02MetricsCalculator? _step02;
 
     public override int StepNumber => 2;
     public override string AgentName => "Metrics calculator";
@@ -25,13 +25,38 @@ public sealed class Step2MetricsCalculatorViewModel : StepViewModel
 
     public Step2MetricsCalculatorViewModel(ILogger logger, IScheduler uiScheduler,
         IPathsService paths, IMetricsCalculatorAgent agent, IConfigEditorDialogService configEditor,
-        IIsinProgressRepository isinProgress)
+        IStep02MetricsCalculator step02, IStepEventSource stepEvents,
+        IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
         _paths = paths;
         _agent = agent;
         _configEditorService = configEditor;
-        _isinProgress = isinProgress;
+        _step02 = step02;
+
+        // The tab follows the step rather than running it: whoever drove the handler —
+        // step 1's done-signal locally, a queue trigger in Azure — reports through this stream.
+        Disposables.Add(stepEvents.Events
+            .Where(tick => tick.Step == StepId.MetricsCalculator)
+            .ObserveOn(uiScheduler)
+            .Subscribe(ApplyStepEvent));
+
+        // StepEvent carries no run id, and a per-ISIN run has its own rather than the run
+        // bar's — so the output is read from step 2's done-signal, which names the run.
+        Disposables.Add(pipelineSignals.Signals
+            .OfType<Step02DoneSignal>()
+            .ObserveOn(uiScheduler)
+            .Select(done => Observable
+                .FromAsync(() => LoadOutputAsync(done.RunId))
+                // Caught per load: an error reaching Subscribe would end the stream for
+                // the session, and the next run's output would never show.
+                .Catch((Exception ex) =>
+                {
+                    Logger?.Error(ex, "Step 2 output load failed — runId={0}", done.RunId.Value);
+                    return Observable.Empty<System.Reactive.Unit>();
+                }))
+            .Concat()
+            .Subscribe());
     }
 
     protected override string? GetConfigPath() => _paths?.Config02MetricsJson;
@@ -53,36 +78,21 @@ public sealed class Step2MetricsCalculatorViewModel : StepViewModel
         await LoadOutputAsync();
     }
 
-    public override async Task LoadOutputAsync()
+    public override Task LoadOutputAsync() => LoadOutputAsync(RunId);
+
+    private async Task LoadOutputAsync(PipelineRunId runId)
     {
-        // 8c: prefer SQLite Step02Json columns; disk fallback for per-step button flow.
-        if (_isinProgress is not null)
-        {
-            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
-                _isinProgress, RunId, row => row.Step02Json);
-            if (sqliteResult is not null)
-            {
-                OutputJson = sqliteResult.Json;
-                OutputSummaryText = $"{sqliteResult.Funds.Count} funds — metrics calculated";
-                return;
-            }
-        }
+        if (_step02 is null) return;
 
-        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
+        var output = await _step02.ReadOutputAsync(runId);
 
-        var outPath = _paths.MetricsCalculatorOutput(IsoWeek, RunId);
-        if (!File.Exists(outPath))
+        if (output is null)
         {
-            OutputSummaryText = "Output file not found";
+            OutputSummaryText = "Nothing stored for this run yet";
             return;
         }
 
-        var json = await File.ReadAllTextAsync(outPath);
-        OutputJson = json;
-
-        var output = JsonSerializer.Deserialize<DataLoaderOutput>(json, JsonOptions.Default);
-        OutputSummaryText = output is null
-            ? "Output file present but unreadable"
-            : $"{output.Funds.Count} funds — metrics calculated";
+        OutputJson = output.Json;
+        OutputSummaryText = $"{output.Funds.Count} funds — metrics calculated";
     }
 }
