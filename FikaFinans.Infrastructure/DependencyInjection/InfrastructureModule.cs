@@ -10,6 +10,7 @@ using FikaFinans.Application.Pipeline.Analytics;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Application.Pipeline.Macro;
 using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
 using FikaFinans.Application.Pipeline.Signals;
@@ -28,6 +29,7 @@ using FikaFinans.Infrastructure.Pipeline.Analytics;
 using FikaFinans.Infrastructure.Pipeline.Configs;
 using FikaFinans.Infrastructure.Pipeline.Csv;
 using FikaFinans.Infrastructure.Pipeline.Fetch;
+using FikaFinans.Infrastructure.Pipeline.Macro;
 using FikaFinans.Infrastructure.Pipeline.Progress;
 using FikaFinans.Infrastructure.Pipeline.Run;
 using FikaFinans.Infrastructure.Pipeline.Signals;
@@ -228,6 +230,10 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.RegisterType<SqliteIsinProgressRepository>()
             .As<IIsinProgressRepository>()
+            .SingleInstance();
+
+        builder.RegisterType<SqliteMacroContextRepository>()
+            .As<IMacroContextRepository>()
             .SingleInstance();
     }
 
@@ -492,6 +498,13 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(FileBackedStep03MacroAnalystPromptsProvider)),
                 ctx.Resolve<IPathsService>()))
             .As<IStep03MacroAnalystPromptsProvider>()
+            .SingleInstance();
+
+        // The week's computed contexts — SQLite locally; Tables or blob in Azure.
+        builder.Register(ctx => new RepositoryBackedMacroContextStore(
+                LogManager.GetLogger(nameof(RepositoryBackedMacroContextStore)),
+                ctx.Resolve<IMacroContextRepository>()))
+            .As<IMacroContextStore>()
             .SingleInstance();
     }
 

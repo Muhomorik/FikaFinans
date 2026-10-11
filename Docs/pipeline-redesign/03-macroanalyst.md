@@ -222,7 +222,7 @@ Every new type carries the step number, as steps 1 and 2 do. All
 | Analytics input | — | a loader for the three reports, as the typed runs the agent takes — the analytics plan's source, name not chosen there; `IWeeklyAnalyticsReportsProvider` returning `WeeklyAnalyticsReports` — built in row 1, named after the schema's "three weekly analytics reports" |
 | Universe for the agent | — | no new type — a "list every fund" read on the existing `IFundMetadataProvider`; the handler wraps it in a `DataLoaderOutput` |
 | Agent call | `IMetricsCalculatorAgent.RunInMemory` | `IMacroAnalystAgent.RunInMemoryAsync` — exists on the class, moves onto the interface |
-| Week's context, stored | — | `IMacroContextStore` — placeholder |
+| Week's context, stored | — | `IMacroContextStore` — built in row 5, over `IMacroContextRepository` |
 | Cloud function | `Step02MetricsCalculatorFunction` *(sketch)* | `Step03MacroAnalystFunction` |
 | Row — start | `StartStep02Async` | `StartStep03Async` |
 | Row — complete | `CompleteStep02Async` — **removed** when step 3 takes the tail | `CompleteStep03Async` |
@@ -249,7 +249,7 @@ owned by [backend-nav-sync-plan.md](../backend-nav-sync-plan.md).
 | `IFundMetadataProvider` — the all-funds read | — none; step 1's universe-wide output file | `YieldRaccoonSqliteMetadataProvider`, plus a list query | REST-backed provider *(new)* — needs a YieldRaccoon list endpoint |
 | `IMacroAnalystAgent` | `RunAsync` only, called by `PipelineRunner` and the tab | plus `RunInMemoryAsync`, called by the handler | same |
 | Prompts provider *(new)* | — none; the agent's constructor reads `MacroAnalystPromptsDir` | file-backed — the same folder via `IPathsService`, embedded defaults extracted when missing | another source — embedded defaults, app settings or blob; open |
-| Context store *(new)* | — none; the agent writes `03-macro-{iso_week}-{run_id}.json` | SQLite | Tables or blob — open |
+| Context store *(new)* | — none; the agent writes `03-macro-{iso_week}-{run_id}.json` | a `MacroContexts` table in the app's database — the one the progress rows use | a `"macro-contexts"` partition in the backend's one Azure table |
 | `IMacroLlmClient` | `FoundryMacroLlmClient` over `AIProjectClient` | unchanged | unchanged — same Foundry project, managed identity instead of `az login` |
 
 Step 3 is the first step with an LLM in the signal path. The client
@@ -655,13 +655,28 @@ On a miss, two writes; on a hit, one. Then one signal.
 
 | Written | When | Current | WPF | Cloud |
 | --- | --- | --- | --- | --- |
-| The week's `MacroContext` | miss only | `03-macro-{iso_week}-{run_id}.json` on disk, plus held in memory for the per-fund block | the context store, SQLite | the context store — Tables or blob |
+| The week's `MacroContext` | miss only | `03-macro-{iso_week}-{run_id}.json` on disk, plus held in memory for the per-fund block | the context store — the app's database | the context store — the backend's Azure table |
 | This fund's `Step03Json` | every time | — always null; `IsinProgressEntity`'s remarks say so | `IIsinProgressStore`, `StepId.MacroAnalyst` | same — Tables |
 | Row freed | on success / failure | nothing on the signal path | `CompleteStep03Async` / `FailStep03Async` — step 3 becomes the tail | same |
 
 The context does **not** go on the progress row. It is per week, and
 the row is per fund and cleared at every step 1 start — the same
 reason the parent plan keeps the mirrored NAV history off it.
+
+**Where it is stored (decided 2026-10-11).** It is step 3's output,
+read back by step 3 for the week's later funds and by steps 5 and 6 —
+so it lives beside the other pipeline state, not in a file:
+
+| | Local | Cloud |
+| --- | --- | --- |
+| Where | a `MacroContexts` table in the app's database — the same database, and the same `IDbContextFactory`, the progress rows use; SQLite or in-memory per Settings | a partition in the backend's one Azure table — the table [backend-nav-sync-plan.md](../backend-nav-sync-plan.md) already provisions, which also holds Step 10's non-per-ISIN portfolio-trades row; no new resource |
+| Key | PartitionKey `"macro-contexts"`, RowKey the weekly summary's `runId` | same |
+| Columns | `IsoWeek`, `GeneratedAt`, `ContextJson` — the context in the step output files' JSON shape | same |
+| Size | unbounded | must fit the 32K-character property cap; a context is a regime and a handful of catalysts and themes, expected well under it. Not measured yet — if it grows past, that plan's escape hatch applies: gzip the column, or move it to blob |
+
+Not blob storage: the backend plan keeps one storage account with
+queues and one table, and argues against a separate blob container
+("fewer moving parts"). Not a folder: a cloud host has none.
 
 ### What `Step03Json` holds
 
@@ -755,7 +770,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1–4 done; the rest not started. One change per row, each reviewed and
+Rows 1–5 done; the rest not started. One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -766,7 +781,7 @@ rest do.
 | 2b | ✅ `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time — through the 2a provider, which the constructor now takes in place of the three template parameters; the agent keeps `IPathsService`. No logic change. Tests for the in-memory call in a **new file**, `MacroAnalystAgentRunInMemoryTests`; shared builders in `MacroAnalystTestData` | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
 | 3 | ✅ `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 4 | ✅ "List every fund" read on `IFundMetadataProvider` — `ListMetadataAsync(company, isoWeek)`, SQLite implementation: the one-ISIN query without the ISIN, same company filter, same mapping; empty list where the one-ISIN read returns null. The CSV provider returns every row of the week's export, and its one-ISIN read now goes through it | `IFundMetadataProvider`, `YieldRaccoonSqliteMetadataProvider`, `YieldRaccoonCsvBackedMetadataProvider` (must implement it too), their tests | — |
-| 5 | Context store — local implementation, keyed per the decision | Application, Infrastructure | key choice |
+| 5 | ✅ Context store — local implementation, keyed per the decision; see "Where it is stored". Tables-shaped, as [storage-migration-plan.md](../storage-migration-plan.md) sets for every store, in the same layers as the progress rows: `IMacroContextStore` (get by weekly summary `runId`, newest for a week or earlier, save) over `IMacroContextRepository` and `MacroContextEntity`; SQLite side `SqliteMacroContextRepository` and `MacroContextRow` (a `TableEntity`) on the same database context as `IsinProgressRow`. A new table needs the `.db` rebuilt — that plan's schema rule | Application, Infrastructure, `BankDbContext`, `InfrastructureModule` | — |
 | 6 | `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 7 | `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | `IStep03MacroAnalystEntry` + entry point; registration as step 2's | Application, `InfrastructureModule` | row 7 |
@@ -814,7 +829,11 @@ not settled here.
   5 and 6 match a fund against, since the row does not say.
 - **Where the context is stored.** A new store in both hosts — SQLite
   locally; Tables or blob in cloud. Its lifetime is per week and must
-  outlive every run, like the NAV mirror's.
+  outlive every run, like the NAV mirror's. ✅ **Resolved 2026-10-11** —
+  the app's database locally (built in row 5); a `"macro-contexts"`
+  partition in the backend's one Azure table in cloud. See "Where it is
+  stored". Left to check: a real context's size against the Tables
+  property cap.
 - **Where the prompts live in cloud.** The seam is decided — the prompts
   provider. What sits behind it in cloud is not: app settings, blob, or
   the embedded defaults, which lose the editability the local folder
