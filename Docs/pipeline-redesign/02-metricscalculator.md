@@ -122,7 +122,7 @@ order "write, then emit" itself:
 | `BeginProcessingAsync` — **starts** step 1 on the row, which also clears it | start step 2 on the row — refused unless it still carries the signal's run id → stop | starts without clearing — see "Start, do not claim" below |
 | `LoadFundAsync` — fetch identity, holdings, pins | read `Step01Json` by the signal's run id and take this fund's record out; none → throw | one store read instead of three fetches |
 | `AssembleAgentInputAsync` — compute buckets, snapshot | load the step 2 config through the config provider | config only; the record is already assembled |
-| `RunAgentAsync` — `IDataLoaderAgent.RunInMemory` | `IMetricsCalculatorAgent.ProcessFund` | already on the interface, already pure |
+| `RunAgentAsync` — `IDataLoaderAgent.RunInMemory` | `IMetricsCalculatorAgent.RunInMemory` | domain inputs instead of files, same as step 1's |
 | `PersistAsync` — `Step01Json` | `Step02Json` | same store call, different `StepId` |
 | `EmitDoneAsync` — `Step01DoneSignal` | step 2's done-signal | new signal type, new overload |
 | `ReadOutputAsync` | same, `StepId.MetricsCalculator` | none |
@@ -142,9 +142,9 @@ only the few lines that connect a transport to it differ per host.
 ```mermaid
 flowchart TB
   subgraph app["Application — shared by both hosts"]
-    door["Step02MetricsCalculatorEntry (new)<br/>one Step01DoneSignal in"]
-    h["Step02MetricsCalculatorHandler<br/>start → read Step01Json → ProcessFund → save → emit → complete"]
-    agent["IMetricsCalculatorAgent.ProcessFund"]
+    door["Step02MetricsCalculatorEntry<br/>one Step01DoneSignal in"]
+    h["Step02MetricsCalculatorHandler<br/>start → read Step01Json → RunInMemory → save → emit → complete"]
+    agent["IMetricsCalculatorAgent.RunInMemory"]
     door --> h --> agent
   end
   subgraph local["Local — WPF"]
@@ -161,7 +161,7 @@ flowchart TB
 
 | Piece | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| The calculation — `ProcessFund` | `MetricsCalculatorAgent`, called by `PipelineRunner` | same agent, called by the handler | same agent — shared |
+| The calculation | `MetricsCalculatorAgent.ProcessFund`, called by `PipelineRunner` | same agent's `RunInMemory`, called by the handler | same agent — shared |
 | The phases | — no handler; `PipelineRunner` calls the agent inline | `Step02MetricsCalculatorHandler`, Application, beside step 1's | same class — shared |
 | Runs the phases in order, the front door's twin | — | `Step02MetricsCalculatorEntry`, Application, beside `PipelineFrontDoor` | same class — shared |
 | Signal → entry point | — no signal; Run All drives step 2 through `PipelineRunner` | Rx subscription in `MainWindowViewModel` — wiring only | `Step02MetricsCalculatorFunction`, queue trigger — wiring only |
@@ -207,7 +207,7 @@ binding. Step 2 is its trigger:
 public Task Run(
     [QueueTrigger("%Step02Queue%")] Step01DoneSignal signal,
     CancellationToken ct)
-    => _step02Entry.HandleAsync(signal, ct);   // IStep02MetricsCalculatorEntry (new)
+    => _step02Entry.HandleAsync(signal, ct);   // IStep02MetricsCalculatorEntry
 ```
 
 The same entry point the local subscription calls — so the cloud adds a
@@ -403,23 +403,26 @@ once, at the front, and later steps only read.
 Code, not an LLM. Contract:
 [02-metricscalculator.md](../../FikaFinans.InfrastructureV2.Tests/docs/02-metricscalculator.md).
 
-The call is
-[`IMetricsCalculatorAgent.ProcessFund(fund, config)`](../../FikaFinans.Application/Pipeline/Agents/IMetricsCalculatorAgent.cs),
+The call is `RunInMemory` on
+[`IMetricsCalculatorAgent`](../../FikaFinans.Application/Pipeline/Agents/IMetricsCalculatorAgent.cs),
 implemented by
-[`MetricsCalculatorAgent`](../../FikaFinans.Infrastructure/Pipeline/Agents/MetricsCalculatorAgent.cs).
+[`MetricsCalculatorAgent`](../../FikaFinans.Infrastructure/Pipeline/Agents/MetricsCalculatorAgent.cs)
+— the same approach as step 1's `IDataLoaderAgent.RunInMemory`: domain
+inputs in (company, ISO week, run id, the fund records, the config), the
+pipeline's output document out, no paths and no file I/O.
 
-Unlike step 1, **nothing stands in the way**:
+| | Step 1 | Step 2 |
+| --- | --- | --- |
+| In-memory call | `IDataLoaderAgent.RunInMemory` over metadata, buckets, snapshots, holdings, structure | `IMetricsCalculatorAgent.RunInMemory` over the fund records and the config |
+| Reads files | no — `Run` does, for the debug button | no — `Run` does, for the debug button |
+| Returns | a `DataLoaderOutput` the handler saves as is | same |
 
-| Step 1 had | Step 2 has |
-| --- | --- |
-| the in-memory call missing from the interface | `ProcessFund` already on it |
-| `TextReader` inputs | a typed `FundRecord` |
-| a universe to join across | one fund, no cross-fund reads |
-
-`ProcessFund` is pure — no I/O, no clock, returns an enriched copy with
-`Metrics` set and every earlier field preserved. The append-only rule
-holds without any change. `Run` and `RunInMemory` stay for the
-universe-wide button and tests; the per-fund step does not call them.
+Each record comes back enriched by `ProcessFund` — `Metrics` set, every
+earlier field preserved — so the append-only rule holds without any
+change. The output's portfolio-wide fields (frozen positions, cash) are
+left empty: they are not this step's input, and how the envelope rides
+on the row is still open. The older `RunInMemory` over a whole
+`DataLoaderOutput` stays for `Run` and its tests.
 
 ### One flag that may lose its meaning
 
@@ -616,7 +619,8 @@ committed before the next starts.
 The per-fund read was dropped: the run-wide read already returns one
 fund.
 
-None of it touches `MetricsCalculatorAgent`. The agent is done.
+The only change to `MetricsCalculatorAgent` is the domain-input
+`RunInMemory`, landed with the handler; the metric rules are untouched.
 
 ## Open questions
 

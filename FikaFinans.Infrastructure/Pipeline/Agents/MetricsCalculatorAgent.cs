@@ -2,6 +2,7 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Identifiers;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using System.Text.Json;
 
@@ -56,6 +57,29 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
             FrozenPositions = input.FrozenPositions,
             CashAvailableKr = input.CashAvailableKr,
             DataQuality     = input.DataQuality,
+        };
+    }
+
+    /// <inheritdoc />
+    public DataLoaderOutput RunInMemory(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        MetricsCalculatorConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(config);
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = funds.Select(f => ProcessFund(f, config)).ToList(),
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality(),
         };
     }
 

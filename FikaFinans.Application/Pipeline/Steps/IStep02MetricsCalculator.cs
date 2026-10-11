@@ -26,8 +26,8 @@ public interface IStep02MetricsCalculator
     /// <summary>Loads step 2's config through its provider; the record needs no assembly.</summary>
     Task AssembleAgentInputAsync(Step01DoneSignal signal, CancellationToken ct = default);
 
-    /// <summary>Computes the metrics via <c>IMetricsCalculatorAgent.ProcessFund</c>.</summary>
-    Task<FundRecord> RunAgentAsync(Step01DoneSignal signal, CancellationToken ct = default);
+    /// <summary>Computes the metrics via <c>IMetricsCalculatorAgent.RunInMemory</c>.</summary>
+    Task<DataLoaderOutput> RunAgentAsync(Step01DoneSignal signal, CancellationToken ct = default);
 
     /// <summary>Writes the enriched record to <c>Step02Json</c> on the fund's progress row.</summary>
     Task PersistAsync(Step01DoneSignal signal, CancellationToken ct = default);

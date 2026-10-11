@@ -31,13 +31,14 @@ public sealed class Step02MetricsCalculatorHandlerTests
     private Mock<IStepEventPublisher> _stepEvents = null!;
 
     private FundRecord _step01Record = null!;
-    private FundRecord _enriched = null!;
+    private DataLoaderOutput _agentOutput = null!;
     private MetricsCalculatorConfig _metricsConfig = null!;
 
     [SetUp]
     public void SetUp()
     {
         _fixture = new Fixture().Customize(new AutoMoqCustomization());
+        _fixture.Inject(new NavSyncOptions { CompanyFilter = "TestCo" });
         _progress = _fixture.Freeze<Mock<IIsinProgressStore>>();
         _config = _fixture.Freeze<Mock<IStep02MetricsConfigProvider>>();
         _agent = _fixture.Freeze<Mock<IMetricsCalculatorAgent>>();
@@ -45,7 +46,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
         _stepEvents = _fixture.Freeze<Mock<IStepEventPublisher>>();
 
         _step01Record = MakeFund(Signal.Isin.Value);
-        _enriched = MakeFund(Signal.Isin.Value);
+        _agentOutput = MakeOutput(MakeFund(Signal.Isin.Value));
         _metricsConfig = new MetricsCalculatorConfig { StaleSnapshotWarnDays = 21 };
 
         // The happy path; tests override the one piece they are about.
@@ -59,8 +60,10 @@ public sealed class Step02MetricsCalculatorHandlerTests
             .Setup(x => x.GetConfigAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(_metricsConfig);
         _agent
-            .Setup(x => x.ProcessFund(_step01Record, _metricsConfig))
-            .Returns(_enriched);
+            .Setup(x => x.RunInMemory(
+                It.IsAny<Company>(), It.IsAny<IsoWeek>(), It.IsAny<PipelineRunId>(),
+                It.IsAny<IReadOnlyList<FundRecord>>(), It.IsAny<MetricsCalculatorConfig>()))
+            .Returns(_agentOutput);
     }
 
     private Step02MetricsCalculatorHandler CreateSut() => _fixture.Create<Step02MetricsCalculatorHandler>();
@@ -186,7 +189,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
     // ── RunAgentAsync ─────────────────────────────────────────────────
 
     [Test]
-    public async Task RunAgentAsync_AfterLoadAndAssemble_ReturnsAgentOutputForStep01RecordAndConfig()
+    public async Task RunAgentAsync_AfterLoadAndAssemble_RunsAgentOnStep01RecordAndConfig()
     {
         // Arrange
         var sut = CreateSut();
@@ -198,7 +201,16 @@ public sealed class Step02MetricsCalculatorHandlerTests
         var result = await sut.RunAgentAsync(Signal);
 
         // Assert
-        Assert.That(result, Is.SameAs(_enriched));
+        Assert.Multiple(() =>
+        {
+            Assert.That(result, Is.SameAs(_agentOutput));
+            _agent.Verify(x => x.RunInMemory(
+                new Company("TestCo"),
+                new IsoWeek("2026-W23"),
+                Signal.RunId,
+                It.Is<IReadOnlyList<FundRecord>>(f => f.Count == 1 && f[0] == _step01Record),
+                _metricsConfig), Times.Once);
+        });
     }
 
     [Test]
@@ -214,7 +226,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
     // ── PersistAsync ──────────────────────────────────────────────────
 
     [Test]
-    public async Task PersistAsync_AfterAgent_SavesEnrichedRecordToStep02Column()
+    public async Task PersistAsync_AfterAgent_SavesAgentOutputToStep02Column()
     {
         // Arrange
         var sut = CreateSut();
@@ -228,7 +240,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
             Signal.Isin,
             StepId.MetricsCalculator,
             Signal.RunId,
-            It.Is<DataLoaderOutput>(o => o.Funds.Count == 1 && o.Funds[0] == _enriched),
+            _agentOutput,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -352,7 +364,7 @@ public sealed class Step02MetricsCalculatorHandlerTests
     public async Task ReadOutputAsync_ReadsStep02Column()
     {
         // Arrange
-        var stored = new StepOutput("[]", [_enriched]);
+        var stored = new StepOutput("[]", _agentOutput.Funds);
         _progress
             .Setup(x => x.ReadStepOutputAsync(StepId.MetricsCalculator, Signal.RunId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(stored);
@@ -380,6 +392,18 @@ public sealed class Step02MetricsCalculatorHandlerTests
         // Assert
         Assert.That(output, Is.Null);
     }
+
+    private static DataLoaderOutput MakeOutput(params FundRecord[] funds) => new()
+    {
+        GeneratedAt = string.Empty,
+        IsoWeek = "2026-W23",
+        Family = "TestCo",
+        RunId = Signal.RunId,
+        ConfigVersion = "1.0.0",
+        Funds = funds,
+        FrozenPositions = Array.Empty<FrozenPosition>(),
+        DataQuality = new DataQuality(),
+    };
 
     private static FundRecord MakeFund(string isin) => new()
     {

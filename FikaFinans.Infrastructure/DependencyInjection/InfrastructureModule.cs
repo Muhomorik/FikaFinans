@@ -447,6 +447,27 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPathsService>()))
             .As<IStep02MetricsConfigProvider>()
             .SingleInstance();
+
+        // Deliberately not SingleInstance, same as step 1's handler: it carries one run's
+        // state in fields — record, config, agent output, progress row.
+        builder.Register(ctx => new Step02MetricsCalculatorHandler(
+                logger: LogManager.GetLogger(nameof(Step02MetricsCalculatorHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                configProvider: ctx.Resolve<IStep02MetricsConfigProvider>(),
+                agent: ctx.Resolve<IMetricsCalculatorAgent>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep02MetricsCalculator>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step02MetricsCalculatorEntry(
+                LogManager.GetLogger(nameof(Step02MetricsCalculatorEntry)),
+                ctx.Resolve<Func<IStep02MetricsCalculator>>()))
+            .As<IStep02MetricsCalculatorEntry>()
+            .SingleInstance();
     }
 
     /// <summary>

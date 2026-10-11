@@ -1,5 +1,6 @@
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
+using FikaFinans.Domain.Identifiers;
 
 using FikaFinans.Domain.Pipeline;
 
@@ -14,6 +15,21 @@ public interface IMetricsCalculatorAgent
     /// output file, and returns the in-memory result.
     /// </summary>
     DataLoaderOutput Run(string isoWeek, PipelineRunId runId);
+
+    /// <summary>
+    /// Computes metrics for funds already read. Pure and storage-agnostic — reads nothing,
+    /// writes nothing, so the caller owns both ends of the read-modify-write. Every input is
+    /// a domain model on purpose: the calculator must not know whether the records came from
+    /// a JSON file, a progress row or a queue message.
+    /// </summary>
+    /// <remarks>
+    /// The portfolio-wide fields of the returned output — frozen positions, cash — are left
+    /// empty: they are not an input to this step.
+    /// </remarks>
+    DataLoaderOutput RunInMemory(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        MetricsCalculatorConfig config);
 
     /// <summary>
     /// Per-fund compute. Pure function over a single

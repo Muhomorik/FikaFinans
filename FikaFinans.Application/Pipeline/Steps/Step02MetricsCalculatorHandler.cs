@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
@@ -19,21 +20,30 @@ namespace FikaFinans.Application.Pipeline.Steps;
 /// </summary>
 public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 {
+    private readonly ILogger _logger;
+    private readonly NavSyncOptions _options;
     private readonly IIsinProgressStore _progress;
     private readonly IStep02MetricsConfigProvider _configProvider;
     private readonly IMetricsCalculatorAgent _agent;
     private readonly IPipelineSignals _signals;
     private readonly IStepEventPublisher _stepEvents;
-    private readonly ILogger _logger;
 
-    /// <summary>This fund's record as step 1 stored it; null until it loads.</summary>
-    private FundRecord? _fund;
+    /// <summary>
+    /// Company filter from configuration, stamped on the output the same way step 1 stamps it.
+    /// </summary>
+    private Company _family = new(string.Empty);
+
+    /// <summary>Week of the trading date that raised the run.</summary>
+    private IsoWeek _isoWeek = new(string.Empty);
+
+    /// <summary>This fund's record as step 1 stored it; empty until it loads.</summary>
+    private IReadOnlyList<FundRecord> _funds = Array.Empty<FundRecord>();
 
     /// <summary>The settings the agent runs with; null until assembled.</summary>
     private MetricsCalculatorConfig? _config;
 
     /// <summary>What the agent produced, kept for the phases that persist and emit it.</summary>
-    private FundRecord? _agentOutput;
+    private DataLoaderOutput? _agentOutput;
 
     /// <summary>This fund's progress row as this run last wrote it; null until it is started.</summary>
     private IsinProgressEntity? _progressRow;
@@ -42,26 +52,29 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
     private readonly Stopwatch _stepDuration = new();
 
     public Step02MetricsCalculatorHandler(
+        ILogger logger,
+        NavSyncOptions options,
         IIsinProgressStore progress,
         IStep02MetricsConfigProvider configProvider,
         IMetricsCalculatorAgent agent,
         IPipelineSignals signals,
-        IStepEventPublisher stepEvents,
-        ILogger logger)
+        IStepEventPublisher stepEvents)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentNullException.ThrowIfNull(configProvider);
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(signals);
         ArgumentNullException.ThrowIfNull(stepEvents);
-        ArgumentNullException.ThrowIfNull(logger);
 
+        _logger = logger;
+        _options = options;
         _progress = progress;
         _configProvider = configProvider;
         _agent = agent;
         _signals = signals;
         _stepEvents = stepEvents;
-        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -124,6 +137,10 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
         try
         {
+            _isoWeek = ToIsoWeek(signal.NavDate);
+
+            _family = new Company(_options.CompanyFilter);
+
             // The run-wide read is enough: step 1 mints a run id per fund, so the run's
             // output holds this fund's record and nothing else.
             var step01 = await _progress
@@ -133,9 +150,11 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
             // The start already proved the run is ours, so an empty column is not a late
             // signal — step 1 stored no record, which happens when its agent drops the fund.
             // A failure, so it shows on the row and the next signal retries the fund.
-            _fund = step01?.Funds.FirstOrDefault(f => f.Isin == signal.Isin)
+            var record = step01?.Funds.FirstOrDefault(f => f.Isin == signal.Isin)
                 ?? throw new InvalidOperationException(
                     $"Step 1 stored no record for ISIN {signal.Isin.Value} in run {signal.RunId.Value}.");
+
+            _funds = [record];
         }
         catch (OperationCanceledException)
         {
@@ -184,13 +203,13 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
     }
 
     /// <inheritdoc />
-    public Task<FundRecord> RunAgentAsync(Step01DoneSignal signal, CancellationToken ct = default)
+    public Task<DataLoaderOutput> RunAgentAsync(Step01DoneSignal signal, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(signal);
 
         // Both are set by the phases this one runs after. Reaching here without them is a
         // caller running the phases out of order, not a condition to recover from.
-        if (_fund is null)
+        if (_funds.Count == 0)
             throw new InvalidOperationException("LoadFundAsync must run before RunAgentAsync.");
 
         if (_config is null)
@@ -200,9 +219,10 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
         try
         {
-            // Pure: no I/O, no clock. Returns an enriched copy with every earlier field
-            // preserved, so the append-only rule holds without anything done here.
-            _agentOutput = _agent.ProcessFund(_fund, _config);
+            // Everything the agent computes from is already in memory by now — this phase
+            // opens no file and touches no database. Each record comes back enriched with
+            // every earlier field preserved, so the append-only rule holds here untouched.
+            _agentOutput = _agent.RunInMemory(_family, _isoWeek, signal.RunId, _funds, _config);
 
             return Task.FromResult(_agentOutput);
         }
@@ -231,24 +251,8 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
         try
         {
-            // The save takes a whole output and keeps only this fund's record, so the
-            // record goes in a one-fund envelope. The envelope's other fields are left
-            // empty: the store drops them, and how the envelope is carried on the row is
-            // still open on the design page.
-            var output = new DataLoaderOutput
-            {
-                GeneratedAt = string.Empty,
-                IsoWeek = string.Empty,
-                Family = string.Empty,
-                RunId = signal.RunId,
-                ConfigVersion = string.Empty,
-                Funds = [_agentOutput],
-                FrozenPositions = Array.Empty<FrozenPosition>(),
-                DataQuality = new DataQuality(),
-            };
-
             _progressRow = await _progress
-                .SaveStepOutputAsync(signal.Isin, StepId.MetricsCalculator, signal.RunId, output, ct)
+                .SaveStepOutputAsync(signal.Isin, StepId.MetricsCalculator, signal.RunId, _agentOutput, ct)
                 .ConfigureAwait(false);
 
             _logger.Debug("Step 2 persisted — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
@@ -399,6 +403,21 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Returns the ISO-8601 week label that a trading date falls in — the same rule as
+    /// step 1's, so both steps stamp the same week on the same run.
+    /// </summary>
+    /// <param name="navDate">Read in its own offset; converting to UTC can move the week.</param>
+    /// <returns>A label in <c>YYYY-Www</c> form, for example <c>2026-W18</c>.</returns>
+    private static IsoWeek ToIsoWeek(DateTimeOffset navDate)
+    {
+        var date = navDate.Date;
+
+        return IsoWeek.From(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ISOWeek.GetYear(date):D4}-W{ISOWeek.GetWeekOfYear(date):D2}"));
     }
 
     /// <summary>
