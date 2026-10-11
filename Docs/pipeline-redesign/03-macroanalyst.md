@@ -770,7 +770,7 @@ the projection already lives on `StepViewModel`. No XAML changes.
 
 ## Proposed implementation order
 
-Rows 1–8 done; the rest not started. One change per row, each reviewed and
+Rows 1–9 done; the rest not started. One change per row, each reviewed and
 committed before the next, as for step 2. Rows 1–4 do not depend on the open questions; the
 rest do.
 
@@ -785,7 +785,7 @@ rest do.
 | 6 | ✅ `StartStep03Async`, `CompleteStep03Async`, `FailStep03Async`, `ListOrphanedStep03Async` — `Step03Json` uses the existing save, no new shape | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 7 | ✅ `IStep03MacroAnalyst` + handler, with get-or-compute and local single-flight. Not wired. Load reads `Step02Json`, asks the loader for the week's reports and looks the context up by their weekly summary `runId`; no reports → the newest stored context up to the week, logged when it is an earlier week; neither → the fund fails. Assemble and the agent run on a miss only; the compute goes through `MacroContextSingleFlight` (one per process, keyed by the weekly summary `runId`), re-checks the store, then calls the LLM and saves. An empty category universe fails the fund rather than storing an empty context. The tab's read is left to row 10 | Application, `Pipeline/Steps` | rows 1–6; "Which week" |
 | 8 | ✅ `IStep03MacroAnalystEntry` + entry point; registration as step 2's — handler per dependency, entry point and `MacroContextSingleFlight` single instance | Application, `InfrastructureModule` | row 7 |
-| 9 | Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |
+| 9 | ✅ Subscription `Step02DoneSignal` → entry point; step 3 takes completion — `CompleteStep02Async` removed, with step 2's `CompleteAsync`; the store's complete tests moved to step 3 | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 8 |
 | 10 | Step 3's tab goes passive — listens, reads the week's context, keeps the debug button; recovers orphaned runs on first open | `Step3MacroAnalystViewModel`, no XAML | row 9 |
 
 Row 9 is the first that spends money on a signal. Until then, nothing

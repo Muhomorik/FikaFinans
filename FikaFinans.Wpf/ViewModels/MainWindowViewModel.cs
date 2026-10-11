@@ -248,12 +248,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .OfType<Step01DoneSignal>()
             .Subscribe(done => RunStep02Async(step02Entry, done));
         _disposables.Add(step02Sub);
+
+        // Step 2's done-signal: the local stand-in for step 3's queue trigger. Same stream,
+        // filtered to the next signal down the chain.
+        var step03Entry = _scope.Resolve<IStep03MacroAnalystEntry>();
+        var step03Sub = pipelineSignals.Signals
+            .OfType<Step02DoneSignal>()
+            .Subscribe(done => RunStep03Async(step03Entry, done));
+        _disposables.Add(step03Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — step 2 follows
-    /// through <see cref="RunStep02Async"/>; steps 3-10 still run through
-    /// <see cref="IPipelineRunner"/> from the Run All button.
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 and 3
+    /// follow through <see cref="RunStep02Async"/> and <see cref="RunStep03Async"/>; steps
+    /// 4-10 still run through <see cref="IPipelineRunner"/> from the Run All button.
     /// </summary>
     /// <remarks>
     /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
@@ -299,6 +307,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 2 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-2 done-signal to step 3's entry point, off the Rx callback — the bus
+    /// publishes inside step 2's emit, so running step 3 inline would hold step 2 up.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
+    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
+    /// </remarks>
+    private void RunStep03Async(IStep03MacroAnalystEntry step03Entry, Step02DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step03Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 3 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 3 failed for {Isin}", signal.Isin.Value);
             }
         });
 

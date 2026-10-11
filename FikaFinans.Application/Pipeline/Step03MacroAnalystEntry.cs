@@ -59,7 +59,7 @@ public sealed class Step03MacroAnalystEntry : IStep03MacroAnalystEntry
                 await step03.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step03.EmitDoneAsync(signal, ct).ConfigureAwait(false);
 
-                // Step 3 is the chain tail once subscribed, so its success ends the run and
+                // Step 3 is the chain tail, so its success ends the run and
                 // frees the fund. Moves on once a later step consumes step 3's done-signal.
                 await step03.CompleteAsync(signal, ct).ConfigureAwait(false);
             }

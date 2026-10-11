@@ -84,14 +84,6 @@ public interface IIsinProgressStore
     Task<IsinProgressEntity?> StartStep02Async(Isin isin, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
-    /// Ends a successful run at step 2 — step 2 is the chain tail. Frees the row and
-    /// advances the durable dedup anchor to the run's trading date.
-    /// </summary>
-    /// <param name="isin">The fund whose row is freed.</param>
-    /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>
-    Task<IsinProgressEntity?> CompleteStep02Async(Isin isin, CancellationToken ct = default);
-
-    /// <summary>
     /// Ends a run that failed in step 2. Frees the row and records why, leaving the dedup
     /// anchor where it was so the next signal retries the fund.
     /// </summary>
@@ -125,8 +117,8 @@ public interface IIsinProgressStore
     Task<IsinProgressEntity?> StartStep03Async(Isin isin, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
-    /// Ends a successful run at step 3 — step 3 is the chain tail once it is subscribed.
-    /// Frees the row and advances the durable dedup anchor to the run's trading date.
+    /// Ends a successful run at step 3 — step 3 is the chain tail. Frees the row and
+    /// advances the durable dedup anchor to the run's trading date.
     /// </summary>
     /// <param name="isin">The fund whose row is freed.</param>
     /// <returns>The row as it now stands — or <c>null</c> when the fund has no row.</returns>

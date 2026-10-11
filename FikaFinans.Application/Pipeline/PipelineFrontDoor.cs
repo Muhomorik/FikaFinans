@@ -56,8 +56,8 @@ public sealed class PipelineFrontDoor : IPipelineFrontDoor
                 await step01.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step01.EmitDoneAsync(signal, ct).ConfigureAwait(false);
 
-                // No complete: step 2 is the chain tail, so the row stays in flight until
-                // step 2 completes or fails the run.
+                // No complete: a later step is the chain tail, so the row stays in flight
+                // until that step completes the run, or any step fails it.
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

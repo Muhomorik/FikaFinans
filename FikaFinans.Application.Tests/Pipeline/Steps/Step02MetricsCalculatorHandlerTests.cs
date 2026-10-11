@@ -279,32 +279,6 @@ public sealed class Step02MetricsCalculatorHandlerTests
         });
     }
 
-    // ── CompleteAsync ─────────────────────────────────────────────────
-
-    [Test]
-    public async Task CompleteAsync_AfterStart_CompletesStep02()
-    {
-        // Arrange
-        var sut = CreateSut();
-        await sut.BeginProcessingAsync(Signal);
-
-        // Act
-        await sut.CompleteAsync(Signal);
-
-        // Assert
-        _progress.Verify(x => x.CompleteStep02Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public void CompleteAsync_NotStarted_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var sut = CreateSut();
-
-        // Act & Assert
-        Assert.ThrowsAsync<InvalidOperationException>(() => sut.CompleteAsync(Signal));
-    }
-
     // ── FailAsync ─────────────────────────────────────────────────────
 
     [Test]

@@ -38,7 +38,7 @@ public sealed class Step02MetricsCalculatorEntryTests
     private Step02MetricsCalculatorEntry CreateSut() => _fixture.Create<Step02MetricsCalculatorEntry>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndCompletesLast()
+    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndEmitsLast()
     {
         // Arrange
         var calls = new List<string>();
@@ -54,17 +54,15 @@ public sealed class Step02MetricsCalculatorEntryTests
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
         _step02.Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
-        _step02.Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("complete")).Returns(Task.CompletedTask);
 
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert
+        // Assert — no complete: step 3 is the chain tail, so the run stays in flight for it.
         Assert.Multiple(() =>
         {
             Assert.That(calls, Is.EqualTo(new[]
-                { "begin", "load", "assemble", "agent", "persist", "emit", "complete" }));
+                { "begin", "load", "assemble", "agent", "persist", "emit" }));
             _step02.Verify(x => x.FailAsync(
                 It.IsAny<Step01DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
         });
@@ -85,8 +83,6 @@ public sealed class Step02MetricsCalculatorEntryTests
         Assert.Multiple(() =>
         {
             _step02.Verify(x => x.LoadFundAsync(
-                It.IsAny<Step01DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-            _step02.Verify(x => x.CompleteAsync(
                 It.IsAny<Step01DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
             _step02.Verify(x => x.FailAsync(
                 It.IsAny<Step01DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -110,7 +106,7 @@ public sealed class Step02MetricsCalculatorEntryTests
         {
             Assert.That(thrown, Is.SameAs(boom));
             _step02.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
-            _step02.Verify(x => x.CompleteAsync(
+            _step02.Verify(x => x.EmitDoneAsync(
                 It.IsAny<Step01DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         });
     }
@@ -137,12 +133,12 @@ public sealed class Step02MetricsCalculatorEntryTests
     }
 
     [Test]
-    public void HandleAsync_CompleteThrows_FailsWithThatErrorAndRethrows()
+    public void HandleAsync_EmitThrows_FailsWithThatErrorAndRethrows()
     {
-        // Arrange
-        var boom = new InvalidOperationException("store unreachable");
+        // Arrange — the last phase now that step 2 no longer completes the run.
+        var boom = new InvalidOperationException("bus unreachable");
         _step02
-            .Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
+            .Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .ThrowsAsync(boom);
 
         // Act
@@ -157,7 +153,7 @@ public sealed class Step02MetricsCalculatorEntryTests
     }
 
     [Test]
-    public void HandleAsync_Cancelled_NeitherCompletesNorFails()
+    public void HandleAsync_Cancelled_DoesNotFail()
     {
         // Arrange
         _step02
@@ -168,13 +164,8 @@ public sealed class Step02MetricsCalculatorEntryTests
         Assert.ThrowsAsync<OperationCanceledException>(() => CreateSut().HandleAsync(Signal));
 
         // Assert
-        Assert.Multiple(() =>
-        {
-            _step02.Verify(x => x.CompleteAsync(
-                It.IsAny<Step01DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-            _step02.Verify(x => x.FailAsync(
-                It.IsAny<Step01DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
-        });
+        _step02.Verify(x => x.FailAsync(
+            It.IsAny<Step01DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
