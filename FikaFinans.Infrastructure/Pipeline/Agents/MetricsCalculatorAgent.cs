@@ -10,16 +10,25 @@ using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
+/// <summary>
+/// Step 2 of the pipeline — default <see cref="IMetricsCalculatorAgent"/>. Pure metric
+/// arithmetic over step 1's fund records; only <see cref="Run"/> touches disk.
+/// </summary>
 public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
 {
     private readonly IPathsService _paths;
 
+    /// <param name="paths">
+    /// Resolves step 1's output, the step 2 config and step 2's output file — used by
+    /// <see cref="Run"/> only.
+    /// </param>
     public MetricsCalculatorAgent(IPathsService paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
         _paths = paths;
     }
 
+    /// <inheritdoc />
     public DataLoaderOutput Run(string isoWeek, PipelineRunId runId)
     {
         var inputPath  = _paths.DataLoaderOutput(isoWeek, runId);
@@ -42,6 +51,12 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
         return output;
     }
 
+    /// <summary>
+    /// Step 2 over a whole step 1 output, as <see cref="Run"/> reads it from disk. Every fund
+    /// is enriched; the portfolio-wide fields — frozen positions, cash, data quality — are
+    /// carried through from <paramref name="input"/> unchanged.
+    /// </summary>
+    /// <remarks>Not on the interface — kept for <see cref="Run"/> and its tests.</remarks>
     public DataLoaderOutput RunInMemory(DataLoaderOutput input, MetricsCalculatorConfig config)
     {
         var enrichedFunds = input.Funds.Select(f => ProcessFund(f, config)).ToList();
@@ -83,6 +98,7 @@ public sealed class MetricsCalculatorAgent : IMetricsCalculatorAgent
         };
     }
 
+    /// <inheritdoc />
     public FundRecord ProcessFund(FundRecord fund, MetricsCalculatorConfig config)
     {
         ArgumentNullException.ThrowIfNull(fund);

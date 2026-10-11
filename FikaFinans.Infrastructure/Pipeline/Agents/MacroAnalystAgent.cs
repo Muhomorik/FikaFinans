@@ -13,6 +13,12 @@ using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
+/// <summary>
+/// Step 3 of the pipeline — default <see cref="IMacroAnalystAgent"/>. Validates the
+/// analytics bundle, sends it with the fund category list to the LLM, retries once on an
+/// invalid response, then filters the result against the categories. Only
+/// <see cref="RunAsync"/> touches disk.
+/// </summary>
 public sealed class MacroAnalystAgent : IMacroAnalystAgent
 {
     private const string ConfigVersion = "1.0.0";
@@ -23,6 +29,18 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
     private readonly string _userPromptTemplate;
     private readonly string _retryPromptTemplate;
 
+    /// <param name="paths">
+    /// Resolves the input and output files for <see cref="RunAsync"/>, and the prompt folder
+    /// when a template is not passed in.
+    /// </param>
+    /// <param name="llm">The model behind the single macro call and its one retry.</param>
+    /// <param name="systemPromptTemplate">
+    /// The three templates come as a set: pass all of them, or leave any one null to load
+    /// every template from <see cref="IPathsService.MacroAnalystPromptsDir"/>. Missing files
+    /// there are first extracted from the embedded defaults.
+    /// </param>
+    /// <param name="userPromptTemplate">See <paramref name="systemPromptTemplate"/>.</param>
+    /// <param name="retryPromptTemplate">See <paramref name="systemPromptTemplate"/>.</param>
     public MacroAnalystAgent(
         IPathsService paths,
         IMacroLlmClient llm,
@@ -51,6 +69,7 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         }
     }
 
+    /// <inheritdoc />
     public async Task<MacroContext> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default)
     {
         var dataLoaderPath = _paths.DataLoaderOutput(isoWeek, runId);
@@ -81,6 +100,20 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         }
     }
 
+    /// <summary>
+    /// Step 3 over inputs already read — reads nothing and writes nothing. Validates the
+    /// bundle, calls the LLM, and returns the context with catalysts and themes filtered to
+    /// the categories in <paramref name="dataLoader"/>.
+    /// </summary>
+    /// <param name="dataLoader">
+    /// Step 1's output; only its funds' categories and its ISO week are read.
+    /// </param>
+    /// <param name="isoWeek">Stamped on the context and on each rotation theme's id.</param>
+    /// <exception cref="MacroAnalystValidationException">
+    /// An input has status Failed, the reports' weeks or FK chain disagree, the reports'
+    /// week is not <paramref name="dataLoader"/>'s, or the LLM's response is invalid twice.
+    /// </exception>
+    /// <remarks>Not on the interface — <see cref="RunAsync"/> and the tests call it.</remarks>
     public async Task<MacroContext> RunInMemoryAsync(
         WeeklySummaryRun summary,
         SubstitutionChainRun chain,

@@ -1,11 +1,18 @@
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Domain.Funds;
-using FikaFinans.Domain.Identifiers;
-
 using FikaFinans.Domain.Pipeline;
 
 namespace FikaFinans.Application.Pipeline.Agents;
 
+/// <summary>
+/// Step 2 of the pipeline (<see cref="StepId.MetricsCalculator"/>). Enriches each fund record
+/// from step 1 with its <see cref="FundRecord.Metrics"/> — returns, Sharpe, volatility,
+/// drawdown and data-quality flags. Pure code, no LLM.
+/// </summary>
+/// <remarks>
+/// Append-only: every field step 1 produced is carried through untouched; only
+/// <see cref="FundRecord.Metrics"/> is added.
+/// </remarks>
 public interface IMetricsCalculatorAgent
 {
     /// <summary>
