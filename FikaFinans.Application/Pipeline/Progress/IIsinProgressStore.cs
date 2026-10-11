@@ -25,7 +25,7 @@ public interface IIsinProgressStore
     /// The row as it now stands, held by this run — or <c>null</c> when another run already
     /// holds it, which means: do not start.
     /// </returns>
-    Task<IsinProgressEntity?> ClaimAsync(Isin isin, DateTimeOffset navDate, CancellationToken ct = default);
+    Task<IsinProgressEntity?> StartStep01Async(Isin isin, DateTimeOffset navDate, CancellationToken ct = default);
 
     /// <summary>
     /// Stores this fund's record from <paramref name="output"/> in the column

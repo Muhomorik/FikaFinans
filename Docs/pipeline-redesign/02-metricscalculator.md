@@ -75,6 +75,14 @@ Every new type carries the step number, the way step 1's do. All
 | Done-signal | `Step01DoneSignal` | `Step02DoneSignal` |
 | Config provider | — step 1 has no config | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` |
 | Cloud function | `Step01DataLoaderFunction` *(sketch)* | `Step02MetricsCalculatorFunction` |
+| Row — start | `StartStep01Async` — formerly `ClaimAsync` | `StartStep02Async` |
+| Row — complete | `CompleteStep01Async` *(new)* — only while step 1 is the chain tail | `CompleteStep02Async` |
+| Row — fail | `FailStep01Async` *(new)* | `FailStep02Async` |
+
+The last three are methods on `IIsinProgressStore`, one set per step,
+for the same reason `IPipelineSignals` has one overload per step: a step
+that is not wired to the row does not compile. Save and the run-wide read
+stay shared, keyed by `StepId`.
 
 `PipelineFrontDoor` keeps its name — it is the pipeline's entry, not
 only step 1's. `JsonBacked…` follows `RepositoryBackedIsinProgressStore`
@@ -94,7 +102,7 @@ registration differs.
 | --- | --- | --- | --- |
 | `IPipelineSignalStreams` | `LocalRxPipelineSignalBus` — only step 1's tab subscribes | same bus — also the step 2 subscription | — nothing subscribes |
 | `IPipelineSignals` | `LocalRxPipelineSignalBus`, step 1's overload only | same bus, plus step 2's overload | queue publisher *(new)* |
-| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class, plus a per-fund release and a stuck-row query | the same class over Tables |
+| `IIsinProgressStore` | `RepositoryBackedIsinProgressStore` over SQLite — claim, save, run-wide read | same class — claim renamed to step 1's start, plus start / complete / fail per step and a stuck-row query | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
 | `IStep02MetricsConfigProvider` *(new)* | — none; the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` *(new)* — `config-02-metrics.json` via `IPathsService` | another source — which one is still open |
 
@@ -111,7 +119,7 @@ order "write, then emit" itself:
 
 | Step 1 phase | Step 2 equivalent | Difference |
 | --- | --- | --- |
-| `BeginProcessingAsync` — **claims** the row | read `Step01Json` for the signal's run id; null → stop | must not claim — see "Do not claim" below |
+| `BeginProcessingAsync` — **starts** step 1 on the row, which also clears it | start step 2 on the row — refused unless it still carries the signal's run id → stop; then read `Step01Json` | starts without clearing — see "Start, do not claim" below |
 | `LoadFundAsync` — fetch identity, holdings, pins | take this fund's record out of what Begin read | no I/O |
 | `AssembleAgentInputAsync` — compute buckets, snapshot | load the step 2 config through the config provider | config only; the record is already assembled |
 | `RunAgentAsync` — `IDataLoaderAgent.RunInMemory` | `IMetricsCalculatorAgent.ProcessFund` | already on the interface, already pure |
@@ -135,7 +143,7 @@ only the few lines that connect a transport to it differ per host.
 flowchart TB
   subgraph app["Application — shared by both hosts"]
     door["Step02MetricsCalculatorEntry (new)<br/>one Step01DoneSignal in"]
-    h["Step02MetricsCalculatorHandler (new)<br/>check row → read Step01Json → ProcessFund → save → emit"]
+    h["Step02MetricsCalculatorHandler (new)<br/>start → read Step01Json → ProcessFund → save → emit → complete"]
     agent["IMetricsCalculatorAgent.ProcessFund"]
     door --> h --> agent
   end
@@ -223,26 +231,36 @@ Delivery is at-least-once, as for step 1. Two cases matter:
 | Arrives | Row says | Action |
 | --- | --- | --- |
 | Duplicate of a signal already handled | same run id, `Step02Json` populated | run again — the column is latest-only, overwrite is safe |
-| Late — a newer run has claimed the fund since | a **different** run id | drop it. Its `Step01Json` was cleared by the newer claim; there is nothing to read and nothing to write |
+| Late — a newer run has started step 1 on the fund since | a **different** run id | drop it — step 2's start refuses it. Its `Step01Json` was cleared by the newer start; there is nothing to read and nothing to write |
 
 The second row is new with step 2. Step 1 never has it, because step 1
 mints the run id. Every later step inherits it.
 
-### Do not claim
+### Start, do not claim
 
-`IIsinProgressStore.ClaimAsync` is step 1's lock, and it **clears every
-step column** — that is how a new run starts clean. Calling it from
-step 2 would wipe the `Step01Json` step 2 is about to read.
+Step 1's start — `IIsinProgressStore.StartStep01Async`, formerly
+`ClaimAsync` — is the lock, and it **clears
+every step column**: that is how a new run starts clean. Step 2 calling
+it would wipe the `Step01Json` it is about to read.
 
-So step 2's first phase is a check, not a claim: does this fund's row
-still carry the signal's run id, with `Step01Json` written? The lock
-taken by step 1 covers the whole chain for that fund.
+Step 2 has its own start, `StartStep02Async` *(new)*. It is a check and
+a mark, never a clear:
 
-The check falls out of the read. `ReadStepOutputAsync` only returns rows
-naming the run id it is given, so a null answer covers every "not mine"
-case at once — no row, a newer run's claim, or a cleared column. Null →
-log and return false, the way step 1's refused claim does. The read
-therefore happens in the first phase, so the gate stays first.
+| Does | Why |
+| --- | --- |
+| Refuses unless the row is in flight **and** names the signal's run id | the late-signal drop — no row, or a newer run's start, both answer "not mine" |
+| Moves `CurrentStep` to 2 | a fund that dies inside step 2 is then found by step 2's tab, not step 1's — see "Stuck rows" |
+| Leaves the step columns and `ProcessingStartedAt` alone | `Step01Json` is step 2's input; step 1's start time is what the session-start check reads |
+
+Refused → log and return false, the way step 1's refused start does.
+The lock step 1 took still covers the whole chain for that fund; step 2
+only records that the chain has reached it.
+
+The read of `Step01Json` follows the start, in the same first phase. A
+null read after a granted start is not a late signal: step 1 wrote no
+record — its save leaves the column null when the agent dropped the
+fund. Whether step 2 then fails the fund or completes it with nothing
+written is open (see "Open questions").
 
 ### Manual trigger — WPF only
 
@@ -338,7 +356,7 @@ Two shapes, neither chosen:
 | | Whole one-fund output in each step column | Separate envelope column |
 | --- | --- | --- |
 | What `Step{N}Json` holds | the step's full `DataLoaderOutput` — envelope plus its single fund record | the fund record only, as today |
-| Where the envelope lives | inside every step column — each step's copy | one new column on `IsinProgressEntity`, written by step 1, cleared at the claim |
+| Where the envelope lives | inside every step column — each step's copy | one new column on `IsinProgressEntity`, written by step 1, cleared at step 1's start |
 | Store change | save stops picking the record out; the read hands back the envelope too | new column in the SQLite row and the Tables entity, plus a migration and a read path |
 | Can a later step add to the envelope | yes — it rewrites its own copy | only by writing the shared column |
 | Rests on | a run being one fund — which holds today | nothing extra |
@@ -415,7 +433,7 @@ One write, then one signal. Same order as step 1, same reason.
 | Written | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | This fund's enriched record | `Step02Json` via `StreamingPipelineGateway`'s block write (runner), or the `02-metrics-{iso_week}-{run_id}.json` file (button) | `IIsinProgressStore.SaveStepOutputAsync` with `StepId.MetricsCalculator` → `Step02Json`, `CurrentStep` advances to 2 — SQLite | same call — Azure Tables |
-| Row release | `ReleaseIsinProgressAsync` once, at the end of the whole `PipelineRunner` pass; **nothing** on the signal path | per-fund release by the chain tail — step 2, see "Release" | same |
+| Row freed | `ReleaseIsinProgressAsync` once, at the end of the whole `PipelineRunner` pass; **nothing** on the signal path | `CompleteStep02Async` on success, `FailStep02Async` on failure — step 2 is the chain tail, see "Complete and fail" | same |
 
 No NAV rows, no mirror — step 2 writes only its column.
 
@@ -426,7 +444,7 @@ per-fund processing. If the envelope ends up stored whole in each step
 column (see "How the envelope is stored"), the save stops picking the
 record out; the call stays.
 
-### Release — the chain tail frees the row
+### Complete and fail — the chain tail frees the row
 
 Step 1's claim sets the row to processing, and on the signal path
 nothing sets it back. `ReleaseIsinProgressAsync` exists, but only the
@@ -437,41 +455,53 @@ universe-wide `PipelineRunner` calls it. Two consequences, live today:
 | Step 1 succeeds | row stays in flight forever — the next NAV signal for that fund is refused at the claim, and the dedup anchor never advances |
 | Step 1 fails | same — its comment says the janitor will reset it, but no janitor exists |
 
-**Decided: whichever step is currently last on the signal path releases
-the row**, once its emit is done:
+A step ends one of two ways, the same two `StepEventKind` already
+reports — succeeded or failed. Each step gets its own method for each on
+`IIsinProgressStore`:
 
-| Outcome | Row after release |
-| --- | --- |
-| Success | free; `LatestProcessedNavDate` advanced to the run's trading date |
-| Failure, any phase | free; anchor **not** advanced, `LastError` set — the next signal retries the fund |
+| Method | Called by | Row after |
+| --- | --- | --- |
+| `CompleteStep{N}Async` *(new)* | the chain tail only, once its emit is done | free; `LatestProcessedNavDate` advanced to the run's trading date; `LastError` cleared |
+| `FailStep{N}Async` *(new)* | any step, from any phase that throws | free; anchor **not** advanced; `LastError` set — the next signal retries the fund |
+
+**Decided: only the step currently last on the signal path completes.**
+A step that is not the tail has nothing to complete — its save has
+already moved `CurrentStep` on — so it has a fail method and no complete
+method.
 
 The tail moves as the chain grows: step 1 today, step 2 once it lands
 — and step 2 stays the tail until a later step consumes its
-done-signal. So step 2 takes the release over from step 1 in the same
-change that wires it — one step releases, never two.
+done-signal. So in the change that wires step 2, `CompleteStep01Async`
+is removed and `CompleteStep02Async` takes over — one step completes,
+never two.
 
 **Fix step 1 first**, as its own small change: it is broken today
-whether or not step 2 exists.
-
-**TODO:** a release on `IIsinProgressStore`. The gateway's `ReleaseIsinProgressAsync` is universe-shaped
-(the whole step 1 output plus a failed set) and lives on the old path;
-the per-fund chain needs the same two outcomes for one ISIN.
+whether or not step 2 exists. The gateway's `ReleaseIsinProgressAsync`
+is no help — it is universe-shaped (the whole step 1 output plus a
+failed set) and lives on the old path.
 
 ### Stuck rows — restart when the tab opens (WPF only)
 
 A crash or app shutdown mid-run still leaves a row in flight, because no
-code gets to run the release. The "janitor" step 1's comments promise —
+code gets to complete or fail the step. The "janitor" step 1's comments promise —
 a background job that resets rows stuck too long — does not exist.
 
 **Decided, local only: each step tab restarts its own stuck funds when
 it opens** — the rows whose `CurrentStep` is that tab's step. Step 2's
 tab restarts funds that died in step 2, step 1's those that died in
-step 1. For each such row still in flight:
+step 1. That split holds because every step's start moves
+`CurrentStep` to its own number — without step 2's start, a fund dying
+inside step 2 would still read as step 1. For each such row still in
+flight:
 
 | Check | Then |
 | --- | --- |
-| claimed **before this app session started** | its run is dead — nothing from an earlier process can still be running. Reset the row and publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` |
-| claimed during this session | leave it — it may genuinely be running right now |
+| step 1 started it **before this app session started** | its run is dead — nothing from an earlier process can still be running. Fail the step through that step's `FailStep{N}Async`, recording it as abandoned, then publish a fresh `NavChangeSignal` for its ISIN and trading date through `INavSignalPublisher` |
+| started during this session | leave it — it may genuinely be running right now |
+
+The reset is a fail on purpose: it does exactly what a reset must —
+frees the row, keeps the anchor, records why — so it needs no method of
+its own.
 
 The restart goes back through the front door like any other signal, so
 it always starts at step 1, whichever step the run died in. The dedup
@@ -482,8 +512,8 @@ view is only a read. It is limited to rows the session-start check
 proves dead, so a view still never starts work that is already
 underway.
 
-The reset must land before the signal: step 1's claim refuses a row
-still in flight, so a re-published signal against a row not yet reset
+The fail must land before the signal: step 1's start refuses a row
+still in flight, so a re-published signal against a row not yet failed
 would just be dropped. Finding the rows needs a store query step 2 does not
 otherwise use — every in-flight row at a given step.
 
@@ -507,7 +537,8 @@ Nothing changes on `IPipelineSignalStreams` — it already carries every
 
 **Decided: nobody, yet.** Step 2 emits its done-signal and nothing
 consumes it for work. Step 2 is the chain tail, so it is also the step
-that releases the row (see "Release" above).
+that completes the run and frees the row (see "Complete and fail"
+above).
 
 Why not wire step 4 now: step 3 (MacroAnalyst) is a universe-wide
 barrier, and step 4 is the next per-fund consumer of step 2's output —
@@ -521,7 +552,7 @@ does.
 
 ```mermaid
 flowchart LR
-  s1["Step 1<br/>DataLoader"] -->|"Step01DoneSignal"| s2["Step 2<br/>MetricsCalculator<br/>chain tail — releases"]
+  s1["Step 1<br/>DataLoader"] -->|"Step01DoneSignal"| s2["Step 2<br/>MetricsCalculator<br/>chain tail — completes"]
   s2 -->|"Step02DoneSignal (new)"| tab["step 2 tab<br/>reads only"]
   s2 -.->|"later — step 4's page decides"| next["next step"]
   s1 -->|writes| row[("per-ISIN row")]
@@ -558,23 +589,26 @@ flight, not processed — apply unchanged.
 
 ## TODO summary
 
+In implementation order — one change per row, each reviewed and
+committed before the next starts.
+
 | # | Work | Touches |
 | --- | --- | --- |
-| 1 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape | Application, `Pipeline/Steps` |
-| 2 | First phase reads `Step01Json` by run id instead of claiming; null → stop | the handler — no store changes |
-| 3 | — | *(was: per-fund read — dropped, the run-wide read already returns one fund)* |
-| 4 | Save wraps the record in a one-fund envelope | the handler |
-| 5 | `Step02DoneSignal` *(new)* and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
-| 6 | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry`, the front door's twin | Application, `Pipeline` |
-| 7 | Subscription: `Step01DoneSignal` → entry point, beside step 1's | `MainWindowViewModel` |
-| 8 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
-| 9 | Registration — handler per-dependency, entry point single-instance, like step 1's | `InfrastructureModule` |
-| 10 | Per-fund release — success advances the anchor, failure does not | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
-| 11 | **Before everything else:** step 1 releases at the tail, so a fund is not locked after one signal | `Step01DataLoaderHandler`, `PipelineFrontDoor` |
-| 12 | Hand the release from step 1 to step 2 when step 2 is wired | both handlers |
-| 13 | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
-| 14 | `IStep02MetricsConfigProvider` in Application, `JsonBackedStep02MetricsConfigProvider` in Infrastructure | Application, Infrastructure, `InfrastructureModule` |
-| 15 | Each step tab restarts its own stuck funds on open — `CurrentStep` is its step, claimed before this session; reset first, then re-published as `NavChangeSignal`. Needs an in-flight-rows-by-step query | step 1 and step 2 tabs, `IIsinProgressStore`, `INavSignalPublisher` |
+| 1 | Rename `ClaimAsync` to `StartStep01Async` — no behaviour change | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore`, `Step01DataLoaderHandler` |
+| 2 | `CompleteStep01Async` + `FailStep01Async` — complete advances the anchor, fail does not | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
+| 3 | Step 1 completes after its emit and fails from any phase that throws, so a fund is not locked after one signal | `Step01DataLoaderHandler`, `PipelineFrontDoor` |
+| 4 | `Step02DoneSignal` *(new)* and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` |
+| 5 | `IStep02MetricsConfigProvider` in Application, `JsonBackedStep02MetricsConfigProvider` in Infrastructure | Application, Infrastructure, `InfrastructureModule` |
+| 6 | `StartStep02Async`, `CompleteStep02Async`, `FailStep02Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` |
+| 7 | `IStep02MetricsCalculator` + `Step02MetricsCalculatorHandler`, in step 1's shape — first phase starts step 2 then reads `Step01Json`; save wraps the record in a one-fund envelope. Not wired yet | Application, `Pipeline/Steps` |
+| 8 | `IStep02MetricsCalculatorEntry` + `Step02MetricsCalculatorEntry`, the front door's twin; registration — handler per-dependency, entry point single-instance, like step 1's | Application, `Pipeline`, `InfrastructureModule` |
+| 9 | Subscription `Step01DoneSignal` → entry point, beside step 1's — and, in the same change, step 2 takes completion over: `CompleteStep01Async` removed | `MainWindowViewModel`, both handlers, `IIsinProgressStore` |
+| 10 | Step 2's tab goes passive — listens, reads, keeps its debug button | `Step2MetricsCalculatorViewModel`, no XAML |
+| 11 | Each step tab restarts its own stuck funds on open — `CurrentStep` is its step, step 1 started before this session; failed first through that step's fail, then re-published as `NavChangeSignal`. Needs an in-flight-rows-by-step query | step 1 and step 2 tabs, `IIsinProgressStore`, `INavSignalPublisher` |
+| — | Carry the envelope on the row — shape still open, see "How the envelope is stored" | `IIsinProgressStore` and its storage, both handlers |
+
+The per-fund read was dropped: the run-wide read already returns one
+fund.
 
 None of it touches `MetricsCalculatorAgent`. The agent is done.
 
@@ -599,6 +633,11 @@ not settled here.
   but it is step 10's page to decide.
 - **Where the bucketing config lives** once step 1 owns the bucketing —
   through a config provider either way; which one is step 1's call.
+- **Step 2 finds no record after a granted start.** Step 1 leaves
+  `Step01Json` null when its agent dropped the fund, yet still emits.
+  Step 2 can fail the fund — anchor kept, retried on every signal — or
+  complete it with nothing written. Which one depends on whether a
+  dropped fund is an error or a normal "out of scope".
 - **Who consumes step 2's done-signal.** Nobody for now; step 2 is the
   tail. Step 4 is the natural consumer if step 3 resolves as a barrier
   off the per-fund chain — step 4's page owns the decision.

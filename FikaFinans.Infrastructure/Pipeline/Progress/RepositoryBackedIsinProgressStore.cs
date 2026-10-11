@@ -39,7 +39,7 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
     }
 
     /// <inheritdoc />
-    public async Task<IsinProgressEntity?> ClaimAsync(
+    public async Task<IsinProgressEntity?> StartStep01Async(
         Isin isin, DateTimeOffset navDate, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();

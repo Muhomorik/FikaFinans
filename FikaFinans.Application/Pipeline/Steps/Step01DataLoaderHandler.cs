@@ -122,7 +122,7 @@ public sealed class Step01DataLoaderHandler : IStep01DataLoader
         try
         {
             _progressRow = await _progress
-                .ClaimAsync(signal.Isin, signal.NavDate, ct)
+                .StartStep01Async(signal.Isin, signal.NavDate, ct)
                 .ConfigureAwait(false);
 
             if (_progressRow is null)
