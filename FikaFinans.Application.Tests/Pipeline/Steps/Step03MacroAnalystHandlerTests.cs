@@ -592,6 +592,64 @@ public sealed class Step03MacroAnalystHandlerTests
         Assert.That(context, Is.Null);
     }
 
+    // ── ComputeContextAsync ───────────────────────────────────────────
+
+    [Test]
+    public async Task ComputeContextAsync_ReportsFound_ReturnsTheAgentsContextWithoutTouchingTheStore()
+    {
+        // Act
+        var context = await CreateSut().ComputeContextAsync(Week);
+
+        // Assert — a debug run: no cached context reused, none replaced.
+        Assert.That(context, Is.SameAs(_computed));
+        _contexts.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task ComputeContextAsync_OnlyEarlierReports_ComputesForTheReportsWeek()
+    {
+        // Arrange — the agent's week check needs the universe stamped with the reports' week.
+        var lastWeek = IsoWeek.From("2026-W22");
+        _reports
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeReports(lastWeek.Value, "ws-run-22"));
+
+        // Act
+        await CreateSut().ComputeContextAsync(Week);
+
+        // Assert
+        _agent.Verify(x => x.RunInMemoryAsync(
+            It.IsAny<WeeklySummaryRun>(), It.IsAny<SubstitutionChainRun>(), It.IsAny<OpportunityScanRun>(),
+            It.Is<DataLoaderOutput>(u => u.IsoWeek == lastWeek.Value && u.Funds.Count == 2),
+            lastWeek, It.IsAny<Step03MacroAnalystPrompts>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public void ComputeContextAsync_NoReports_Throws()
+    {
+        // Arrange
+        _reports
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WeeklyAnalyticsReports?)null);
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => CreateSut().ComputeContextAsync(Week));
+        VerifyAgentNeverCalled();
+    }
+
+    [Test]
+    public void ComputeContextAsync_EmptyUniverse_Throws()
+    {
+        // Arrange
+        _metadata
+            .Setup(x => x.ListMetadataAsync(It.IsAny<Company>(), Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => CreateSut().ComputeContextAsync(Week));
+        VerifyAgentNeverCalled();
+    }
+
     // ── Builders ──────────────────────────────────────────────────────
 
     private static FundRecord MakeFund(string isin, string category) => new()

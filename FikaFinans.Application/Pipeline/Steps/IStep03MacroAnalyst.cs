@@ -78,4 +78,14 @@ public interface IStep03MacroAnalyst
     /// </summary>
     /// <returns><c>null</c> when nothing is stored, or the store could not be read.</returns>
     Task<MacroContext?> ReadContextAsync(IsoWeek isoWeek, CancellationToken ct = default);
+
+    /// <summary>
+    /// The debug run: computes a context from the latest reports up to
+    /// <paramref name="isoWeek"/>, with the same loads a miss makes, and returns it. Neither
+    /// reads nor writes the store — a cached context would not be debugging the LLM call,
+    /// and a replaced one would change what every later fund reads.
+    /// </summary>
+    /// <returns>The context computed, stamped with the reports' week.</returns>
+    /// <exception cref="InvalidOperationException">No reports up to the week, or an empty category universe.</exception>
+    Task<MacroContext> ComputeContextAsync(IsoWeek isoWeek, CancellationToken ct = default);
 }

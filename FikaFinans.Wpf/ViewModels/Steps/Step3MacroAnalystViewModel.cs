@@ -1,9 +1,7 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text.Json;
-using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
-using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Macro;
@@ -14,8 +12,6 @@ namespace FikaFinans.Wpf.ViewModels.Steps;
 
 public sealed class Step3MacroAnalystViewModel : StepViewModel
 {
-    private readonly IPathsService? _paths;
-    private readonly IMacroAnalystAgent? _agent;
     private readonly IStep03MacroAnalyst? _step03;
 
     public override int StepNumber => 3;
@@ -25,12 +21,10 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
     public Step3MacroAnalystViewModel() { }
 
     public Step3MacroAnalystViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IMacroAnalystAgent agent, IStep03MacroAnalyst step03,
+        IStep03MacroAnalyst step03,
         IStepEventSource stepEvents, IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
-        _paths = paths;
-        _agent = agent;
         _step03 = step03;
 
         // The tab follows the step rather than running it: whoever drove the handler —
@@ -59,24 +53,22 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
     }
 
     /// <summary>
-    /// The debug button: runs the agent file in, file out, and shows what it returned. It
-    /// neither reads nor writes the context store — a cached context would not be
-    /// debugging the LLM call, and a replaced one would change what every later fund reads.
+    /// The debug button: computes a context for the run bar's week through the step, and
+    /// shows it. Never stored — a cached context would not be debugging the LLM call, and a
+    /// replaced one would change what every later fund reads.
     /// </summary>
     protected override async Task RunStepCoreAsync()
     {
-        if (_agent is null || _paths is null)
-        {
-            OutputSummaryText = "Configure Foundry credentials in Settings → Models";
+        // Null only under the designer's parameterless constructor.
+        if (_step03 is null)
             return;
-        }
         if (string.IsNullOrEmpty(IsoWeek))
         {
             OutputSummaryText = "Select a week in the run bar first";
             return;
         }
 
-        var context = await _agent.RunAsync(IsoWeek, RunId);
+        var context = await _step03.ComputeContextAsync(Domain.Pipeline.IsoWeek.From(IsoWeek));
         Show(context, requestedWeek: IsoWeek, prefix: "Debug run, not stored");
     }
 

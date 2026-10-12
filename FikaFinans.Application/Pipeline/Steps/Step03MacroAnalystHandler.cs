@@ -24,6 +24,9 @@ namespace FikaFinans.Application.Pipeline.Steps;
 /// </summary>
 public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
 {
+    /// <summary>Stamps the debug run's universe; the agent never reads it.</summary>
+    private static readonly PipelineRunId DebugRunId = PipelineRunId.From("step03-debug");
+
     private readonly ILogger _logger;
     private readonly NavSyncOptions _options;
     private readonly IIsinProgressStore _progress;
@@ -218,19 +221,9 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
 
         try
         {
-            // Every fund's categories, not this fund's: the agent restricts the LLM to the
-            // categories some fund actually has, and the context serves the whole week.
-            var funds = await _metadata
-                .ListMetadataAsync(_family, _isoWeek, ct)
-                .ConfigureAwait(false);
+            var funds = await ListUniverseAsync(_family, _isoWeek, ct).ConfigureAwait(false);
 
-            // An empty universe would filter every catalyst and theme away and store that
-            // empty context for the whole week — fail instead, so the next signal retries.
-            if (funds.Count == 0)
-                throw new InvalidOperationException(
-                    $"No fund metadata for company '{_family.Value}' — the category universe is empty.");
-
-            _universe = WrapAsUniverse(funds, signal.RunId);
+            _universe = WrapAsUniverse(funds, _family, _reportsWeek, signal.RunId);
 
             _prompts = await _promptsProvider.GetPromptsAsync(ct).ConfigureAwait(false);
 
@@ -515,6 +508,61 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Locals only, never this run's fields: the tab holds one handler for its reads, and a
+    /// debug run must not leave state behind for them.
+    /// </remarks>
+    public async Task<MacroContext> ComputeContextAsync(IsoWeek isoWeek, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 3 debug compute — expected week {0}", isoWeek);
+
+        var reports = await _reports.GetLatestAsync(isoWeek, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"No analytics reports for {isoWeek} or earlier.");
+
+        var reportsWeek = IsoWeek.From(reports.WeeklySummary.PeriodIsoWeek);
+        var family = new Company(_options.CompanyFilter);
+
+        var funds = await ListUniverseAsync(family, isoWeek, ct).ConfigureAwait(false);
+        var prompts = await _promptsProvider.GetPromptsAsync(ct).ConfigureAwait(false);
+
+        var context = await _agent
+            .RunInMemoryAsync(
+                reports.WeeklySummary,
+                reports.SubstitutionChain,
+                reports.RotationTargets,
+                WrapAsUniverse(funds, family, reportsWeek, DebugRunId),
+                reportsWeek,
+                prompts,
+                ct)
+            .ConfigureAwait(false);
+
+        _logger.Info(
+            "Step 3 debug compute done, not stored — expected week {0}, computed for week {1}, weekly summary run {2}, regime {3}",
+            isoWeek, context.IsoWeek, reports.WeeklySummary.RunId, context.MacroRegime);
+
+        return context;
+    }
+
+    /// <summary>
+    /// Every fund's categories, not one fund's: the agent restricts the LLM to the categories
+    /// some fund actually has, and the context serves the whole week.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The universe is empty — it would filter every catalyst and theme away, and a stored
+    /// empty context would serve the whole week. Failing lets the next signal retry.
+    /// </exception>
+    private async Task<IReadOnlyList<FundMetadata>> ListUniverseAsync(Company family, IsoWeek isoWeek, CancellationToken ct)
+    {
+        var funds = await _metadata.ListMetadataAsync(family, isoWeek, ct).ConfigureAwait(false);
+
+        if (funds.Count == 0)
+            throw new InvalidOperationException(
+                $"No fund metadata for company '{family.Value}' — the category universe is empty.");
+
+        return funds;
+    }
+
     /// <summary>
     /// The lookup in the step 3 plan's order: the latest reports up to the fund's week name
     /// the context to look for; a stored context of a later week than those reports wins
@@ -628,7 +676,8 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
     /// categories from, stamped with the reports' week — the agent checks the two match, and
     /// a context is only ever computed for the week its reports are from.
     /// </summary>
-    private DataLoaderOutput WrapAsUniverse(IReadOnlyList<FundMetadata> funds, PipelineRunId runId) =>
+    private static DataLoaderOutput WrapAsUniverse(
+        IReadOnlyList<FundMetadata> funds, Company family, IsoWeek reportsWeek, PipelineRunId runId) =>
         WrapAsOutput(
             funds.Select(m => new FundRecord
             {
@@ -636,16 +685,18 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
                 Metadata = m,
                 NavBuckets = Array.Empty<NavBucket>(),
             }).ToList(),
-            _reportsWeek,
+            family,
+            reportsWeek,
             runId);
 
-    private DataLoaderOutput WrapAsOutput(FundRecord fund, PipelineRunId runId) => WrapAsOutput([fund], _isoWeek, runId);
+    private DataLoaderOutput WrapAsOutput(FundRecord fund, PipelineRunId runId) => WrapAsOutput([fund], _family, _isoWeek, runId);
 
-    private DataLoaderOutput WrapAsOutput(IReadOnlyList<FundRecord> funds, IsoWeek week, PipelineRunId runId) => new()
+    private static DataLoaderOutput WrapAsOutput(
+        IReadOnlyList<FundRecord> funds, Company family, IsoWeek week, PipelineRunId runId) => new()
     {
         GeneratedAt = DateTimeOffset.UtcNow.ToString("o"),
         IsoWeek = week.Value,
-        Family = _family.Value,
+        Family = family.Value,
         RunId = runId,
         ConfigVersion = "1.0.0",
         Funds = funds,
