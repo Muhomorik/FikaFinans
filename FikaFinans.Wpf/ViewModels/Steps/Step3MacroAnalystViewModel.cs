@@ -6,20 +6,25 @@ using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
+
+using JetBrains.Annotations;
+
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
 
 public sealed class Step3MacroAnalystViewModel : StepViewModel
 {
-    private readonly IStep03MacroAnalyst? _step03;
+    private readonly IStep03MacroAnalyst _step03;
 
     public override int StepNumber => 3;
     public override string AgentName => "Macro analyst";
     public override bool HasConfig => false;
 
-    public Step3MacroAnalystViewModel() { }
+    [UsedImplicitly]
+    public Step3MacroAnalystViewModel() => _step03 = null!;   // designer only
 
+    [UsedImplicitly]
     public Step3MacroAnalystViewModel(ILogger logger, IScheduler uiScheduler,
         IStep03MacroAnalyst step03,
         IStepEventSource stepEvents, IPipelineSignalStreams pipelineSignals)
