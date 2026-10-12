@@ -636,6 +636,21 @@ remembered for a while — a negative entry, a backoff — is open.
 **Under A**, all three move into the weekly job, and the per-fund chain
 only ever reads.
 
+### Measured (2026-10-12)
+
+The first signal-driven run in the app: one fund of 2026-W41, the
+reports on disk for 2026-W18, an empty store. The fund fell back,
+computed for W18, stored the context and completed in 29.6 s — one
+LLM call, valid on the first try.
+
+| Part | Time |
+| --- | --- |
+| Lookup, reports, universe (34 funds, 28 categories), prompts | under 1 s |
+| Create the Foundry agent version | 14 s |
+| The response — 3872 chars, from 2658 + 6335 chars of prompt | 11 s |
+| Delete the agent version | 3 s |
+| Validate, filter, store, persist, emit, complete | under 0.1 s |
+
 ### What the context is keyed by
 
 **Decided (2026-10-11): by the run ids it was built from — the weekly

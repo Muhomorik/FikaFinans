@@ -70,6 +70,10 @@ public sealed class FoundryMacroLlmClient : IMacroLlmClient
         }
     }
 
+    // Slowest part of the call: measured 2026-10-12 at 14 s to create the agent version vs 11 s
+    // for the response itself (plus 3 s to delete). Acceptable while step 3 computes once per
+    // week's reports; if it starts to matter, reuse one named agent per prompt version instead
+    // of a create/delete per call.
     private async Task<(string Name, string Version)> CreateAgentAsync(string systemPrompt, CancellationToken ct)
     {
         var definition = new DeclarativeAgentDefinition(_modelId)

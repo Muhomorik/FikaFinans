@@ -88,7 +88,8 @@ public sealed class RepositoryBackedMacroContextStore : IMacroContextStore
         await _contexts.UpsertAsync(entity, ct).ConfigureAwait(false);
 
         _logger.Trace(
-            "Macro context saved — week {0}, weekly summary run {1}", entity.IsoWeek, entity.RowKey);
+            "Macro context saved — week {0}, weekly summary run {1}, {2} chars",
+            entity.IsoWeek, entity.RowKey, entity.ContextJson.Length);
     }
 
     private static MacroContext Deserialize(MacroContextEntity entity) =>
