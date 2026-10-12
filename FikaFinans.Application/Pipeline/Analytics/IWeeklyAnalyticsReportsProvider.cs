@@ -15,11 +15,15 @@ namespace FikaFinans.Application.Pipeline.Analytics;
 public interface IWeeklyAnalyticsReportsProvider
 {
     /// <summary>
-    /// Returns the reports for <paramref name="isoWeek"/>, read fresh on every call, or
-    /// <c>null</c> when there are none for that week.
+    /// Returns the latest reports for <paramref name="notAfter"/> or an earlier week, read
+    /// fresh on every call — or <c>null</c> when there are none. Reports for a later week are
+    /// never returned: a fund is not analysed against a week it has not reached.
     /// </summary>
-    /// <param name="isoWeek">Matched against the weekly summary's <c>periodIsoWeek</c>.</param>
+    /// <param name="notAfter">
+    /// The fund's week. Matched against the weekly summary's <c>periodIsoWeek</c>; the
+    /// caller reads the week actually returned from it.
+    /// </param>
     /// <param name="ct">Cancels the read.</param>
     /// <exception cref="InvalidDataException">A report is present but cannot be read.</exception>
-    Task<WeeklyAnalyticsReports?> GetAsync(IsoWeek isoWeek, CancellationToken ct = default);
+    Task<WeeklyAnalyticsReports?> GetLatestAsync(IsoWeek notAfter, CancellationToken ct = default);
 }

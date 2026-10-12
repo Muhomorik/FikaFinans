@@ -7,7 +7,6 @@ using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Macro;
-using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using NLog;
 

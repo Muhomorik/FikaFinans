@@ -22,8 +22,8 @@ public interface IStep03MacroAnalyst
 
     /// <summary>
     /// Reads this fund's record back from <c>Step02Json</c>, and looks up the context for the
-    /// week of the signal's trading date: by the week's reports when they exist, otherwise
-    /// the newest stored context of an earlier week. Fails when there is neither.
+    /// week of the signal's trading date: by the latest reports up to that week when there
+    /// are any, otherwise the newest stored context up to it. Fails when there is neither.
     /// </summary>
     Task LoadFundAsync(Step02DoneSignal signal, CancellationToken ct = default);
 

@@ -400,7 +400,7 @@ not this button's job.
 
 | Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| **The week's analytics reports** — weekly summary, substitution chain, rotation targets | three files via `IPathsService` (`AnalyticsWeeklySummaryJson` and siblings), fixed names, latest copy only — read inside `RunAsync` | the loader, asked for a week — file-backed, same files, deserialised into `WeeklySummaryRun`, `SubstitutionChainRun`, `OpportunityScanRun`; returns them only when the weekly summary's `periodIsoWeek` is the week asked for, otherwise none | the loader, asked for a week — KanelBrief REST API, live or cached |
+| **The week's analytics reports** — weekly summary, substitution chain, rotation targets | three files via `IPathsService` (`AnalyticsWeeklySummaryJson` and siblings), fixed names, latest copy only — read inside `RunAsync` | the loader, asked for a week — file-backed, same files, deserialised into `WeeklySummaryRun`, `SubstitutionChainRun`, `OpportunityScanRun`; returns them when the weekly summary's `periodIsoWeek` is the week asked for or earlier, otherwise none | the loader, asked for a week — KanelBrief REST API, latest up to that week, live or cached |
 | **A universe `DataLoaderOutput`** — the agent reads every fund's `Metadata.Category` from it, and checks its `IsoWeek` | step 1's universe-wide output file | built by the handler from every fund's metadata — YieldRaccoon SQLite, see below | same, from YieldRaccoon's API — endpoint not built yet |
 | **Prompts** — system, user template, retry | three files in `MacroAnalystPromptsDir`, extracted from embedded resources on first use — read by the agent's constructor | through the prompts provider, file-backed — same folder, same files, so editing a prompt still works | through the prompts provider — source open |
 | **Foundry project + model id** | settings, `az login` | unchanged | app settings, managed identity |
@@ -409,8 +409,10 @@ not this button's job.
 **The loader takes the week.** In cloud the reports come from a REST
 call, which has to name the week it wants; the file-backed loader takes
 the same parameter so the handler asks both the same way. The handler
-passes the fund's week — the one it derives from the trading date. The
-files hold one week only, so locally any other week is "none".
+passes the fund's week — the one it derives from the trading date — and
+gets the latest reports up to it. The files hold one week only, so
+locally that week is returned when it is not later than the fund's.
+Each read logs the files used next to the week expected.
 
 The loader **only loads** — the week it was asked for is its one
 check, and only against the weekly summary. The FK-chain, status and same-week checks
@@ -513,26 +515,34 @@ its week can be computed yet — a policy on the lookup, not on the agent:
 keeps the chain moving and is honest about it, without touching the
 agent. It is decided once, in the step, not in each consumer.
 
+The loader returns the **latest reports up to W** — W's own, or an
+earlier week's R when nothing later exists. Never a week after W.
+
 In order, for a fund whose week is W:
 
 | # | Finds | Does |
 | --- | --- | --- |
-| 1 | a stored context for W | uses it — the normal hit |
-| 2 | the loader has reports for W | computes W's context — the normal miss |
-| 3 | no reports for W, and a context for an earlier week is stored | uses the newest stored one |
-| 4 | no reports for W, nothing earlier stored | fails the fund — nothing honest to use |
+| 1 | reports, and a context stored under their weekly summary `runId` | uses it — the normal hit |
+| 2 | reports for W, nothing stored for them | computes W's context — the normal miss |
+| 3 | reports for an earlier week R, nothing stored for them, but a stored context newer than R | uses that newer context — recomputing from older reports would step the analysis backwards |
+| 4 | reports for an earlier week R, nothing stored for them or newer | computes R's context — stamped R, never W, so the agent's week check holds — stores it and uses it |
+| 5 | no reports up to W, a context of W or earlier stored | uses the newest stored one |
+| 6 | no reports up to W, nothing stored | fails the fund — nothing honest to use |
 
-Whenever the context used is not W's, the step logs which week it is.
-The fund record has no field for it, and step 3 adds none — the
-context carries its own `IsoWeek` and source run ids. Once W's reports land, the
-next fund of week W misses at row 1, finds them at row 2, and
-computes — so the fallback ends by itself.
+Whenever the context used is not W's, the step logs which week it is,
+and the loader logs which files it used against the week expected. The
+fund record has no field for it, and step 3 adds none — the context
+carries its own `IsoWeek` and source run ids. Once W's reports land, the
+next fund of week W misses at row 1, computes at row 2 — so the
+fallback ends by itself.
 
-Revised 2026-10-11, when the loader started taking the week: an earlier
-draft had a row between 3 and 4 that computed a context for whatever
-week the loaded reports held. A loader asked for W cannot say which
-earlier week it has, so that row went. The cost is the very first week
-only — with nothing stored yet, funds fail until W's reports land.
+Revised twice on 2026-10-11. First, when the loader started taking the
+week, the "compute from older reports" row was dropped: a loader asked
+for exactly W could not say which earlier week it had, so a first week
+with a stale export failed every fund. The first local test hit exactly
+that (W41 funds, W18 files). Second, the loader became "latest up to W"
+and the row came back as row 4, with row 3 added so a stored newer
+context is never displaced by older reports.
 
 ## Pre-processing — assemble the agent input
 
@@ -777,7 +787,7 @@ rest do.
 
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
-| 1 | ✅ Analytics loader, file-backed — reads the three files into the typed runs; no validation, the agent keeps it. `IWeeklyAnalyticsReportsProvider.GetAsync(IsoWeek)` returning `WeeklyAnalyticsReports`, or nothing when any of the three files is missing or the files hold another week | Application, Infrastructure, `InfrastructureModule` | — |
+| 1 | ✅ Analytics loader, file-backed — reads the three files into the typed runs; no validation, the agent keeps it. `IWeeklyAnalyticsReportsProvider.GetLatestAsync(IsoWeek notAfter)` returning `WeeklyAnalyticsReports`, or nothing when any of the three files is missing or the files hold a later week | Application, Infrastructure, `InfrastructureModule` | — |
 | 2a | ✅ The prompts record, the prompts provider in Application, and its file-backed implementation in Infrastructure — takes over the folder read and embedded-default extraction from the agent's constructor. Read fresh on every call; an empty prompt file throws. The agent keeps its own copy of the extraction until 2b | Application, Infrastructure, `InfrastructureModule` | — |
 | 2b | ✅ `RunInMemoryAsync` onto `IMacroAnalystAgent`: week typed as `IsoWeek`, prompts as a parameter, nothing from `_paths` used. `RunAsync` converts its string and loads the prompts at call time — through the 2a provider, which the constructor now takes in place of the three template parameters; the agent keeps `IPathsService`. No logic change. Tests for the in-memory call in a **new file**, `MacroAnalystAgentRunInMemoryTests`; shared builders in `MacroAnalystTestData` | `IMacroAnalystAgent`, `MacroAnalystAgent`, a new test file in `Agents/03-macroanalyst/` | 2a |
 | 3 | ✅ `Step03DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |

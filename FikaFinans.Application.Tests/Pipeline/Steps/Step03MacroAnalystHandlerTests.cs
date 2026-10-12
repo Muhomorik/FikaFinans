@@ -72,7 +72,7 @@ public sealed class Step03MacroAnalystHandlerTests
             .Setup(x => x.ReadStepOutputAsync(StepId.MetricsCalculator, Signal.RunId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new StepOutput("[]", [_step02Record]));
         _reports
-            .Setup(x => x.GetAsync(Week, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_weeklyReports);
         _metadata
             .Setup(x => x.ListMetadataAsync(It.IsAny<Company>(), Week, It.IsAny<CancellationToken>()))
@@ -179,7 +179,7 @@ public sealed class Step03MacroAnalystHandlerTests
     {
         // Arrange — the fourth row of the fallback order: nothing honest to use.
         _reports
-            .Setup(x => x.GetAsync(Week, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
             .ReturnsAsync((WeeklyAnalyticsReports?)null);
         var sut = CreateSut();
         await sut.BeginProcessingAsync(Signal);
@@ -285,7 +285,7 @@ public sealed class Step03MacroAnalystHandlerTests
     {
         // Arrange — the third row of the fallback order.
         _reports
-            .Setup(x => x.GetAsync(Week, It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
             .ReturnsAsync((WeeklyAnalyticsReports?)null);
         var lastWeek = MakeContext("2026-W22", "ws-run-22");
         _contexts
@@ -512,6 +512,51 @@ public sealed class Step03MacroAnalystHandlerTests
 
         // Assert
         Assert.That(failed, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task RunAgentAsync_OnlyEarlierReports_ComputesForTheReportsWeek()
+    {
+        // Arrange — the export is stale: the latest reports are for 2026-W18.
+        var stale = MakeReports("2026-W18", "ws-run-18");
+        _reports
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        var sut = CreateSut();
+
+        // Act
+        await RunThroughAgentAsync(sut);
+
+        // Assert — computed and stamped for the reports' week, never the fund's, so the
+        // agent's week check holds and the context does not claim a week it is not from.
+        var reportsWeek = IsoWeek.From("2026-W18");
+        _agent.Verify(x => x.RunInMemoryAsync(
+            stale.WeeklySummary, stale.SubstitutionChain, stale.RotationTargets,
+            It.Is<DataLoaderOutput>(u => u.IsoWeek == "2026-W18"),
+            reportsWeek,
+            It.IsAny<Step03MacroAnalystPrompts>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task RunAgentAsync_EarlierReportsButNewerContextStored_UsesTheStoredOne()
+    {
+        // Arrange — W22 was computed from an export since replaced by an older one.
+        _reports
+            .Setup(x => x.GetLatestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeReports("2026-W18", "ws-run-18"));
+        var newer = MakeContext("2026-W22", "ws-run-22");
+        _contexts
+            .Setup(x => x.GetNewestAsync(Week, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newer);
+        var sut = CreateSut();
+
+        // Act
+        var context = await RunThroughAgentAsync(sut);
+
+        // Assert
+        Assert.That(context, Is.SameAs(newer));
+        VerifyAgentNeverCalled();
     }
 
     // ── ReadContextAsync ──────────────────────────────────────────────

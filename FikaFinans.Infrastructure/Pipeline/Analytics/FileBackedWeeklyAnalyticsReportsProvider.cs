@@ -16,9 +16,9 @@ namespace FikaFinans.Infrastructure.Pipeline.Analytics;
 /// <c>RunAsync</c> reads.
 /// </summary>
 /// <remarks>
-/// Fixed names, latest copy only: the files hold whichever week was exported last, so any
-/// other week asked for is "none". Read on every call rather than cached, so a new export
-/// applies to the next fund without a restart.
+/// Fixed names, latest copy only: the files hold whichever week was exported last, and that
+/// is what is returned — unless it is later than the week asked for. Read on every call
+/// rather than cached, so a new export applies to the next fund without a restart.
 /// </remarks>
 public sealed class FileBackedWeeklyAnalyticsReportsProvider : IWeeklyAnalyticsReportsProvider
 {
@@ -32,7 +32,7 @@ public sealed class FileBackedWeeklyAnalyticsReportsProvider : IWeeklyAnalyticsR
     }
 
     /// <inheritdoc />
-    public async Task<WeeklyAnalyticsReports?> GetAsync(IsoWeek isoWeek, CancellationToken ct = default)
+    public async Task<WeeklyAnalyticsReports?> GetLatestAsync(IsoWeek notAfter, CancellationToken ct = default)
     {
         var weeklySummaryPath     = _paths.AnalyticsWeeklySummaryJson;
         var substitutionChainPath = _paths.AnalyticsSubstitutionChainJson;
@@ -45,26 +45,37 @@ public sealed class FileBackedWeeklyAnalyticsReportsProvider : IWeeklyAnalyticsR
             .ToList();
         if (missing.Count > 0)
         {
-            _logger.Warn("Weekly analytics reports not available, missing — {0}", string.Join(", ", missing));
+            _logger.Warn(
+                "Weekly analytics reports not available — expected week {0} or earlier, missing: {1}",
+                notAfter, string.Join(", ", missing));
             return null;
         }
 
         var weeklySummary = await ReadAsync<WeeklySummaryRun>(weeklySummaryPath, ct).ConfigureAwait(false);
+        var found = weeklySummary.PeriodIsoWeek;
 
         // Only the weekly summary's week is matched: the other two disagreeing with it is the
-        // agent's validation to report, not a reason to pretend the week has no reports.
-        if (!string.Equals(weeklySummary.PeriodIsoWeek, isoWeek.Value, StringComparison.Ordinal))
+        // agent's validation to report, not a reason to pretend there are no reports. ISO week
+        // labels are zero-padded, so ordinal order is week order.
+        if (string.CompareOrdinal(found, notAfter.Value) > 0)
         {
-            _logger.Info("Weekly analytics reports not available for {0} — the files hold {1}",
-                isoWeek, weeklySummary.PeriodIsoWeek);
+            _logger.Info(
+                "Weekly analytics reports not used — expected week {0} or earlier, {1} holds {2}",
+                notAfter, weeklySummaryPath, found);
             return null;
         }
 
         var substitutionChain = await ReadAsync<SubstitutionChainRun>(substitutionChainPath, ct).ConfigureAwait(false);
         var rotationTargets   = await ReadAsync<OpportunityScanRun>(rotationTargetsPath, ct).ConfigureAwait(false);
 
-        _logger.Trace("Weekly analytics reports read — week {0}, weekly summary run {1}",
-            weeklySummary.PeriodIsoWeek, weeklySummary.RunId);
+        // What was expected next to what is used, with the files, so a stale export is
+        // visible in the log rather than only in the context's week.
+        var message =
+            "Weekly analytics reports used — expected week {0}, using {1} (weekly summary run {2}) from {3}, {4}, {5}";
+        if (found == notAfter.Value)
+            _logger.Debug(message, notAfter, found, weeklySummary.RunId, weeklySummaryPath, substitutionChainPath, rotationTargetsPath);
+        else
+            _logger.Info(message, notAfter, found, weeklySummary.RunId, weeklySummaryPath, substitutionChainPath, rotationTargetsPath);
 
         return new WeeklyAnalyticsReports(weeklySummary, substitutionChain, rotationTargets);
     }

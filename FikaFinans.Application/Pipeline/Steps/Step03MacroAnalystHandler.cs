@@ -45,8 +45,14 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
     /// <summary>This fund's record as step 2 stored it; null until it loads.</summary>
     private FundRecord? _fund;
 
-    /// <summary>The week's reports; null when there are none, or until loaded.</summary>
+    /// <summary>The latest reports up to the week; null when there are none, or until loaded.</summary>
     private WeeklyAnalyticsReports? _weeklyReports;
+
+    /// <summary>
+    /// The week the loaded reports are from — the fund's week, or an earlier one when no
+    /// later export exists. A miss computes the context for this week, never the fund's.
+    /// </summary>
+    private IsoWeek _reportsWeek = IsoWeek.Empty;
 
     /// <summary>The context this fund runs with — found by the lookup, or computed on a miss.</summary>
     private MacroContext? _context;
@@ -266,7 +272,8 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
         var key = _weeklyReports.WeeklySummary.RunId;
 
         _logger.Debug(
-            "Step 3 compute — isin={0}, week {1}, weekly summary run {2}", signal.Isin.Value, _isoWeek, key);
+            "Step 3 compute — isin={0}, expected week {1}, computing for week {2}, weekly summary run {3}",
+            signal.Isin.Value, _isoWeek, _reportsWeek, key);
 
         try
         {
@@ -509,44 +516,78 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
     }
 
     /// <summary>
-    /// The lookup in the step 3 plan's order: the week's reports name the context to look
-    /// for; without them, the newest stored context of the week or earlier stands in.
+    /// The lookup in the step 3 plan's order: the latest reports up to the fund's week name
+    /// the context to look for; a stored context of a later week than those reports wins
+    /// over computing from them; without any reports, the newest stored context stands in.
     /// </summary>
     /// <returns>The context found, or <c>null</c> for a miss that must be computed.</returns>
-    /// <exception cref="InvalidOperationException">No reports for the week and no context to fall back on.</exception>
+    /// <exception cref="InvalidOperationException">No reports up to the week and no context to fall back on.</exception>
     private async Task<MacroContext?> LookUpContextAsync(Step02DoneSignal signal, CancellationToken ct)
     {
-        _weeklyReports = await _reports.GetAsync(_isoWeek, ct).ConfigureAwait(false);
+        _weeklyReports = await _reports.GetLatestAsync(_isoWeek, ct).ConfigureAwait(false);
 
         if (_weeklyReports is not null)
         {
             var key = _weeklyReports.WeeklySummary.RunId;
+            _reportsWeek = IsoWeek.From(_weeklyReports.WeeklySummary.PeriodIsoWeek);
+
             var stored = await _contexts.GetAsync(key, ct).ConfigureAwait(false);
 
             _logger.Debug(
-                "Step 3 lookup — isin={0}, week {1}, weekly summary run {2}: {3}",
-                signal.Isin.Value, _isoWeek, key, stored is null ? "miss" : "hit");
+                "Step 3 lookup — isin={0}, expected week {1}, reports week {2}, weekly summary run {3}: {4}",
+                signal.Isin.Value, _isoWeek, _reportsWeek, key, stored is null ? "miss" : "hit");
 
-            return stored;
+            if (stored is not null)
+            {
+                LogIfEarlierWeek(signal, stored);
+                return stored;
+            }
+
+            // Reports older than the fund's week, but a context newer than them is stored —
+            // computed from a later export that has since been replaced. The newer one wins:
+            // recomputing from older reports would step the week's analysis backwards.
+            if (_reportsWeek.Value != _isoWeek.Value)
+            {
+                var newest = await _contexts.GetNewestAsync(_isoWeek, ct).ConfigureAwait(false);
+
+                if (newest is not null && string.CompareOrdinal(newest.IsoWeek, _reportsWeek.Value) > 0)
+                {
+                    LogIfEarlierWeek(signal, newest);
+                    return newest;
+                }
+
+                _logger.Info(
+                    "Step 3 fallback — isin={0}, no reports for {1}; computing from the reports of {2}",
+                    signal.Isin.Value, _isoWeek, _reportsWeek);
+            }
+
+            return null;
         }
 
-        // No reports for the week yet: the newest context of the week or earlier keeps the
+        // No reports up to the week: the newest context of the week or earlier keeps the
         // chain moving. A stored context for this very week can still be found here — the
         // reports being unreachable does not make the context computed from them wrong.
         var fallback = await _contexts.GetNewestAsync(_isoWeek, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException(
-                $"No analytics reports for {_isoWeek} and no earlier macro context stored.");
+                $"No analytics reports for {_isoWeek} or earlier, and no macro context stored.");
 
-        // Logged, not recorded: the fund record has no field for it, and the context
-        // carries its own week and run ids.
-        if (fallback.IsoWeek != _isoWeek.Value)
-        {
-            _logger.Info(
-                "Step 3 fallback — isin={0}, no reports for {1}; using the context of {2}",
-                signal.Isin.Value, _isoWeek, fallback.IsoWeek);
-        }
+        LogIfEarlierWeek(signal, fallback);
 
         return fallback;
+    }
+
+    /// <summary>
+    /// Logged, not recorded: the fund record has no field for the week its context is from,
+    /// and the context carries its own week and run ids.
+    /// </summary>
+    private void LogIfEarlierWeek(Step02DoneSignal signal, MacroContext context)
+    {
+        if (context.IsoWeek == _isoWeek.Value)
+            return;
+
+        _logger.Info(
+            "Step 3 fallback — isin={0}, expected week {1}; using the stored context of {2} (weekly summary run {3})",
+            signal.Isin.Value, _isoWeek, context.IsoWeek, context.SourceRunIds.WeeklySummaryRunId);
     }
 
     /// <summary>
@@ -568,7 +609,7 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
                 _weeklyReports.SubstitutionChain,
                 _weeklyReports.RotationTargets,
                 _universe!,
-                _isoWeek,
+                _reportsWeek,
                 _prompts!,
                 ct)
             .ConfigureAwait(false);
@@ -584,8 +625,8 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
 
     /// <summary>
     /// Wraps every fund's metadata as the <see cref="DataLoaderOutput"/> the agent reads its
-    /// categories from, stamped with the fund's week — the agent checks it against the
-    /// reports' week.
+    /// categories from, stamped with the reports' week — the agent checks the two match, and
+    /// a context is only ever computed for the week its reports are from.
     /// </summary>
     private DataLoaderOutput WrapAsUniverse(IReadOnlyList<FundMetadata> funds, PipelineRunId runId) =>
         WrapAsOutput(
@@ -595,14 +636,15 @@ public sealed class Step03MacroAnalystHandler : IStep03MacroAnalyst
                 Metadata = m,
                 NavBuckets = Array.Empty<NavBucket>(),
             }).ToList(),
+            _reportsWeek,
             runId);
 
-    private DataLoaderOutput WrapAsOutput(FundRecord fund, PipelineRunId runId) => WrapAsOutput([fund], runId);
+    private DataLoaderOutput WrapAsOutput(FundRecord fund, PipelineRunId runId) => WrapAsOutput([fund], _isoWeek, runId);
 
-    private DataLoaderOutput WrapAsOutput(IReadOnlyList<FundRecord> funds, PipelineRunId runId) => new()
+    private DataLoaderOutput WrapAsOutput(IReadOnlyList<FundRecord> funds, IsoWeek week, PipelineRunId runId) => new()
     {
         GeneratedAt = DateTimeOffset.UtcNow.ToString("o"),
-        IsoWeek = _isoWeek.Value,
+        IsoWeek = week.Value,
         Family = _family.Value,
         RunId = runId,
         ConfigVersion = "1.0.0",
