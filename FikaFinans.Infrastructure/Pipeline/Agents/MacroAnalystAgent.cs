@@ -11,6 +11,8 @@ using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOption
 
 using FikaFinans.Domain.Pipeline;
 
+using NLog;
+
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
 /// <summary>
@@ -23,10 +25,12 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
 {
     private const string ConfigVersion = "1.0.0";
 
+    private readonly ILogger _logger;
     private readonly IPathsService _paths;
     private readonly IMacroLlmClient _llm;
     private readonly IStep03MacroAnalystPromptsProvider _prompts;
 
+    /// <param name="logger">The LLM call, its retry, and what was kept or dropped.</param>
     /// <param name="paths">
     /// Resolves the input and output files for <see cref="RunAsync"/> only.
     /// </param>
@@ -36,13 +40,16 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
     /// <see cref="RunInMemoryAsync"/> takes them as a parameter.
     /// </param>
     public MacroAnalystAgent(
+        ILogger logger,
         IPathsService paths,
         IMacroLlmClient llm,
         IStep03MacroAnalystPromptsProvider prompts)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(llm);
         ArgumentNullException.ThrowIfNull(prompts);
+        _logger = logger;
         _paths = paths;
         _llm = llm;
         _prompts = prompts;
@@ -105,9 +112,17 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         var systemPrompt = prompts.SystemPrompt;
         var userPrompt = BuildUserPrompt(prompts.UserPromptTemplate, summary, chain, targets, categoryUniverse);
 
+        _logger.Debug("MacroAnalyst compute — week {0}, weekly summary run {1}, {2} categories",
+            isoWeek, summary.RunId, categoryUniverse.Count);
+
         var raw = await CallWithRetryAsync(systemPrompt, userPrompt, prompts.RetryPromptTemplate, ct);
 
         var ctx = BuildContext(raw, summary, chain, targets, categoryUniverse, isoWeek.Value, warnings);
+        _logger.Debug("MacroAnalyst computed — week {0}, regime {1} ({2}), {3} catalyst(s), {4} theme(s), {5} warning(s)",
+            isoWeek, ctx.MacroRegime, ctx.RegimeConfidence, ctx.Catalysts.Count, ctx.RotationThemes.Count,
+            warnings.Count);
+        foreach (var warning in warnings)
+            _logger.Debug("MacroAnalyst warning — {0}", warning);
         return ctx;
     }
 
@@ -199,6 +214,8 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
         var firstRaw = await _llm.CompleteAsync(systemPrompt, userPrompt, ct);
         if (TryParse(firstRaw, out var firstParsed, out var firstError))
             return firstParsed!;
+
+        _logger.Warn("MacroAnalyst response invalid, retrying once — {0}", firstError);
 
         var retryPrompt = userPrompt
             + "\n\n---\n\n"

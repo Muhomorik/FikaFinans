@@ -70,11 +70,13 @@ public sealed class MacroAnalystAgentIntegrationTests
 
         var dl = MakeSyntheticDataLoaderOutput(summary.PeriodIsoWeek);
 
-        var llm = new FoundryMacroLlmClient(_projectClient, _modelId);
+        var llm = new FoundryMacroLlmClient(
+            LogManager.GetLogger(nameof(FoundryMacroLlmClient)), _projectClient, _modelId);
         var promptsProvider = new FileBackedStep03MacroAnalystPromptsProvider(
             LogManager.GetLogger(nameof(FileBackedStep03MacroAnalystPromptsProvider)), new TestPathsService());
         var prompts = await promptsProvider.GetPromptsAsync();
-        var sut = new MacroAnalystAgent(new TestPathsService(), llm, promptsProvider);
+        var sut = new MacroAnalystAgent(
+            LogManager.GetLogger(nameof(MacroAnalystAgent)), new TestPathsService(), llm, promptsProvider);
 
         var ctx = await sut.RunInMemoryAsync(
             summary, chain, targets, dl, IsoWeek.From(summary.PeriodIsoWeek), prompts);

@@ -335,6 +335,7 @@ public sealed class InfrastructureModule : Autofac.Module
         // All take AIProjectClient (already registered) + the default model ID from settings.
         builder.Register(ctx =>
             new FoundryMacroLlmClient(
+                LogManager.GetLogger(nameof(FoundryMacroLlmClient)),
                 ctx.Resolve<AIProjectClient>(),
                 ResolveDefaultModelId(ctx)))
             .As<IMacroLlmClient>()
@@ -374,6 +375,7 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.RegisterType<MetricsCalculatorAgent>().As<IMetricsCalculatorAgent>().SingleInstance();
 
         builder.Register(ctx => new MacroAnalystAgent(
+                logger: LogManager.GetLogger(nameof(MacroAnalystAgent)),
                 paths: ctx.Resolve<IPathsService>(),
                 llm: ctx.Resolve<IMacroLlmClient>(),
                 prompts: ctx.Resolve<IStep03MacroAnalystPromptsProvider>()))

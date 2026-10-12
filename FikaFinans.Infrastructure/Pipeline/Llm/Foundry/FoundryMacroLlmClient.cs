@@ -5,6 +5,8 @@ using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using OpenAI.Responses;
 
+using NLog;
+
 namespace FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 
 // Minimal Foundry-backed LLM client for MacroAnalyst. Mirrors the ephemeral-agent
@@ -15,13 +17,16 @@ public sealed class FoundryMacroLlmClient : IMacroLlmClient
 {
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(3);
 
+    private readonly ILogger _logger;
     private readonly AIProjectClient _projectClient;
     private readonly string _modelId;
 
-    public FoundryMacroLlmClient(AIProjectClient projectClient, string modelId)
+    public FoundryMacroLlmClient(ILogger logger, AIProjectClient projectClient, string modelId)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(projectClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        _logger = logger;
         _projectClient = projectClient;
         _modelId = modelId;
     }
@@ -31,7 +36,11 @@ public sealed class FoundryMacroLlmClient : IMacroLlmClient
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(RunTimeout);
 
+        _logger.Debug("Macro LLM call — model {0}, system {1} chars, user {2} chars, timeout {3}",
+            _modelId, systemPrompt.Length, userPrompt.Length, RunTimeout);
+
         var (agentName, agentVersion) = await CreateAgentAsync(systemPrompt, timeoutCts.Token);
+        _logger.Trace("Macro LLM agent created — {0} v{1}", agentName, agentVersion);
         try
         {
             var responseClient = _projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgent(agentName);
@@ -41,7 +50,19 @@ public sealed class FoundryMacroLlmClient : IMacroLlmClient
                 throw new InvalidOperationException(
                     $"MacroAnalyst response ended with status {response.Status} for model {_modelId}");
 
-            return response.GetOutputText();
+            var text = response.GetOutputText();
+            _logger.Debug("Macro LLM response — {0}, {1} chars", agentName, text.Length);
+            return text;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.Warn("Macro LLM call timed out — {0}, after {1}", agentName, RunTimeout);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Warn(ex, "Macro LLM call failed — {0}", agentName);
+            throw;
         }
         finally
         {
@@ -72,12 +93,14 @@ public sealed class FoundryMacroLlmClient : IMacroLlmClient
         try
         {
             await _projectClient.AgentAdministrationClient.DeleteAgentVersionAsync(agentName, agentVersion);
+            _logger.Trace("Macro LLM agent deleted — {0} v{1}", agentName, agentVersion);
         }
         catch (RequestFailedException ex) when (ex.Status == 404) { }
         catch (ClientResultException ex) when (ex.Status == 404) { }
-        catch
+        catch (Exception ex)
         {
             // Best-effort cleanup; the test base or operator can sweep stragglers later.
+            _logger.Warn(ex, "Macro LLM agent not deleted — {0} v{1}, left for a sweep", agentName, agentVersion);
         }
     }
 }
