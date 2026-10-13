@@ -53,6 +53,10 @@ public sealed class SignalScorerAgent : ISignalScorerAgent
         };
     }
 
+    /// <summary>
+    /// Scores every fund of a whole step-2 output, carrying its envelope through unchanged.
+    /// </summary>
+    /// <remarks>Not on the interface — kept for <see cref="Run"/> and its tests.</remarks>
     public DataLoaderOutput RunInMemory(DataLoaderOutput input, SignalScorerConfig config)
     {
         var enrichedFunds = input.Funds.Select(f => ProcessFund(f, config)).ToList();
@@ -68,6 +72,29 @@ public sealed class SignalScorerAgent : ISignalScorerAgent
             FrozenPositions = input.FrozenPositions,
             CashAvailableKr = input.CashAvailableKr,
             DataQuality     = input.DataQuality,
+        };
+    }
+
+    /// <inheritdoc />
+    public DataLoaderOutput RunInMemory(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        SignalScorerConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(config);
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = funds.Select(f => ProcessFund(f, config)).ToList(),
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality(),
         };
     }
 
