@@ -17,7 +17,7 @@
 
 # Pipeline Redesign
 
-**This folder started as a design.** Steps 1, 2 and 3 are now implemented
+**This folder started as a design.** Steps 1 to 4 are now implemented
 for the local (WPF) host — each page's status line says how far; every
 other page is still design only, and no page is a record of current
 behaviour beyond what its status says.
@@ -68,7 +68,7 @@ already settled; it may not settle one on its own.
 | 1 | DataLoader | [01-dataloader.md](./01-dataloader.md) |
 | 2 | MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
 | 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — implemented locally; a per-fund hop doing per-week work |
-| 4 | SignalScorer | [04-signalscorer.md](./04-signalscorer.md) — design; a code-only hop, step 2's pattern |
+| 4 | SignalScorer | [04-signalscorer.md](./04-signalscorer.md) — implemented locally; a code-only hop, step 2's pattern |
 | 5 | MacroAligner | not written |
 | 6 | CatalystTagger | not written |
 | 7 | ThesisValidator | not written |
