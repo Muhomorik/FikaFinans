@@ -256,12 +256,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .OfType<Step02DoneSignal>()
             .Subscribe(done => RunStep03Async(step03Entry, done));
         _disposables.Add(step03Sub);
+
+        // Step 3's done-signal: the local stand-in for step 4's queue trigger.
+        var step04Entry = _scope.Resolve<IStep04SignalScorerEntry>();
+        var step04Sub = pipelineSignals.Signals
+            .OfType<Step03DoneSignal>()
+            .Subscribe(done => RunStep04Async(step04Entry, done));
+        _disposables.Add(step04Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 and 3
-    /// follow through <see cref="RunStep02Async"/> and <see cref="RunStep03Async"/>; steps
-    /// 4-10 still run through <see cref="IPipelineRunner"/> from the Run All button.
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 4
+    /// follow through <see cref="RunStep02Async"/>, <see cref="RunStep03Async"/> and
+    /// <see cref="RunStep04Async"/>; steps 5-10 still run through <see cref="IPipelineRunner"/>
+    /// from the Run All button.
     /// </summary>
     /// <remarks>
     /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
@@ -332,6 +340,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 3 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-3 done-signal to step 4's entry point, off the Rx callback — the bus
+    /// publishes inside step 3's emit, so running step 4 inline would hold step 3 up.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
+    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
+    /// </remarks>
+    private void RunStep04Async(IStep04SignalScorerEntry step04Entry, Step03DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step04Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 4 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 4 failed for {Isin}", signal.Isin.Value);
             }
         });
 

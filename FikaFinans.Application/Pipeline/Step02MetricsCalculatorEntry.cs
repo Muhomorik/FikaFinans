@@ -54,8 +54,8 @@ public sealed class Step02MetricsCalculatorEntry : IStep02MetricsCalculatorEntry
                 await step02.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
                 // Write, then emit. The reverse order can announce output that was never
-                // stored. No complete: step 3 consumes the done-signal and is the chain
-                // tail, so the run — and the fund's row — stays in flight for it.
+                // stored. No complete: step 3 consumes the done-signal and a later step is
+                // the chain tail, so the run — and the fund's row — stays in flight for it.
                 await step02.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step02.EmitDoneAsync(signal, ct).ConfigureAwait(false);
             }

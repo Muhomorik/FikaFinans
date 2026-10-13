@@ -58,7 +58,7 @@ public sealed class Step02MetricsCalculatorEntryTests
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert — no complete: step 3 is the chain tail, so the run stays in flight for it.
+        // Assert — no complete: a later step is the chain tail, so the run stays in flight for it.
         Assert.Multiple(() =>
         {
             Assert.That(calls, Is.EqualTo(new[]

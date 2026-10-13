@@ -395,31 +395,7 @@ public sealed class Step03MacroAnalystHandlerTests
             e.Step == StepId.MacroAnalyst && e.Kind == StepEventKind.Succeeded)), Times.Once);
     }
 
-    // ── CompleteAsync / FailAsync ─────────────────────────────────────
-
-    [Test]
-    public async Task CompleteAsync_AfterStart_CompletesStep03()
-    {
-        // Arrange
-        var sut = CreateSut();
-        await sut.BeginProcessingAsync(Signal);
-
-        // Act
-        await sut.CompleteAsync(Signal);
-
-        // Assert
-        _progress.Verify(x => x.CompleteStep03Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public void CompleteAsync_NotStarted_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var sut = CreateSut();
-
-        // Act & Assert
-        Assert.ThrowsAsync<InvalidOperationException>(() => sut.CompleteAsync(Signal));
-    }
+    // ── FailAsync ─────────────────────────────────────────────────────
 
     [Test]
     public async Task FailAsync_AfterStart_FailsStep03WithErrorMessage()
