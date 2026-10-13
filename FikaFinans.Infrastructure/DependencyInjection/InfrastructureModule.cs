@@ -445,6 +445,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep01Services(builder);
         RegisterStep02Services(builder);
         RegisterStep03Services(builder);
+        RegisterStep04Services(builder);
     }
 
     /// <summary>
@@ -539,6 +540,20 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step03MacroAnalystEntry)),
                 ctx.Resolve<Func<IStep03MacroAnalyst>>()))
             .As<IStep03MacroAnalystEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 4 — only what is step 4's own, as for steps 2 and 3. It shares
+    /// step 1's progress store and buses, registered there.
+    /// </summary>
+    private static void RegisterStep04Services(ContainerBuilder builder)
+    {
+        // The JSON file the tab's config editor writes locally; another source in Azure.
+        builder.Register(ctx => new JsonBackedStep04SignalsConfigProvider(
+                LogManager.GetLogger(nameof(JsonBackedStep04SignalsConfigProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IStep04SignalsConfigProvider>()
             .SingleInstance();
     }
 
