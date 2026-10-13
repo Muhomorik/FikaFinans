@@ -68,7 +68,7 @@ already settled; it may not settle one on its own.
 | 1 | DataLoader | [01-dataloader.md](./01-dataloader.md) |
 | 2 | MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
 | 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — implemented locally; a per-fund hop doing per-week work |
-| 4 | SignalScorer | not written |
+| 4 | SignalScorer | [04-signalscorer.md](./04-signalscorer.md) — design; a code-only hop, step 2's pattern |
 | 5 | MacroAligner | not written |
 | 6 | CatalystTagger | not written |
 | 7 | ThesisValidator | not written |
