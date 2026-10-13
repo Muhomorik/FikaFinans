@@ -415,6 +415,31 @@ public sealed class Step02MetricsCalculatorHandler : IStep02MetricsCalculator
         }
     }
 
+    /// <inheritdoc />
+    public async Task<DataLoaderOutput> ComputeOutputAsync(
+        PipelineRunId runId, IsoWeek isoWeek, CancellationToken ct = default)
+    {
+        _logger.Debug("Step 2 debug compute — runId={0}, week {1}", runId.Value, isoWeek);
+
+        var step01 = await _progress
+            .ReadStepOutputAsync(StepId.DataLoader, runId, ct)
+            .ConfigureAwait(false);
+
+        if (step01 is null || step01.Funds.Count == 0)
+            throw new InvalidOperationException($"Step 1 stored no records for run {runId.Value}.");
+
+        var config = await _configProvider.GetConfigAsync(ct).ConfigureAwait(false);
+
+        var output = _agent.RunInMemory(
+            new Company(_options.CompanyFilter), isoWeek, runId, step01.Funds, config);
+
+        _logger.Info(
+            "Step 2 debug compute done, not stored — runId={0}, week {1}, {2} fund(s)",
+            runId.Value, isoWeek, output.Funds.Count);
+
+        return output;
+    }
+
     /// <summary>
     /// Reports this step's progress for one fund. Elapsed time is measured from the start,
     /// so it spans every phase rather than the one that happened to report.

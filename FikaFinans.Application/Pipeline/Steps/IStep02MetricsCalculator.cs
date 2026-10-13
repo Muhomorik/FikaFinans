@@ -60,4 +60,14 @@ public interface IStep02MetricsCalculator
     /// </summary>
     /// <returns><c>null</c> when that run wrote no output.</returns>
     Task<StepOutput?> ReadOutputAsync(PipelineRunId runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The debug run: computes metrics for the records step 1 stored under
+    /// <paramref name="runId"/>, with the config a real run loads, and returns them. Neither
+    /// starts the run nor writes the store — a debug run must not take the fund's lock, and
+    /// a replaced output would change what step 3 reads.
+    /// </summary>
+    /// <returns>The enriched records, stamped with <paramref name="isoWeek"/>.</returns>
+    /// <exception cref="InvalidOperationException">Step 1 stored no records for the run.</exception>
+    Task<DataLoaderOutput> ComputeOutputAsync(PipelineRunId runId, IsoWeek isoWeek, CancellationToken ct = default);
 }

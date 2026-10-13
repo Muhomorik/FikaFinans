@@ -435,6 +435,66 @@ public sealed class Step02MetricsCalculatorHandlerTests
         });
     }
 
+    // ── ComputeOutputAsync ────────────────────────────────────────────
+
+    private static readonly IsoWeek Week = IsoWeek.From("2026-W23");
+
+    [Test]
+    public async Task ComputeOutputAsync_Step01Stored_RunsAgentOnStep01RecordsAndConfig()
+    {
+        // Arrange
+        var sut = CreateSut();
+
+        // Act
+        var output = await sut.ComputeOutputAsync(Signal.RunId, Week);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(output, Is.SameAs(_agentOutput));
+            _agent.Verify(x => x.RunInMemory(
+                new Company("TestCo"), Week, Signal.RunId,
+                It.Is<IReadOnlyList<FundRecord>>(f => f.Count == 1 && f[0] == _step01Record),
+                _metricsConfig), Times.Once);
+        });
+    }
+
+    [Test]
+    public void ComputeOutputAsync_NoStep01Output_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _progress
+            .Setup(x => x.ReadStepOutputAsync(StepId.DataLoader, Signal.RunId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((StepOutput?)null);
+        var sut = CreateSut();
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.ComputeOutputAsync(Signal.RunId, Week));
+    }
+
+    [Test]
+    public async Task ComputeOutputAsync_Always_NeitherStartsNorStoresNorReports()
+    {
+        // Arrange — a debug run must not take the fund's lock or replace what step 3 reads.
+        var sut = CreateSut();
+
+        // Act
+        await sut.ComputeOutputAsync(Signal.RunId, Week);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            _progress.Verify(x => x.StartStep02Async(
+                It.IsAny<Isin>(), It.IsAny<PipelineRunId>(), It.IsAny<CancellationToken>()), Times.Never);
+            _progress.Verify(x => x.SaveStepOutputAsync(
+                It.IsAny<Isin>(), It.IsAny<StepId>(), It.IsAny<PipelineRunId>(),
+                It.IsAny<DataLoaderOutput>(), It.IsAny<CancellationToken>()), Times.Never);
+            _signals.Verify(x => x.PublishAsync(
+                It.IsAny<Step02DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+            _stepEvents.Verify(x => x.Publish(It.IsAny<StepEvent>()), Times.Never);
+        });
+    }
+
     private static IsinProgressEntity Row(string isin) => new() { Isin = isin };
 
     private static DataLoaderOutput MakeOutput(params FundRecord[] funds) => new()

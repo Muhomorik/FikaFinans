@@ -1,37 +1,35 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
-using FikaFinans.Application.Paths;
+using System.Text.Json;
 using FikaFinans.Application.Pipeline;
-using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Pipeline;
-using FikaFinans.Wpf.Services;
+using FikaFinans.Infrastructure.Pipeline.Json;
+
+using JetBrains.Annotations;
+
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
 
 public sealed class Step2MetricsCalculatorViewModel : StepViewModel
 {
-    private readonly IPathsService? _paths;
-    private readonly IMetricsCalculatorAgent? _agent;
-    private readonly IStep02MetricsCalculator? _step02;
+    private readonly IStep02MetricsCalculator _step02;
 
     public override int StepNumber => 2;
     public override string AgentName => "Metrics calculator";
-    public override bool HasConfig => true;
+    public override bool HasConfig => false;
 
-    public Step2MetricsCalculatorViewModel() { }
+    [UsedImplicitly]
+    public Step2MetricsCalculatorViewModel() => _step02 = null!;   // designer only
 
+    [UsedImplicitly]
     public Step2MetricsCalculatorViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IMetricsCalculatorAgent agent, IConfigEditorDialogService configEditor,
-        IStep02MetricsCalculator step02, IStepEventSource stepEvents,
-        IPipelineSignalStreams pipelineSignals)
+        IStep02MetricsCalculator step02,
+        IStepEventSource stepEvents, IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
-        _paths = paths;
-        _agent = agent;
-        _configEditorService = configEditor;
         _step02 = step02;
 
         // The tab follows the step rather than running it: whoever drove the handler —
@@ -59,23 +57,26 @@ public sealed class Step2MetricsCalculatorViewModel : StepViewModel
             .Subscribe());
     }
 
-    protected override string? GetConfigPath() => _paths?.Config02MetricsJson;
-
+    /// <summary>
+    /// The debug button: computes metrics for the run bar's run through the step, and shows
+    /// them. Never stored — a replaced output would change what step 3 reads.
+    /// </summary>
     protected override async Task RunStepCoreAsync()
     {
-        if (_agent is null || _paths is null)
-        {
-            OutputSummaryText = "Configure data folder in Settings → Folders";
+        // Null only under the designer's parameterless constructor.
+        if (_step02 is null)
             return;
-        }
         if (string.IsNullOrEmpty(IsoWeek))
         {
             OutputSummaryText = "Select a week in the run bar first";
             return;
         }
 
-        await Task.Run(() => _agent.Run(IsoWeek, RunId));
-        await LoadOutputAsync();
+        var output = await _step02.ComputeOutputAsync(RunId, Domain.Pipeline.IsoWeek.From(IsoWeek));
+
+        // The funds only, the same shape a stored output reads back as.
+        OutputJson = JsonSerializer.Serialize(output.Funds, JsonOptions.Default);
+        OutputSummaryText = $"Debug run, not stored — {output.Funds.Count} funds — metrics calculated";
     }
 
     /// <summary>
