@@ -5,8 +5,8 @@
   (per-fund hop, linear chain), so the trigger and the input column are
   not new choices. Decided: the agent gains a domain-input RunInMemory,
   as step 2's; an empty sell-trigger list falls back to the defaults.
-  Choices still marked "Proposed" copy steps 2 and 3 and await review;
-  the open questions are at the end.
+  The debug button and the config provider copy steps 2 and 3. The open
+  questions left are at the end.
 -->
 
 # Step 4 — SignalScorer
@@ -213,7 +213,7 @@ mark, never a clear.
 
 ### Manual trigger — WPF only
 
-**Proposed: the debug button goes through the handler, as steps 2 and 3's
+**Decided (2026-10-13): the debug button goes through the handler, as steps 2 and 3's
 now do.** Today it calls `ISignalScorerAgent.Run`, which reads step 2's
 `02-metrics-{iso_week}-{run_id}.json` and writes
 `04-signal-{iso_week}-{run_id}.json`. After a signal-driven run there is
@@ -247,10 +247,10 @@ The macro context is **not** an input. The rules read metrics only;
 
 ### Config through a seam
 
-**Proposed: the step reads its config through `IStep04SignalsConfigProvider`,
+**Decided (2026-10-13): the step reads its config through `IStep04SignalsConfigProvider`,
 never a file** — step 2's pattern, which step 2's page already said steps
-4, 9 and 10 inherit. The tab's config editor keeps writing the same file,
-so locally nothing visible changes.
+4, 9 and 10 inherit. The file is edited by hand — the tab has no config
+editor, as step 3's has none — and the provider rereads it for every fund.
 
 ```mermaid
 flowchart LR
@@ -426,7 +426,7 @@ the orphaned-run exception.
 | Listens to `Step04DoneSignal` | to learn the run id, then reads that run's output |
 | Reads | through the step 4 handler's `ReadOutputAsync`, never the store directly |
 | Runs | nothing on a signal — only the debug button, through the handler |
-| Config editor | kept — `HasConfig` stays true, it edits the file the provider reads |
+| Config editor | **removed** — `HasConfig` is false, as on step 3's tab, so the tab needs no `IPathsService`; `config-04-signals.json` is edited by hand |
 
 `Step4SignalScorerViewModel` today holds the agent, `IPathsService` and
 `IIsinProgressRepository`, and reads through `IsinProgressOutputLoader`
@@ -448,7 +448,7 @@ steps 2 and 3. Rows 1–4 do not depend on the open questions.
 | 5 | ✅ `IStep04SignalScorer` + `Step04SignalScorerHandler`, step 2's shape. Not wired. Load reads `Step03Json`; the agent phase calls row 4's `RunInMemory`; `CompleteAsync` copied from step 3's for when step 4 is the tail; `ReadOutputAsync` and `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1–4 |
 | 6 | ✅ `IStep04SignalScorerEntry` + `Step04SignalScorerEntry`; registration as steps 2 and 3's — handler per dependency, entry point single instance. The entry point already completes last; nothing calls it until row 7 | Application, `InfrastructureModule` | row 5 |
 | 7 | ✅ Subscription `Step03DoneSignal` → entry point; step 4 takes completion — `CompleteStep03Async` removed, with step 3's `CompleteAsync`; the store's complete tests move to step 4. Step 3 keeps its done-signal and its `Succeeded` step event — only the row release moves | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 6 |
-| 8 | ✅ Step 4's tab goes passive — listens, reads through the handler, debug button through `ComputeOutputAsync`, config editor kept; recovers orphaned runs on first open. The agent, `IIsinProgressRepository`, `IsinProgressOutputLoader` and the disk fallback leave the tab | `Step4SignalScorerViewModel`, no XAML | row 7 |
+| 8 | ✅ Step 4's tab goes passive — listens, reads through the handler, debug button through `ComputeOutputAsync`; recovers orphaned runs on first open. Shaped like step 3's tab: the agent, `IPathsService`, the config editor, `IIsinProgressRepository`, `IsinProgressOutputLoader` and the disk fallback leave the tab | `Step4SignalScorerViewModel`, no XAML | row 7 |
 
 Row 7 is cheap to switch on: no LLM behind it, so a signal costs
 milliseconds, not money.

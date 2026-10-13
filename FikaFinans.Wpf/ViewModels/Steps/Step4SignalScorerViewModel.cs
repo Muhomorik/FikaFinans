@@ -1,13 +1,11 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text.Json;
-using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
-using FikaFinans.Wpf.Services;
 
 using JetBrains.Annotations;
 
@@ -15,27 +13,28 @@ using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
 
+/// <summary>
+/// The step 4 tab: shows the run's scored fund, following the step's events rather than
+/// driving them, with a debug button that scores the run again without storing it.
+/// </summary>
 public sealed class Step4SignalScorerViewModel : StepViewModel
 {
     private readonly IStep04SignalScorer _step04;
-    private readonly IPathsService? _paths;
 
     public override int StepNumber => 4;
     public override string AgentName => "Signal scorer";
-    public override bool HasConfig => true;
+    public override bool HasConfig => false;
 
     [UsedImplicitly]
     public Step4SignalScorerViewModel() => _step04 = null!;   // designer only
 
     [UsedImplicitly]
     public Step4SignalScorerViewModel(ILogger logger, IScheduler uiScheduler,
-        IStep04SignalScorer step04, IPathsService paths, IConfigEditorDialogService configEditor,
+        IStep04SignalScorer step04,
         IStepEventSource stepEvents, IPipelineSignalStreams pipelineSignals)
         : base(logger, uiScheduler)
     {
         _step04 = step04;
-        _paths = paths;
-        _configEditorService = configEditor;
 
         // The tab follows the step rather than running it: whoever drove the handler —
         // step 3's done-signal locally, a queue trigger in Azure — reports through this stream.
@@ -63,19 +62,12 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
     }
 
     /// <summary>
-    /// The file the config editor opens — the same one the step's config provider reads.
-    /// </summary>
-    protected override string? GetConfigPath() => _paths?.Config04SignalsJson;
-
-    /// <summary>
     /// The debug button: scores the run bar's run through the step, and shows the result.
     /// Never stored — a replaced output would change what step 5 reads.
     /// </summary>
     protected override async Task RunStepCoreAsync()
     {
         // Null only under the designer's parameterless constructor.
-        if (_step04 is null)
-            return;
         if (string.IsNullOrEmpty(IsoWeek))
         {
             OutputSummaryText = "Select a week in the run bar first";
@@ -94,8 +86,6 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
     /// </summary>
     protected override async Task OnFirstOpenedAsync()
     {
-        if (_step04 is null) return;
-
         var failed = await _step04.FailOrphanedRunsAsync(SessionStartedAt);
 
         if (failed > 0)
@@ -106,8 +96,6 @@ public sealed class Step4SignalScorerViewModel : StepViewModel
 
     private async Task LoadOutputAsync(PipelineRunId runId)
     {
-        if (_step04 is null) return;
-
         var output = await _step04.ReadOutputAsync(runId);
 
         if (output is null)
