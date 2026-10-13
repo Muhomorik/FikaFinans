@@ -1,6 +1,6 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: in progress, 2026-10-13 — rows 1–2 of the implementation order built. Follows step 3's decision B
+  STATUS: in progress, 2026-10-13 — rows 1–3 of the implementation order built. Follows step 3's decision B
   (per-fund hop, linear chain), so the trigger and the input column are
   not new choices. Decided: the agent gains a domain-input RunInMemory,
   as step 2's; an empty sell-trigger list falls back to the defaults.
@@ -442,7 +442,7 @@ steps 2 and 3. Rows 1–4 do not depend on the open questions.
 | --- | --- | --- | --- |
 | 1 | ✅ `Step04DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 2 | ✅ `IStep04SignalsConfigProvider` in Application, `JsonBackedStep04SignalsConfigProvider` in Infrastructure — read fresh on every call; missing file and empty or null sell list fall back to defaults, warned; malformed or `null` JSON throws. Run All's `LoadSignalConfig` and the agent's `Run` left alone | Application, Infrastructure, `InfrastructureModule` | — |
-| 3 | `StartStep04Async`, `CompleteStep04Async`, `FailStep04Async`, `ListOrphanedStep04Async` — `Step04Json` uses the existing save | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
+| 3 | ✅ `StartStep04Async`, `CompleteStep04Async`, `FailStep04Async`, `ListOrphanedStep04Async` — `Step04Json` uses the existing save. Two complete tests for now; the rest move from step 3 in row 7 | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 4 | Domain-input `RunInMemory` onto `ISignalScorerAgent` — company, week, run id, fund records, config; `ProcessFund` per record, wrapped. No rule change. Tests in a **new file** beside `SignalScorerAgentTests` | `ISignalScorerAgent`, `SignalScorerAgent`, a new test file in `Agents/04-signalscorer/` | — |
 | 5 | `IStep04SignalScorer` + handler, step 2's shape. Not wired. Load reads `Step03Json`; the agent phase calls row 4's `RunInMemory`; `ReadOutputAsync` and `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1–4 |
 | 6 | `IStep04SignalScorerEntry` + entry point; registration as steps 2 and 3's — handler per dependency, entry point single instance | Application, `InfrastructureModule` | row 5 |
