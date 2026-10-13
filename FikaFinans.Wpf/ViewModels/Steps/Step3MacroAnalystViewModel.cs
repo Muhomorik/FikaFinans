@@ -13,6 +13,10 @@ using NLog;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
 
+/// <summary>
+/// The step 3 tab: shows the weekly macro context, following the step's events rather
+/// than driving them, with a debug button that computes a fresh, unstored context.
+/// </summary>
 public sealed class Step3MacroAnalystViewModel : StepViewModel
 {
     private readonly IStep03MacroAnalyst _step03;
@@ -65,8 +69,6 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
     protected override async Task RunStepCoreAsync()
     {
         // Null only under the designer's parameterless constructor.
-        if (_step03 is null)
-            return;
         if (string.IsNullOrEmpty(IsoWeek))
         {
             OutputSummaryText = "Select a week in the run bar first";
@@ -82,8 +84,6 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
     /// </summary>
     protected override async Task OnFirstOpenedAsync()
     {
-        if (_step03 is null) return;
-
         var failed = await _step03.FailOrphanedRunsAsync(SessionStartedAt);
 
         if (failed > 0)
@@ -98,8 +98,6 @@ public sealed class Step3MacroAnalystViewModel : StepViewModel
 
     private async Task LoadContextAsync(Domain.Pipeline.IsoWeek week)
     {
-        if (_step03 is null) return;
-
         var context = await _step03.ReadContextAsync(week);
 
         if (context is null)

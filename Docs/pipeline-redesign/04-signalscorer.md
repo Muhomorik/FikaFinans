@@ -2,8 +2,10 @@
   Authoring rules: see README.md in this folder.
   STATUS: design, 2026-10-13 — nothing built. Follows step 3's decision B
   (per-fund hop, linear chain), so the trigger and the input column are
-  not new choices. The choices this page makes are marked "Proposed" and
-  wait for confirmation; the open questions are at the end.
+  not new choices. Decided: the agent gains a domain-input RunInMemory,
+  as step 2's; an empty sell-trigger list falls back to the defaults.
+  Choices still marked "Proposed" copy steps 2 and 3 and await review;
+  the open questions are at the end.
 -->
 
 # Step 4 — SignalScorer
@@ -79,7 +81,7 @@ Every new type carries the step number, as steps 1–3 do. All *(new)*:
 | Done-signal | `Step02DoneSignal` | `Step04DoneSignal` |
 | Config provider | `IStep02MetricsConfigProvider` + `JsonBackedStep02MetricsConfigProvider` | `IStep04SignalsConfigProvider` + `JsonBackedStep04SignalsConfigProvider` — "Signals" after `config-04-signals.json`, as "Metrics" is after `config-02-metrics.json` |
 | What the provider returns | `MetricsCalculatorConfig` | `SignalScorerConfig` — exists |
-| Agent call | `IMetricsCalculatorAgent.RunInMemory` | `ISignalScorerAgent.ProcessFund` — exists; see "Agent work" |
+| Agent call | `IMetricsCalculatorAgent.RunInMemory` | `ISignalScorerAgent.RunInMemory` — domain inputs, onto the interface; see "Agent work" |
 | Cloud function | `Step02MetricsCalculatorFunction` *(sketch)* | `Step04SignalScorerFunction` |
 | Row — start | `StartStep02Async` | `StartStep04Async` |
 | Row — complete | — | `CompleteStep04Async`; `CompleteStep03Async` **removed** when step 4 takes the tail |
@@ -100,7 +102,7 @@ owned by [backend-nav-sync-plan.md](../backend-nav-sync-plan.md).
 | `IIsinProgressStore` | start / fail / orphaned for steps 1–3, complete for step 3 | plus step 4's; step 3 loses its complete | the same class over Tables |
 | `IStepEventPublisher` | `LocalRxStepEventBus` | unchanged | still open — the parent plan's run-lifecycle question |
 | Config provider *(new)* | — none; the agent's `Run` and `StreamingPipelineGateway.LoadSignalConfig` each read the file | JSON-backed — `config-04-signals.json` via `IPathsService` | another source — open, the same question step 2 left |
-| `ISignalScorerAgent` | `Run` (button) and `ProcessFund` (runner) | `ProcessFund`, called by the handler | same |
+| `ISignalScorerAgent` | `Run` (button) and `ProcessFund` (runner) | plus the domain-input `RunInMemory`, called by the handler | same |
 
 No fetch seam, no LLM client, no context store. Step 4 never leaves the
 row and the config.
@@ -115,7 +117,7 @@ then emit" itself:
 | `BeginProcessingAsync` — start step 2 on the row | start step 4 on the row — refused unless it still names the signal's run id | none |
 | `LoadFundAsync` — read `Step01Json` | read `Step03Json` by run id; none → throw | different column |
 | `AssembleAgentInputAsync` — load the config | load the config through the step 4 provider | none |
-| `RunAgentAsync` — `IMetricsCalculatorAgent.RunInMemory` | `ISignalScorerAgent.ProcessFund` | an existing per-fund call — see "Agent work" |
+| `RunAgentAsync` — `IMetricsCalculatorAgent.RunInMemory` | `ISignalScorerAgent.RunInMemory` | same shape — domain inputs in, one-fund output out |
 | `PersistAsync` — `Step02Json` | `Step04Json` — the scored record in a one-fund envelope | same store call |
 | `EmitDoneAsync` — `Step02DoneSignal` | `Step04DoneSignal` | new signal type, new overload |
 | `CompleteAsync` / `FailAsync` | same, step 4's row methods | the tail moves here |
@@ -129,7 +131,7 @@ flowchart TB
   subgraph app["Application — shared by both hosts"]
     door["Step04SignalScorerEntry<br/>one Step03DoneSignal in"]
     h["Step04SignalScorerHandler<br/>start → read Step03Json → config → score → save → emit → complete"]
-    agent["ISignalScorerAgent.ProcessFund<br/>pure, per fund"]
+    agent["ISignalScorerAgent.RunInMemory<br/>in memory, no I/O"]
     door --> h --> agent
   end
   subgraph local["Local — WPF"]
@@ -146,7 +148,7 @@ flowchart TB
 
 | Piece | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| The scoring | `SignalScorerAgent.ProcessFund`, called per fund by `PipelineRunner` | same call, from the handler | same — shared |
+| The scoring | `SignalScorerAgent.ProcessFund`, called per fund by `PipelineRunner` | the same agent's domain-input `RunInMemory`, from the handler — it calls `ProcessFund` per fund | same — shared |
 | The phases | — no handler | `Step04SignalScorerHandler`, Application, beside steps 2 and 3's | same class |
 | Runs the phases in order | — | `Step04SignalScorerEntry` | same class |
 | Signal → entry point | — Run All only | Rx subscription in `MainWindowViewModel` — wiring only | `Step04SignalScorerFunction`, queue trigger — wiring only |
@@ -269,11 +271,19 @@ Not only on where the file is read — on what it means:
 So the same file can score a fund `Weakness` from the button and
 `Neutral` from Run All. The provider is the one place to decide it.
 
-**Proposed: the provider keeps the button's rule** — an empty list falls
-back to the defaults, a missing file falls back to the defaults. An empty
-list silently disabling every exit is the more dangerous reading, and the
-contract's own defaults table lists three triggers. If switching sells off
-is ever wanted, it should be a named setting, not an empty list.
+A corner case, not a live bug: every config that ships — the embedded
+default, the test fixture, `SellTrigger.Defaults` — lists the same three
+triggers, so both loaders agree on all of them. Only a hand-edited empty
+list tells them apart. Neither the contract nor any test defines that
+case; the only test of `LoadSignalConfig` checks the list is not null.
+
+**Decided (2026-10-13): the provider keeps the button's rule** — an empty
+list falls back to the defaults, a missing file falls back to the
+defaults. The contract defines the sell rule as "any one of three
+triggers", so an empty list is outside it, and silently disabling every
+exit is the more dangerous reading. A provider test pins it. If switching
+sells off is ever wanted, it should be a named setting, not an empty
+list.
 
 Whether a **missing file** in cloud falls back or fails is the same open
 question step 2 left for its provider.
@@ -292,25 +302,47 @@ Code, not an LLM. Contract:
 The rules, the rule-fired taxonomy, the NaN-Sharpe handling and the
 `missing_for_upgrade` hint do not change.
 
-**Proposed: no change to the agent.** `ISignalScorerAgent.ProcessFund`
-already is the in-memory call the handler needs:
+**Decided (2026-10-13): a domain-input `RunInMemory` on
+`ISignalScorerAgent`, as step 2 has.** Company, ISO week, run id, the
+fund records and the config in; a `DataLoaderOutput` out, stamped with
+them. No paths, no file I/O.
 
-| What the handler needs | `ProcessFund` |
-| --- | --- |
-| On the interface | yes |
-| Per fund | yes — one `FundRecord` in, one out |
-| No `_paths`, no file | yes — only `Run` uses `IPathsService` |
-| Config as a parameter | yes |
-| Append-only | yes — every earlier field copied, `Signal`, `RuleFired`, `CriteriaEvaluation` added |
+Why the agent builds the output, not the handler — the precedent across
+the existing handlers:
 
-The handler wraps the scored record in a one-fund `DataLoaderOutput` for
-the save, stamped with the company filter, the trading date's week and
-the run id — as step 3's handler already does for its pass-through.
+| Step | What the agent returns | Who builds the output the save takes |
+| --- | --- | --- |
+| 1 | the fund records | the agent — `IDataLoaderAgent.RunInMemory` |
+| 2 | the fund records | the agent — `IMetricsCalculatorAgent.RunInMemory` |
+| 3 | a `MacroContext`, not a fund | the handler — its pass-through record never reaches the agent, so it has no choice |
+| 4 | the fund records | **the agent**, as steps 1 and 2 |
 
-The alternative is step 2's: a domain-input `RunInMemory` on the
-interface that does the wrap inside the agent. It would make step 4's
-handler a closer copy of step 2's, at the cost of an agent change that
-adds no behaviour. Open — see the end.
+Step 3 is the exception, forced by its shape. Step 4 produces the fund
+records itself, so it follows steps 1 and 2 — and its handler stays a
+near-copy of step 2's.
+
+The new call adds no behaviour: it runs `ProcessFund` over each record
+and wraps the results. `ProcessFund` already is pure, per-fund and
+append-only — every earlier field copied, `Signal`, `RuleFired` and
+`CriteriaEvaluation` added — and stays on the interface for
+`PipelineRunner`. The older `RunInMemory` over a whole
+`DataLoaderOutput` stays on the concrete class for `Run` and its tests.
+
+| | Step 2 | Step 4 |
+| --- | --- | --- |
+| In-memory call | `IMetricsCalculatorAgent.RunInMemory` | `ISignalScorerAgent.RunInMemory` — **new on the interface** |
+| Inputs | company, week, run id, fund records, config | same, with `SignalScorerConfig` |
+| Uses `_paths` | no — only `Run` does | no — only `Run` does |
+| Returns | a `DataLoaderOutput` the handler saves as is | same |
+
+The portfolio-wide fields of the output — frozen positions, cash — are
+left empty, as step 2's are: how the envelope rides on the row is still
+open on step 2's page.
+
+Tests for the new call go in a **new file**, beside
+`SignalScorerAgentTests` in
+`FikaFinans.InfrastructureV2.Tests/Agents/04-signalscorer/` — the same
+split step 3 made.
 
 ### One failure mode the contract has and the code does not
 
@@ -404,37 +436,38 @@ changes.
 ## Proposed implementation order
 
 One change per row, each reviewed and committed before the next, as for
-steps 2 and 3. Rows 1–3 do not depend on the open questions.
+steps 2 and 3. Rows 1–4 do not depend on the open questions.
 
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
 | 1 | `Step04DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
-| 2 | `IStep04SignalsConfigProvider` in Application, `JsonBackedStep04SignalsConfigProvider` in Infrastructure — read fresh on every call; missing file and empty sell list both fall back to defaults. Run All's `LoadSignalConfig` and the agent's `Run` left alone | Application, Infrastructure, `InfrastructureModule` | the empty-list policy |
+| 2 | `IStep04SignalsConfigProvider` in Application, `JsonBackedStep04SignalsConfigProvider` in Infrastructure — read fresh on every call; missing file and empty sell list both fall back to defaults. Run All's `LoadSignalConfig` and the agent's `Run` left alone | Application, Infrastructure, `InfrastructureModule` | — |
 | 3 | `StartStep04Async`, `CompleteStep04Async`, `FailStep04Async`, `ListOrphanedStep04Async` — `Step04Json` uses the existing save | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
-| 4 | `IStep04SignalScorer` + handler, step 2's shape. Not wired. Load reads `Step03Json`; the agent phase calls `ProcessFund` and wraps the result; `ReadOutputAsync` and `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1–3; the agent-surface question |
-| 5 | `IStep04SignalScorerEntry` + entry point; registration as steps 2 and 3's — handler per dependency, entry point single instance | Application, `InfrastructureModule` | row 4 |
-| 6 | Subscription `Step03DoneSignal` → entry point; step 4 takes completion — `CompleteStep03Async` removed, with step 3's `CompleteAsync`; the store's complete tests move to step 4 | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 5 |
-| 7 | Step 4's tab goes passive — listens, reads through the handler, debug button through `ComputeOutputAsync`, config editor kept; recovers orphaned runs on first open | `Step4SignalScorerViewModel`, no XAML | row 6 |
+| 4 | Domain-input `RunInMemory` onto `ISignalScorerAgent` — company, week, run id, fund records, config; `ProcessFund` per record, wrapped. No rule change. Tests in a **new file** beside `SignalScorerAgentTests` | `ISignalScorerAgent`, `SignalScorerAgent`, a new test file in `Agents/04-signalscorer/` | — |
+| 5 | `IStep04SignalScorer` + handler, step 2's shape. Not wired. Load reads `Step03Json`; the agent phase calls row 4's `RunInMemory`; `ReadOutputAsync` and `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1–4 |
+| 6 | `IStep04SignalScorerEntry` + entry point; registration as steps 2 and 3's — handler per dependency, entry point single instance | Application, `InfrastructureModule` | row 5 |
+| 7 | Subscription `Step03DoneSignal` → entry point; step 4 takes completion — `CompleteStep03Async` removed, with step 3's `CompleteAsync`; the store's complete tests move to step 4 | `MainWindowViewModel`, both handlers, `IIsinProgressStore` | row 6 |
+| 8 | Step 4's tab goes passive — listens, reads through the handler, debug button through `ComputeOutputAsync`, config editor kept; recovers orphaned runs on first open | `Step4SignalScorerViewModel`, no XAML | row 7 |
 
-Row 6 is cheap to switch on: no LLM behind it, so a signal costs
+Row 7 is cheap to switch on: no LLM behind it, so a signal costs
 milliseconds, not money.
 
-No row touches `SignalScorerAgent`, if the agent-surface proposal holds.
+Row 4 is the only one that touches the agent, and only its surface. If a
+later row turns out to need a change to the scoring rules or the
+contract, it stops and the change is raised here as a question first.
 
 ## Open questions
 
 Raised by this page; they belong in the parent plan's Open Questions,
 not settled here.
 
-- **The agent's surface.** Proposed: none — the handler calls the
-  existing `ProcessFund` and wraps the result, as step 3's handler wraps
-  its pass-through. The alternative is a domain-input `RunInMemory` on
-  `ISignalScorerAgent`, copying step 2, so the envelope is built inside
-  the agent.
-- **An empty sell-trigger list.** Proposed: falls back to the three
-  defaults, in the provider — today's button behaviour, not Run All's.
-  Decides whether Run All keeps its own reading until it moves to the
-  provider, or is fixed in the same change.
+- **The agent's surface.** ✅ **Resolved 2026-10-13** — a domain-input
+  `RunInMemory` on `ISignalScorerAgent`, copying step 2: in both steps
+  whose agent produces the fund records, the agent builds the output.
+  Step 3's handler-side wrap is forced by its shape, not a precedent.
+- **An empty sell-trigger list.** ✅ **Resolved 2026-10-13** — falls
+  back to the three defaults, in the provider. Run All keeps its own
+  reading until it moves to the provider; no shipped config is affected.
 - **The cloud config source** — app settings, a table row or blob, and
   whether a missing config falls back or fails. The same question step 2
   left; one answer should cover steps 2, 4, 9 and 10.
