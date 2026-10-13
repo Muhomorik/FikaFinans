@@ -555,6 +555,27 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPathsService>()))
             .As<IStep04SignalsConfigProvider>()
             .SingleInstance();
+
+        // Deliberately not SingleInstance, same as steps 1–3: it carries one run's state in
+        // fields — record, config, agent output, progress row.
+        builder.Register(ctx => new Step04SignalScorerHandler(
+                logger: LogManager.GetLogger(nameof(Step04SignalScorerHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                configProvider: ctx.Resolve<IStep04SignalsConfigProvider>(),
+                agent: ctx.Resolve<ISignalScorerAgent>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep04SignalScorer>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step04SignalScorerEntry(
+                LogManager.GetLogger(nameof(Step04SignalScorerEntry)),
+                ctx.Resolve<Func<IStep04SignalScorer>>()))
+            .As<IStep04SignalScorerEntry>()
+            .SingleInstance();
     }
 
     /// <summary>
