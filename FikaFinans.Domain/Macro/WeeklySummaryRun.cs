@@ -1,9 +1,11 @@
+using FikaFinans.Domain.KanelBulleKapital;
+
 namespace FikaFinans.Domain.Macro;
 
 public sealed class WeeklySummaryRun
 {
     public required string ReportType { get; init; }
-    public required string RunId { get; init; }
+    public required WeeklySummaryRunId RunId { get; init; }
     public required RunStatus Status { get; init; }
     public required string PeriodIsoWeek { get; init; }
     public required MarketSentiment NetMood { get; init; }

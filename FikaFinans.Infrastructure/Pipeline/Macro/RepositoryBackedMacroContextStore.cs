@@ -3,6 +3,7 @@ using System.Text.Json;
 using FikaFinans.Application.Pipeline.Macro;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
+using FikaFinans.Domain.KanelBulleKapital;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
@@ -34,12 +35,13 @@ public sealed class RepositoryBackedMacroContextStore : IMacroContextStore
     }
 
     /// <inheritdoc />
-    public async Task<MacroContext?> GetAsync(string weeklySummaryRunId, CancellationToken ct = default)
+    public async Task<MacroContext?> GetAsync(WeeklySummaryRunId weeklySummaryRunId, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(weeklySummaryRunId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(weeklySummaryRunId.Value);
 
+        // The row key is the id's string — the storage contract's keys are strings.
         var entity = await _contexts
-            .GetAsync(MacroContextPartition, weeklySummaryRunId, ct)
+            .GetAsync(MacroContextPartition, weeklySummaryRunId.Value, ct)
             .ConfigureAwait(false);
 
         _logger.Trace(
@@ -79,7 +81,7 @@ public sealed class RepositoryBackedMacroContextStore : IMacroContextStore
         var entity = new MacroContextEntity
         {
             PartitionKey = MacroContextPartition,
-            RowKey = context.SourceRunIds.WeeklySummaryRunId,
+            RowKey = context.SourceRunIds.WeeklySummaryRunId.Value,
             IsoWeek = context.IsoWeek,
             GeneratedAt = context.GeneratedAt,
             ContextJson = JsonSerializer.Serialize(context, JsonOptions.Default),

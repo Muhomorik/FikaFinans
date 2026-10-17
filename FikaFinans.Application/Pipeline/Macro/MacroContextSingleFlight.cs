@@ -1,3 +1,4 @@
+using FikaFinans.Domain.KanelBulleKapital;
 using FikaFinans.Domain.Macro;
 
 namespace FikaFinans.Application.Pipeline.Macro;
@@ -21,7 +22,7 @@ namespace FikaFinans.Application.Pipeline.Macro;
 public sealed class MacroContextSingleFlight
 {
     private readonly Lock _gate = new();
-    private readonly Dictionary<string, Task<MacroContext>> _inFlight = new(StringComparer.Ordinal);
+    private readonly Dictionary<WeeklySummaryRunId, Task<MacroContext>> _inFlight = new();
 
     /// <summary>
     /// Runs <paramref name="compute"/> for <paramref name="key"/>, or joins the one already
@@ -33,9 +34,9 @@ public sealed class MacroContextSingleFlight
     /// Stops this caller's wait. The compute itself runs on the first caller's token.
     /// </param>
     public Task<MacroContext> RunAsync(
-        string key, Func<CancellationToken, Task<MacroContext>> compute, CancellationToken ct = default)
+        WeeklySummaryRunId key, Func<CancellationToken, Task<MacroContext>> compute, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key.Value);
         ArgumentNullException.ThrowIfNull(compute);
 
         Task<MacroContext> running;
@@ -53,7 +54,7 @@ public sealed class MacroContextSingleFlight
     }
 
     private async Task<MacroContext> ComputeThenReleaseAsync(
-        string key, Func<CancellationToken, Task<MacroContext>> compute, CancellationToken ct)
+        WeeklySummaryRunId key, Func<CancellationToken, Task<MacroContext>> compute, CancellationToken ct)
     {
         // Yields first, so the entry is always in the dictionary before the release below
         // can run — a compute that finished synchronously would otherwise leave it there.

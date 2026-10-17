@@ -139,7 +139,7 @@ public sealed class FileBackedWeeklyAnalyticsReportsProviderTests
         var reports = await sut.GetLatestAsync(FixtureWeek);
 
         // Assert
-        Assert.That(reports!.WeeklySummary.RunId, Is.EqualTo("replaced-run-id"));
+        Assert.That(reports!.WeeklySummary.RunId.Value, Is.EqualTo("replaced-run-id"));
     }
 
     [Test]

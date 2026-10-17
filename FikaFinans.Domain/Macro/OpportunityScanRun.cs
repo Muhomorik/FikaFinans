@@ -1,12 +1,14 @@
+using FikaFinans.Domain.KanelBulleKapital;
+
 namespace FikaFinans.Domain.Macro;
 
 public sealed class OpportunityScanRun
 {
     public required string ReportType { get; init; }
-    public required string RunId { get; init; }
+    public required OpportunityScanRunId RunId { get; init; }
     public required RunStatus Status { get; init; }
     public required string PeriodIsoWeek { get; init; }
-    public required string SubstitutionChainRunId { get; init; }
+    public required SubstitutionChainRunId SubstitutionChainRunId { get; init; }
     public required IReadOnlyList<RotationTarget> Targets { get; init; }
 }
 

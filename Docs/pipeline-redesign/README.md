@@ -69,7 +69,7 @@ already settled; it may not settle one on its own.
 | 2 | MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
 | 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — implemented locally; a per-fund hop doing per-week work |
 | 4 | SignalScorer | [04-signalscorer.md](./04-signalscorer.md) — implemented locally; a code-only hop, step 2's pattern |
-| 5 | MacroAligner | not written |
+| 5 | MacroAligner | [05-macroaligner.md](./05-macroaligner.md) — design; two inputs, step 4's record and step 3's context |
 | 6 | CatalystTagger | not written |
 | 7 | ThesisValidator | not written |
 | 8 | Recommender | not written |

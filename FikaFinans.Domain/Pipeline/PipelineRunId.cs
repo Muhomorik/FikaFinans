@@ -25,10 +25,10 @@ namespace FikaFinans.Domain.Pipeline;
 /// away when run context leaves the UI.
 /// </para>
 /// <para>
-/// Distinct from the macro run ids (<c>WeeklySummaryRun.RunId</c>,
-/// <c>SubstitutionChainRun.RunId</c>, <c>OpportunityScanRun.RunId</c>), which
-/// remain plain strings — those identify separate upstream analyses, not a
-/// pipeline run.
+/// Distinct from the analytics run ids (<c>WeeklySummaryRunId</c>,
+/// <c>SubstitutionChainRunId</c>, <c>OpportunityScanRunId</c>) — those identify
+/// separate upstream analyses, minted by KanelBulleKapital, not a pipeline run,
+/// and are types of their own so the compiler keeps the four apart.
 /// </para>
 /// </remarks>
 [JsonConverter(typeof(PipelineRunIdJsonConverter))]

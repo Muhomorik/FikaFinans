@@ -79,8 +79,8 @@ public sealed class RepositoryBackedMacroContextStoreTests
         Assert.Multiple(() =>
         {
             Assert.That(result!.IsoWeek, Is.EqualTo("2026-W41"));
-            Assert.That(result.SourceRunIds.SubstitutionChainRunId, Is.EqualTo("run-41-chain"));
-            Assert.That(result.SourceRunIds.RotationTargetsRunId, Is.EqualTo("run-41-targets"));
+            Assert.That(result.SourceRunIds.SubstitutionChainRunId.Value, Is.EqualTo("run-41-chain"));
+            Assert.That(result.SourceRunIds.RotationTargetsRunId.Value, Is.EqualTo("run-41-targets"));
             Assert.That(result.MacroRegime, Is.EqualTo(MacroRegime.Mixed));
         });
     }
@@ -169,7 +169,7 @@ public sealed class RepositoryBackedMacroContextStoreTests
         var result = await sut.GetNewestAsync(IsoWeek.From("2026-W41"));
 
         // Assert
-        Assert.That(result!.SourceRunIds.WeeklySummaryRunId, Is.EqualTo("run-41-corrected"));
+        Assert.That(result!.SourceRunIds.WeeklySummaryRunId.Value, Is.EqualTo("run-41-corrected"));
     }
 
     [Test]

@@ -156,14 +156,14 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
                 $"summary={summary.PeriodIsoWeek}, chain={chain.PeriodIsoWeek}, targets={targets.PeriodIsoWeek}");
         }
 
-        if (!string.Equals(chain.WeeklySummaryRunId, summary.RunId, StringComparison.Ordinal))
+        if (chain.WeeklySummaryRunId != summary.RunId)
         {
             throw new MacroAnalystValidationException(
                 $"FK chain broken: substitution-chain.weeklySummaryRunId={chain.WeeklySummaryRunId} " +
                 $"!= weekly-summary.runId={summary.RunId}");
         }
 
-        if (!string.Equals(targets.SubstitutionChainRunId, chain.RunId, StringComparison.Ordinal))
+        if (targets.SubstitutionChainRunId != chain.RunId)
         {
             throw new MacroAnalystValidationException(
                 $"FK chain broken: rotation-targets.substitutionChainRunId={targets.SubstitutionChainRunId} " +
@@ -199,9 +199,9 @@ public sealed class MacroAnalystAgent : IMacroAnalystAgent
 
         return userPromptTemplate
             .Replace("{iso_week}",                  summary.PeriodIsoWeek)
-            .Replace("{weekly_summary_run_id}",     summary.RunId)
-            .Replace("{substitution_chain_run_id}", chain.RunId)
-            .Replace("{rotation_targets_run_id}",   targets.RunId)
+            .Replace("{weekly_summary_run_id}",     summary.RunId.Value)
+            .Replace("{substitution_chain_run_id}", chain.RunId.Value)
+            .Replace("{rotation_targets_run_id}",   targets.RunId.Value)
             .Replace("{category_list}",             categoryList)
             .Replace("{weekly_summary_json}",       summaryJson)
             .Replace("{substitution_chain_json}",   chainJson)

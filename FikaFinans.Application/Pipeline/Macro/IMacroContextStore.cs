@@ -1,3 +1,4 @@
+using FikaFinans.Domain.KanelBulleKapital;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Pipeline;
 
@@ -19,7 +20,7 @@ public interface IMacroContextStore
     /// Returns the context built from the reports headed by
     /// <paramref name="weeklySummaryRunId"/>, or <c>null</c> when none is stored.
     /// </summary>
-    Task<MacroContext?> GetAsync(string weeklySummaryRunId, CancellationToken ct = default);
+    Task<MacroContext?> GetAsync(WeeklySummaryRunId weeklySummaryRunId, CancellationToken ct = default);
 
     /// <summary>
     /// Returns the newest context stored for <paramref name="notAfter"/> or any earlier
