@@ -86,6 +86,22 @@ public sealed class LocalRxPipelineSignalBusTests
     }
 
     [Test]
+    public async Task PublishAsync_Step05Done_PushesSignalToSubscribers()
+    {
+        // Arrange
+        using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
+        var received = new List<IStepDoneSignal>();
+        using var sub = sut.Signals.Subscribe(received.Add);
+        var signal = new Step05DoneSignal(FundIsin, Date, RunId);
+
+        // Act
+        await sut.PublishAsync(signal);
+
+        // Assert
+        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+    }
+
+    [Test]
     public async Task Signals_FilteredByType_KeepsStepsApart()
     {
         // Arrange — each step listens for its predecessor's signal on the same stream it
@@ -95,16 +111,19 @@ public sealed class LocalRxPipelineSignalBusTests
         var step02 = new List<Step02DoneSignal>();
         var step03 = new List<Step03DoneSignal>();
         var step04 = new List<Step04DoneSignal>();
+        var step05 = new List<Step05DoneSignal>();
         using var sub01 = sut.Signals.OfType<Step01DoneSignal>().Subscribe(step01.Add);
         using var sub02 = sut.Signals.OfType<Step02DoneSignal>().Subscribe(step02.Add);
         using var sub03 = sut.Signals.OfType<Step03DoneSignal>().Subscribe(step03.Add);
         using var sub04 = sut.Signals.OfType<Step04DoneSignal>().Subscribe(step04.Add);
+        using var sub05 = sut.Signals.OfType<Step05DoneSignal>().Subscribe(step05.Add);
 
         // Act
         await sut.PublishAsync(new Step01DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step02DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step03DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step04DoneSignal(FundIsin, Date, RunId));
+        await sut.PublishAsync(new Step05DoneSignal(FundIsin, Date, RunId));
 
         // Assert
         Assert.Multiple(() =>
@@ -113,6 +132,7 @@ public sealed class LocalRxPipelineSignalBusTests
             Assert.That(step02, Has.Count.EqualTo(1));
             Assert.That(step03, Has.Count.EqualTo(1));
             Assert.That(step04, Has.Count.EqualTo(1));
+            Assert.That(step05, Has.Count.EqualTo(1));
         });
     }
 
@@ -144,5 +164,15 @@ public sealed class LocalRxPipelineSignalBusTests
 
         // Act & Assert
         Assert.ThrowsAsync<ArgumentNullException>(() => sut.PublishAsync((Step04DoneSignal)null!));
+    }
+
+    [Test]
+    public void PublishAsync_NullStep05Done_ThrowsArgumentNullException()
+    {
+        // Arrange
+        using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
+
+        // Act & Assert
+        Assert.ThrowsAsync<ArgumentNullException>(() => sut.PublishAsync((Step05DoneSignal)null!));
     }
 }
