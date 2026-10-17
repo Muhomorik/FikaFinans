@@ -11,6 +11,8 @@ using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Microsoft.Extensions.Configuration;
+using NLog;
+using FikaFinans.Domain.Models;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.MacroAligner;
 
@@ -114,7 +116,8 @@ public sealed class MacroAlignerAgentIntegrationTests
             Warnings         = null,
         };
 
-        var llm = new FoundryThemeAdjacencyLlmClient(_projectClient, _modelId);
+        var llm = new FoundryThemeAdjacencyLlmClient(
+            LogManager.GetLogger(nameof(FoundryThemeAdjacencyLlmClient)), _projectClient, new FoundryDeploymentName(_modelId));
         var sut = new MacroAlignerAgent(new TestPathsService(), llm);
 
         // Act

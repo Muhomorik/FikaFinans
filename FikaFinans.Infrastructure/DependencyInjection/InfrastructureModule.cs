@@ -19,6 +19,7 @@ using FikaFinans.Application.Settings;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.UseCases;
 using FikaFinans.Application.Schedules;
+using FikaFinans.Domain.Models;
 using FikaFinans.Infrastructure.Bank;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Foundry;
@@ -332,40 +333,42 @@ public sealed class InfrastructureModule : Autofac.Module
             .SingleInstance();
 
         // Foundry LLM clients used by the hybrid/LLM pipeline steps.
-        // All take AIProjectClient (already registered) + the default model ID from settings.
+        // All take AIProjectClient (already registered) + the deployment of the model picked in settings.
+        // Loggers are named by full type name, so one NLog rule on the namespace covers every client.
         builder.Register(ctx =>
             new FoundryMacroLlmClient(
-                LogManager.GetLogger(nameof(FoundryMacroLlmClient)),
+                LogManager.GetLogger(typeof(FoundryMacroLlmClient).FullName!),
                 ctx.Resolve<AIProjectClient>(),
-                ResolveDefaultModelId(ctx)))
+                ResolveDefaultDeploymentName(ctx)))
             .As<IMacroLlmClient>()
             .SingleInstance();
 
         builder.Register(ctx =>
             new FoundryThemeAdjacencyLlmClient(
+                LogManager.GetLogger(typeof(FoundryThemeAdjacencyLlmClient).FullName!),
                 ctx.Resolve<AIProjectClient>(),
-                ResolveDefaultModelId(ctx)))
+                ResolveDefaultDeploymentName(ctx)))
             .As<IThemeAdjacencyLlmClient>()
             .SingleInstance();
 
         builder.Register(ctx =>
             new FoundryFundCatalystLlmClient(
                 ctx.Resolve<AIProjectClient>(),
-                ResolveDefaultModelId(ctx)))
+                ResolveDefaultDeploymentName(ctx)))
             .As<IFundCatalystLlmClient>()
             .SingleInstance();
 
         builder.Register(ctx =>
             new FoundryThesisRefinementLlmClient(
                 ctx.Resolve<AIProjectClient>(),
-                ResolveDefaultModelId(ctx)))
+                ResolveDefaultDeploymentName(ctx)))
             .As<IThesisRefinementLlmClient>()
             .SingleInstance();
 
         builder.Register(ctx =>
             new FoundryDifferentiatorLlmClient(
                 ctx.Resolve<AIProjectClient>(),
-                ResolveDefaultModelId(ctx)))
+                ResolveDefaultDeploymentName(ctx)))
             .As<IDifferentiatorLlmClient>()
             .SingleInstance();
 
@@ -375,7 +378,8 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.RegisterType<MetricsCalculatorAgent>().As<IMetricsCalculatorAgent>().SingleInstance();
 
         builder.Register(ctx => new MacroAnalystAgent(
-                logger: LogManager.GetLogger(nameof(MacroAnalystAgent)),
+                // Full type name, so one NLog rule on the agents' namespace covers every agent.
+                logger: LogManager.GetLogger(typeof(MacroAnalystAgent).FullName!),
                 paths: ctx.Resolve<IPathsService>(),
                 llm: ctx.Resolve<IMacroLlmClient>(),
                 prompts: ctx.Resolve<IStep03MacroAnalystPromptsProvider>()))
@@ -747,12 +751,17 @@ public sealed class InfrastructureModule : Autofac.Module
             .SingleInstance();
     }
 
-    private static string ResolveDefaultModelId(IComponentContext ctx)
+    /// <summary>
+    /// The Foundry deployment of the model picked in settings — e.g. <c>gpt-5.4-1</c> — or
+    /// <see cref="FoundryModelIds.Gpt5_4_1"/> when none is picked or it names no deployment.
+    /// </summary>
+    private static FoundryDeploymentName ResolveDefaultDeploymentName(IComponentContext ctx)
     {
         var models = ctx.Resolve<IAppSettingsStore>().Load().Models;
         var selected = models.Deployments.FirstOrDefault(d => d.ModelId == models.SelectedModelId);
-        var name = selected?.DeploymentName.Value;
-        return string.IsNullOrWhiteSpace(name) ? FoundryModelIds.Gpt5_4_1 : name;
+        return string.IsNullOrWhiteSpace(selected?.DeploymentName.Value)
+            ? new FoundryDeploymentName(FoundryModelIds.Gpt5_4_1)
+            : selected.DeploymentName;
     }
 
     private const string DefaultSqliteFileName = "fikafinans.db";

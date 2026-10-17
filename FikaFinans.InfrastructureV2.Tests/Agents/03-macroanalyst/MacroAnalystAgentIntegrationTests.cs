@@ -11,6 +11,7 @@ using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Domain.Macro;
 using Microsoft.Extensions.Configuration;
+using FikaFinans.Domain.Models;
 using NLog;
 using DataLoaderJsonOptions = FikaFinans.Infrastructure.Pipeline.Json.JsonOptions;
 
@@ -71,7 +72,7 @@ public sealed class MacroAnalystAgentIntegrationTests
         var dl = MakeSyntheticDataLoaderOutput(summary.PeriodIsoWeek);
 
         var llm = new FoundryMacroLlmClient(
-            LogManager.GetLogger(nameof(FoundryMacroLlmClient)), _projectClient, _modelId);
+            LogManager.GetLogger(nameof(FoundryMacroLlmClient)), _projectClient, new FoundryDeploymentName(_modelId));
         var promptsProvider = new FileBackedStep03MacroAnalystPromptsProvider(
             LogManager.GetLogger(nameof(FileBackedStep03MacroAnalystPromptsProvider)), new TestPathsService());
         var prompts = await promptsProvider.GetPromptsAsync();

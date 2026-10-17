@@ -209,6 +209,13 @@ public sealed class Step05MacroAlignerHandler : IStep05MacroAligner
                 .RunInMemoryAsync(_family, _isoWeek, signal.RunId, _funds, _context.RotationThemes, ct)
                 .ConfigureAwait(false);
 
+            foreach (var fund in _agentOutput.Funds)
+                _logger.Debug(
+                    "Step 5 aligned — isin={0}, category '{1}': {2}, theme {3} by {4}, promoted={5}, against {6}'s context",
+                    fund.Isin.Value, fund.Metadata.Category, fund.MacroAlignment,
+                    fund.MatchedTheme?.Id ?? "-", fund.MatchedTheme?.MatchMethod.ToString() ?? "-",
+                    fund.PromotedToForming, _context.IsoWeek);
+
             // The output's warnings do not reach the row — only the fund's record is stored —
             // so the log is where a fund aligned None by a bad LLM answer shows up.
             foreach (var warning in _agentOutput.DataQuality.Warnings)

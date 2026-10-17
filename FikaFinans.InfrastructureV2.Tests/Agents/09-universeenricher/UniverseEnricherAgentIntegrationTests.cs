@@ -10,6 +10,7 @@ using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Portfolio;
 using FikaFinans.Application.Pipeline.Llm;
 using Microsoft.Extensions.Configuration;
+using FikaFinans.Domain.Models;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.UniverseEnricher;
 
@@ -67,7 +68,7 @@ public sealed class UniverseEnricherAgentIntegrationTests
             Alternatives = [altA, altB],
         };
 
-        var sut = new FoundryDifferentiatorLlmClient(_projectClient, _modelId);
+        var sut = new FoundryDifferentiatorLlmClient(_projectClient, new FoundryDeploymentName(_modelId));
 
         // Act
         var result = await sut.WriteDifferentiatorsAsync(request);
@@ -98,7 +99,7 @@ public sealed class UniverseEnricherAgentIntegrationTests
 
         var input = MakeOutput("2026-W18", buy1, buy2);
 
-        var llm = new FoundryDifferentiatorLlmClient(_projectClient, _modelId);
+        var llm = new FoundryDifferentiatorLlmClient(_projectClient, new FoundryDeploymentName(_modelId));
         var sut = new UniverseEnricherAgent(new TestPathsService(), llm);
 
         // Act

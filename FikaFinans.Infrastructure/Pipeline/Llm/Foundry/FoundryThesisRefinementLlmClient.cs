@@ -1,4 +1,5 @@
 using FikaFinans.Application.Pipeline.Llm;
+using FikaFinans.Domain.Models;
 using System.ClientModel;
 using System.Text;
 using System.Text.Json;
@@ -53,14 +54,20 @@ public sealed class FoundryThesisRefinementLlmClient : IThesisRefinementLlmClien
         """;
 
     private readonly AIProjectClient _projectClient;
-    private readonly string _modelId;
+    private readonly FoundryDeploymentName _deploymentName;
 
-    public FoundryThesisRefinementLlmClient(AIProjectClient projectClient, string modelId)
+    /// <param name="projectClient">The Foundry project the ephemeral agent is created in.</param>
+    /// <param name="deploymentName">
+    /// The Foundry deployment the agent runs on — the name the portal gave the deployment, not
+    /// the model family: e.g. <c>gpt-5.4-1</c> or <c>DeepSeek-R1-0528-1</c>, see
+    /// <see cref="Infrastructure.Foundry.FoundryModelIds"/>.
+    /// </param>
+    public FoundryThesisRefinementLlmClient(AIProjectClient projectClient, FoundryDeploymentName deploymentName)
     {
         ArgumentNullException.ThrowIfNull(projectClient);
-        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName.Value, nameof(deploymentName));
         _projectClient = projectClient;
-        _modelId = modelId;
+        _deploymentName = deploymentName;
     }
 
     public async Task<ThesisRefinementVerdict> RefineAsync(
@@ -210,11 +217,11 @@ public sealed class FoundryThesisRefinementLlmClient : IThesisRefinementLlmClien
 
     private async Task<(string Name, string Version)> CreateAgentAsync(CancellationToken ct)
     {
-        var definition = new DeclarativeAgentDefinition(_modelId)
+        var definition = new DeclarativeAgentDefinition(_deploymentName.Value)
         {
             Instructions = SystemPrompt,
         };
-        var safeModel = _modelId.Replace(".", "-").Replace("_", "-");
+        var safeModel = _deploymentName.Value.Replace(".", "-").Replace("_", "-");
         var shortId = Guid.NewGuid().ToString("N").Substring(0, 16);
         var agentName = $"FikaFinans-Step7-{safeModel}-{shortId}";
 
