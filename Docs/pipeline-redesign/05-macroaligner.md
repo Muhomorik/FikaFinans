@@ -1,8 +1,12 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design, 2026-10-17 — nothing built. Follows step 4's chain: the
-  trigger and the input column are not new choices. Choices marked
-  "Proposed" wait for confirmation; the open questions are at the end.
+  STATUS: implemented for the local (WPF) host, 2026-10-18 — every row of
+  "Proposed implementation order" is done; the cloud host is not. Follows
+  step 4's chain, so the trigger and the input column are not new choices.
+  Decided: a fund is aligned against the newest context stored up to its
+  week (A); the agent gains a domain-input RunInMemoryAsync, as step 4's;
+  step 5 is the chain tail. The adjacency verdict cache is not built. The
+  open questions left are at the end.
 -->
 
 # Step 5 — MacroAligner
@@ -90,7 +94,7 @@ read returns the later one. That needs two contexts with different weeks
 to exist for one fund's run — possible after a backfill, not in the
 normal weekly flow.
 
-**Proposed: A.** No change to step 3, one read, and the same answer the
+**Decided: A.** No change to step 3, one read, and the same answer the
 step 3 tab already shows for the week. The edge case is logged when the
 context's week is not the fund's week, as step 3 logs its own fallback.
 If it ever matters, B is the fix, raised then as a step 3 change.
@@ -230,7 +234,7 @@ Same as steps 2–4: a check and a mark, never a clear. Moves
 
 ### Manual trigger — WPF only
 
-**Proposed: the debug button goes through the handler**, as steps 2–4's
+**Decided: the debug button goes through the handler**, as steps 2–4's
 do — `ComputeOutputAsync` reads `Step04Json` for the run bar's run and
 the context for its week, runs the agent, stores nothing. Unlike steps 2
 and 4, it **can spend money**: a fund with no direct match calls the LLM.
@@ -259,7 +263,7 @@ Hybrid. Contract:
 The matching rules, the tie-break, the promotion and the "no demotion"
 rule do not change.
 
-**Proposed: a domain-input `RunInMemoryAsync` on `IMacroAlignerAgent`**
+**Decided: a domain-input `RunInMemoryAsync` on `IMacroAlignerAgent`**
 — company, week, run id, fund records, the active themes in; a
 `DataLoaderOutput` out. The rule step 4's page set: in every step whose
 agent produces the fund records, the agent builds the output. It loops
@@ -292,13 +296,19 @@ fund **per NAV signal** — and NAV signals arrive daily.
 | | Today | Per signal, no change |
 | --- | --- | --- |
 | Calls | non-matching funds × Run Alls | non-matching funds × NAV signals |
-| Time per call | create the Foundry agent, one response, delete — step 3 measured 14 s + 11 s + 3 s | same |
+| Time per call | create the Foundry agent, one response, delete — measured 2026-10-18 at 5 s + 4 s + 3 s | same |
 | What the answer depends on | the fund's category and the week's themes | same |
 
 The verdict is a function of **(context, category)** — nothing per fund,
 nothing per day. Several funds share a category, and a category's answer
 holds until the next week's context. That is step 3's shape again:
 per-fund hop, work that could be shared.
+
+Only a third of a call is the answer. Two cuts that need no cache, both
+in `FoundryThemeAdjacencyLlmClient` and not scheduled: delete the agent
+off the critical path (−3 s), or reuse one agent per prompt version
+instead of a create and a delete per call (−8 s) — the latter applies to
+every Foundry client, step 3's included.
 
 Options, none chosen — see the open questions:
 
@@ -308,11 +318,18 @@ Options, none chosen — see the open questions:
 | Survives a restart / a cloud instance | — | no | yes |
 | New code | none | a small cache in the handler's registration | a store beside `IMacroContextStore`, Tables-shaped |
 
-Whatever is chosen, **a failed call must not be cached.** Today the
-client cannot tell a failure from a real `None`: a timeout, invalid JSON
-and a genuine "no adjacency" all return `NoneVerdict`. Caching that would
-pin a Foundry outage as "no alignment" for the whole week. A cache needs
-the client to say which it was — a change to `IThemeAdjacencyLlmClient`.
+Whatever is chosen, **a failed call must not be cached.** The client's
+caller cannot tell a failure from a real `None`: a timeout, invalid JSON
+and a genuine "no adjacency" all return a `None` verdict. Caching that
+would pin a Foundry outage as "no alignment" for the whole week. A cache
+needs the client to say which it was — a change to
+`IThemeAdjacencyLlmClient`.
+
+The client does tell them apart in its log: each failure that becomes
+`None` — timeout, exception, incomplete status, unparsed answer, unknown
+theme id — is a Warn line with its reason, and a real verdict is a Debug
+line with the LLM's rationale. The handler logs one line per fund with
+its alignment, theme, match method and the context's week.
 
 ### LLM failure does not fail the fund
 
@@ -341,7 +358,7 @@ step 4 changed step 3's. Called out here so it is not a surprise:
 | — | `FailStep05Async` |
 
 Step 4 keeps its done-signal and its `Succeeded` step event; only the row
-release moves. **Proposed: that change is its own commit**, separate
+release moves. **Decided: that change is its own commit**, separate
 from step 5's wiring.
 
 ### Orphaned runs
@@ -407,7 +424,7 @@ One change per row, each reviewed and committed before the next.
 | 5 | ✅ `IStep05MacroAlignerEntry` + entry point; registration as step 4's | Application, `InfrastructureModule` | row 4 |
 | 6a | ✅ **Step 4 gives up the tail** — `CompleteStep04Async`, step 4's `CompleteAsync` and the entry's call removed; complete tests move to step 5 | step 4's handler, entry point and tests, `IIsinProgressStore` | row 5 |
 | 6b | ✅ Subscription `Step04DoneSignal` → step 5's entry point | `MainWindowViewModel` | 6a |
-| 7 | Step 5's tab goes passive, shaped like step 3's | `Step5MacroAlignerViewModel`, no XAML | row 6b |
+| 7 | ✅ Step 5's tab goes passive, shaped like step 3's | `Step5MacroAlignerViewModel`, no XAML | row 6b |
 | — | Adjacency verdict cache — **not scheduled**, waits on the open question | the handler's registration or a new store; `IThemeAdjacencyLlmClient` | the cache question |
 
 Rows 6a and 6b go in back to back: between them, a fund's run would
@@ -421,11 +438,6 @@ Row 6b is the first that spends money per signal at step 5.
 Raised by this page; they belong in the parent plan's Open Questions,
 not settled here.
 
-- **Which context a fund is aligned against.** Proposed: A, the newest
-  stored up to the fund's week — no step 3 change. B, step 3 recording
-  the key, is exact but changes step 3.
-- **The agent's surface.** Proposed: a domain-input `RunInMemoryAsync`,
-  following step 4's rule.
 - **Caching adjacency verdicts.** None, in-process, or stored — keyed by
   (context, category). Either cache needs the LLM client to tell a
   failure from a real `None` first.
@@ -435,6 +447,9 @@ not settled here.
   to `None`. Kept; raised because a week of outage would quietly mark
   every non-matching fund unaligned.
 - **Who consumes step 5's done-signal.** Step 6's page.
+- **Which context, if A ever disagrees with step 3.** Decided A; B — step
+  3 recording the context's key — is the fix if a backfill makes it
+  matter, raised then as a step 3 change.
 - **Carried over unchanged:** the cloud host, orphaned-run recovery in
   cloud, step outputs too large for Tables, the fresh-handler factory,
   how the envelope is stored — all on step 2's page.
