@@ -42,6 +42,10 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
         return output;
     }
 
+    /// <summary>
+    /// Aligns every fund of a whole step-4 output, carrying its envelope through.
+    /// </summary>
+    /// <remarks>Not on the interface — kept for <see cref="RunAsync"/> and its tests.</remarks>
     public async Task<DataLoaderOutput> RunInMemoryAsync(
         DataLoaderOutput signals,
         MacroContext macro,
@@ -77,6 +81,40 @@ public sealed class MacroAlignerAgent : IMacroAlignerAgent
                 CoreCount     = signals.DataQuality.CoreCount,
                 Warnings      = warnings,
             },
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<DataLoaderOutput> RunInMemoryAsync(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        IReadOnlyList<RotationTheme> activeThemes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(activeThemes);
+
+        var warnings = new List<string>();
+        var alignedFunds = new List<FundRecord>(funds.Count);
+
+        foreach (var fund in funds)
+        {
+            var result = await ProcessFundAsync(fund, activeThemes, ct);
+            alignedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
+        }
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = alignedFunds,
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality { Warnings = warnings },
         };
     }
 

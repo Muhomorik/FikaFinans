@@ -16,6 +16,24 @@ public interface IMacroAlignerAgent
     Task<DataLoaderOutput> RunAsync(string isoWeek, PipelineRunId runId, CancellationToken ct = default);
 
     /// <summary>
+    /// Aligns funds already read against themes already read. Reads nothing, writes nothing,
+    /// so the caller owns both ends of the read-modify-write. Every input is a domain model
+    /// on purpose: the aligner must not know whether the records came from a JSON file, a
+    /// progress row or a queue message — nor where the themes were stored.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ProcessFundAsync"/> per record, wrapped in an output stamped with the
+    /// arguments; the per-fund warnings land in its <see cref="DataQuality.Warnings"/>. The
+    /// portfolio-wide fields — frozen positions, cash — are left empty: they are not an
+    /// input to this step. May call the LLM, once per fund with no direct match.
+    /// </remarks>
+    Task<DataLoaderOutput> RunInMemoryAsync(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        IReadOnlyList<RotationTheme> activeThemes,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Per-fund compute. Hybrid: direct category match (deterministic) plus a
     /// lazy LLM adjacency call when needed. Returns the enriched
     /// <see cref="FundRecord"/> together with any universe-level warnings
