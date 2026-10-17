@@ -446,6 +446,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep02Services(builder);
         RegisterStep03Services(builder);
         RegisterStep04Services(builder);
+        RegisterStep05Services(builder);
     }
 
     /// <summary>
@@ -575,6 +576,35 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step04SignalScorerEntry)),
                 ctx.Resolve<Func<IStep04SignalScorer>>()))
             .As<IStep04SignalScorerEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 5 — only what is step 5's own, as for steps 2–4. It has no config
+    /// provider: its prompt is a constant in the LLM client. It reads step 3's context store,
+    /// registered there, and shares step 1's progress store and buses.
+    /// </summary>
+    private static void RegisterStep05Services(ContainerBuilder builder)
+    {
+        // Deliberately not SingleInstance, same as steps 1–4: it carries one run's state in
+        // fields — record, context, agent output, progress row.
+        builder.Register(ctx => new Step05MacroAlignerHandler(
+                logger: LogManager.GetLogger(nameof(Step05MacroAlignerHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                contexts: ctx.Resolve<IMacroContextStore>(),
+                agent: ctx.Resolve<IMacroAlignerAgent>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep05MacroAligner>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step05MacroAlignerEntry(
+                LogManager.GetLogger(nameof(Step05MacroAlignerEntry)),
+                ctx.Resolve<Func<IStep05MacroAligner>>()))
+            .As<IStep05MacroAlignerEntry>()
             .SingleInstance();
     }
 
