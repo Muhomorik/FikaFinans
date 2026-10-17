@@ -39,7 +39,7 @@ public sealed class Step04SignalScorerEntryTests
     private Step04SignalScorerEntry CreateSut() => _fixture.Create<Step04SignalScorerEntry>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndCompletesLast()
+    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndEmitsLast()
     {
         // Arrange
         var calls = new List<string>();
@@ -55,15 +55,13 @@ public sealed class Step04SignalScorerEntryTests
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
         _step04.Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
-        _step04.Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("complete")).Returns(Task.CompletedTask);
 
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert
+        // Assert — no complete: step 5 is the chain tail, so the run stays in flight for it.
         Assert.That(calls, Is.EqualTo(new[]
-            { "begin", "load", "assemble", "agent", "persist", "emit", "complete" }));
+            { "begin", "load", "assemble", "agent", "persist", "emit" }));
         _step04.Verify(x => x.FailAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -81,8 +79,6 @@ public sealed class Step04SignalScorerEntryTests
 
         // Assert
         _step04.Verify(x => x.LoadFundAsync(
-            It.IsAny<Step03DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-        _step04.Verify(x => x.CompleteAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step04.Verify(x => x.FailAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -103,7 +99,7 @@ public sealed class Step04SignalScorerEntryTests
         // Assert
         Assert.That(thrown, Is.SameAs(boom));
         _step04.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
-        _step04.Verify(x => x.CompleteAsync(
+        _step04.Verify(x => x.RunAgentAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -144,7 +140,7 @@ public sealed class Step04SignalScorerEntryTests
     }
 
     [Test]
-    public void HandleAsync_Cancelled_NeitherCompletesNorFails()
+    public void HandleAsync_Cancelled_NeitherEmitsNorFails()
     {
         // Arrange
         _step04
@@ -155,7 +151,7 @@ public sealed class Step04SignalScorerEntryTests
         Assert.ThrowsAsync<OperationCanceledException>(() => CreateSut().HandleAsync(Signal));
 
         // Assert
-        _step04.Verify(x => x.CompleteAsync(
+        _step04.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step04.Verify(x => x.FailAsync(
             It.IsAny<Step03DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);

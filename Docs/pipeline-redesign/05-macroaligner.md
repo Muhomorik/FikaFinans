@@ -405,7 +405,7 @@ One change per row, each reviewed and committed before the next.
 | 3 | ✅ `StartStep05Async`, `CompleteStep05Async`, `FailStep05Async`, `ListOrphanedStep05Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 4 | ✅ `IStep05MacroAligner` + handler, step 4's shape. Not wired. Load reads `Step04Json` and the context — newest up to the week, fail when none; the agent phase passes the context's themes; warnings logged; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1–3; "Which context" |
 | 5 | ✅ `IStep05MacroAlignerEntry` + entry point; registration as step 4's | Application, `InfrastructureModule` | row 4 |
-| 6a | **Step 4 gives up the tail** — `CompleteStep04Async`, step 4's `CompleteAsync` and the entry's call removed; complete tests move to step 5 | step 4's handler, entry point and tests, `IIsinProgressStore` | row 5 |
+| 6a | ✅ **Step 4 gives up the tail** — `CompleteStep04Async`, step 4's `CompleteAsync` and the entry's call removed; complete tests move to step 5 | step 4's handler, entry point and tests, `IIsinProgressStore` | row 5 |
 | 6b | Subscription `Step04DoneSignal` → step 5's entry point | `MainWindowViewModel` | 6a |
 | 7 | Step 5's tab goes passive, shaped like step 3's | `Step5MacroAlignerViewModel`, no XAML | row 6b |
 | — | Adjacency verdict cache — **not scheduled**, waits on the open question | the handler's registration or a new store; `IThemeAdjacencyLlmClient` | the cache question |

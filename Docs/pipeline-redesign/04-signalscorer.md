@@ -393,10 +393,11 @@ overload on `IPipelineSignals` and `LocalRxPipelineSignalBus`.
 
 ### Who consumes it
 
-**Nobody, yet** — step 4 is the tail until step 5 is wired. Step 5
-(MacroAligner) is the natural consumer: it needs the signal from step 4
-and the week's context from step 3's store. Which context it matches
-against is step 5's page, as step 3's page already said.
+**Step 5 (MacroAligner)** — it needs the signal from step 4 and the
+week's context from step 3's store. Step 4 has given up the tail:
+`CompleteStep04Async` and step 4's `CompleteAsync` are removed, and
+step 5 completes the run — see
+[05-macroaligner.md](./05-macroaligner.md).
 
 ```mermaid
 flowchart LR
