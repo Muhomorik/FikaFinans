@@ -403,7 +403,7 @@ One change per row, each reviewed and committed before the next. Step
 | 4 | ✅ `IStep08Recommender` + handler, step 7's shape with a synchronous agent call. Not wired. Logging per "Logging — in the handler": Debug per phase, a Debug verdict line per fund with signal, thesis, exposure, held, recommendation and reason, Warn per agent warning, Error per failed phase; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 3, choice 5 |
 | 5 | ✅ `IStep08RecommenderEntry` + entry point; registration as step 7's | Application, `InfrastructureModule` | row 4 |
 | 6a | ✅ **Step 7 gives up the tail** — `CompleteStep07Async`, step 7's `CompleteAsync` and the entry's call removed; complete tests move to step 8 | step 7's handler, entry point and tests, `IIsinProgressStore` | row 5, choice 3 |
-| 6b | Subscription `Step07DoneSignal` → step 8's entry point, `RunStep08Async` catching and logging as step 7's | `MainWindowViewModel` | 6a |
+| 6b | ✅ Subscription `Step07DoneSignal` → step 8's entry point, `RunStep08Async` catching and logging as step 7's | `MainWindowViewModel` | 6a |
 | 7 | Step 8's tab goes passive, shaped like step 7's | `Step8RecommenderViewModel`, no XAML | row 6b, choice 4 |
 
 Rows 6a and 6b go in back to back: between them a fund's run would

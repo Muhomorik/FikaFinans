@@ -279,19 +279,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Subscribe(done => RunStep06Async(step06Entry, done));
         _disposables.Add(step06Sub);
 
-        // Step 6's done-signal: the local stand-in for step 7's queue trigger. Step 7 is the
-        // chain tail, so it is the one that frees the fund's row. Calls the LLM only on the
-        // decision matrix's conflicting rows.
+        // Step 6's done-signal: the local stand-in for step 7's queue trigger. Calls the LLM
+        // only on the decision matrix's conflicting rows.
         var step07Entry = _scope.Resolve<IStep07ThesisValidatorEntry>();
         var step07Sub = pipelineSignals.Signals
             .OfType<Step06DoneSignal>()
             .Subscribe(done => RunStep07Async(step07Entry, done));
         _disposables.Add(step07Sub);
+
+        // Step 7's done-signal: the local stand-in for step 8's queue trigger. Step 8 is the
+        // chain tail, so it is the one that frees the fund's row. Code only — no LLM.
+        var step08Entry = _scope.Resolve<IStep08RecommenderEntry>();
+        var step08Sub = pipelineSignals.Signals
+            .OfType<Step07DoneSignal>()
+            .Subscribe(done => RunStep08Async(step08Entry, done));
+        _disposables.Add(step08Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 7
-    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep07Async"/>; steps 8-10
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 8
+    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep08Async"/>; steps 9-10
     /// still run through <see cref="IPipelineRunner"/> from the Run All button.
     /// </summary>
     /// <remarks>
@@ -463,6 +470,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 7 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-7 done-signal to step 8's entry point, off the Rx callback — the bus
+    /// publishes inside step 7's emit, so running step 8 inline would hold step 7 up.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
+    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
+    /// </remarks>
+    private void RunStep08Async(IStep08RecommenderEntry step08Entry, Step07DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step08Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 8 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 8 failed for {Isin}", signal.Isin.Value);
             }
         });
 

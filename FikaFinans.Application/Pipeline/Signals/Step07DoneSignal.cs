@@ -7,7 +7,7 @@ namespace FikaFinans.Application.Pipeline.Signals;
 
 /// <summary>
 /// Raised once step 7 has written its output for a fund. Carries no payload — a reader takes
-/// <c>Step07Json</c> back by key. No step consumes it for work yet.
+/// <c>Step07Json</c> back by key. Step 8 consumes it.
 /// </summary>
 /// <seealso cref="IStepDoneSignal"/>
 [DebuggerDisplay("{Isin.Value,nq} @ {NavDate.Date,nq:yyyy-MM-dd} run {RunId.Value,nq}")]
