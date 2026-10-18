@@ -399,7 +399,7 @@ One change per row, each reviewed and committed before the next. Step
 | --- | --- | --- | --- |
 | 1 | ✅ `Step08DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 2 | ✅ Domain-input `RunInMemory` onto `IRecommenderAgent` — `ProcessFund` per record, wrapped, warnings into the output, portfolio fields empty. No rule change. Tests in a new file beside `RecommenderAgentTests` | `IRecommenderAgent`, `RecommenderAgent`, a new test file | choice 1 |
-| 3 | `StartStep08Async`, `CompleteStep08Async`, `FailStep08Async`, `ListOrphanedStep08Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
+| 3 | ✅ `StartStep08Async`, `CompleteStep08Async`, `FailStep08Async`, `ListOrphanedStep08Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 4 | `IStep08Recommender` + handler, step 7's shape with a synchronous agent call. Not wired. Logging per "Logging — in the handler": Debug per phase, a Debug verdict line per fund with signal, thesis, exposure, held, recommendation and reason, Warn per agent warning, Error per failed phase; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 3, choice 5 |
 | 5 | `IStep08RecommenderEntry` + entry point; registration as step 7's | Application, `InfrastructureModule` | row 4 |
 | 6a | **Step 7 gives up the tail** — `CompleteStep07Async`, step 7's `CompleteAsync` and the entry's call removed; complete tests move to step 8 | step 7's handler, entry point and tests, `IIsinProgressStore` | row 5, choice 3 |
