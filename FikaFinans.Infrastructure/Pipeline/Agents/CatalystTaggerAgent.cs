@@ -48,9 +48,7 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
         CancellationToken ct = default)
     {
         var warnings = new List<string>(aligned.DataQuality.Warnings);
-        var activeCatalysts = (macro.Catalysts ?? Array.Empty<Catalyst>())
-            .Where(c => c.AffectedCategories.Count > 0)
-            .ToArray();
+        var activeCatalysts = Active(macro.Catalysts ?? Array.Empty<Catalyst>());
 
         var taggedFunds = new List<FundRecord>(aligned.Funds.Count);
         foreach (var fund in aligned.Funds)
@@ -80,6 +78,41 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
                 CoreCount     = aligned.DataQuality.CoreCount,
                 Warnings      = warnings,
             },
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<DataLoaderOutput> RunInMemoryAsync(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        IReadOnlyList<Catalyst> catalysts,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(catalysts);
+
+        var activeCatalysts = Active(catalysts);
+        var warnings = new List<string>();
+        var taggedFunds = new List<FundRecord>(funds.Count);
+
+        foreach (var fund in funds)
+        {
+            var result = await ProcessFundAsync(fund, activeCatalysts, ct);
+            taggedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
+        }
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = taggedFunds,
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality { Warnings = warnings },
         };
     }
 
@@ -127,6 +160,11 @@ public sealed class CatalystTaggerAgent : ICatalystTaggerAgent
         };
         return new FundProcessingResult(WithCatalyst(fund, catalyst), warnings);
     }
+
+    // A catalyst with no affected categories should not survive MacroAnalyst's validation;
+    // the contract skips it defensively rather than asking the LLM about it.
+    private static Catalyst[] Active(IReadOnlyList<Catalyst> catalysts) =>
+        catalysts.Where(c => c.AffectedCategories.Count > 0).ToArray();
 
     // Pick the strongest classification: Direct beats Indirect; ties broken by
     // higher catalyst intensity, then longer weeks_active. None entries are

@@ -419,7 +419,7 @@ One change per row, each reviewed and committed before the next.
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
 | 1 | ✅ `Step06DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
-| 2 | Domain-input `RunInMemoryAsync` onto `ICatalystTaggerAgent` — `ProcessFundAsync` per record, empty-category catalysts filtered, wrapped, warnings into the output. No rule change. Tests in a new file beside `CatalystTaggerAgentTests` | `ICatalystTaggerAgent`, `CatalystTaggerAgent`, a new test file | — |
+| 2 | ✅ Domain-input `RunInMemoryAsync` onto `ICatalystTaggerAgent` — `ProcessFundAsync` per record, empty-category catalysts filtered, wrapped, warnings into the output. No rule change. Tests in a new file beside `CatalystTaggerAgentTests` | `ICatalystTaggerAgent`, `CatalystTaggerAgent`, a new test file | — |
 | 3 | `FoundryFundCatalystLlmClient` gets a logger, as `FoundryThemeAdjacencyLlmClient` has — Debug per call and per verdict, Warn per failure reason and per undeleted agent, the caller's cancellation rethrown. Return values unchanged | the client, its registration, its integration test's construction | — |
 | 4 | `StartStep06Async`, `CompleteStep06Async`, `FailStep06Async`, `ListOrphanedStep06Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 5 | `IStep06CatalystTagger` + handler, step 5's shape. Not wired. Load reads `Step05Json` and the context — newest up to the week, fail when none; the agent phase passes the context's catalysts; warnings logged; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 4; "Which context" |
