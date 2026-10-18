@@ -437,6 +437,13 @@ not settled here.
   interface change steps 5 and 6's cache questions wait on.
 - **Caching refinements.** The inputs move with the NAV, so a cache
   would hit less often than at steps 5 and 6. Joins their question.
+- **Step 6's verdict decides step 7's row.** Seen in the first local
+  run, 2026-10-18: the same fund, context and model were tagged Indirect
+  in one run and untagged in the next. With a Weakness signal that is the
+  difference between Invalid — an LLM refinement, the exit case — and a
+  matrix Partial. Step 7 inherits step 6's instability; step 6's
+  "recompute on every NAV signal" and cache questions are where it would
+  be settled, not here.
 - **Where the warnings go** once the envelope question on step 2's page
   is answered. Logged until then.
 - **Who consumes step 7's done-signal.** Step 8's page.
