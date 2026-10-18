@@ -2,8 +2,11 @@
   Authoring rules: see README.md in this folder.
   STATUS: design only, 2026-10-18 — nothing on this page is built. Follows
   step 6's chain, so the trigger and the input column are not new choices.
-  The choices this page proposes but has not settled are listed under
-  "To settle before building"; the open questions are at the end.
+  Decided 2026-10-18: a domain-input RunInMemoryAsync, as steps 5 and 6;
+  the refinement LLM client gains step 6's client's logging before the
+  chain reaches it; an outage stays stamped llm_refinement for now; step 7
+  becomes the chain tail in its own commit; the debug button goes through
+  the handler. The open questions are at the end.
 -->
 
 # Step 7 — ThesisValidator
@@ -191,7 +194,7 @@ Same as steps 2–6: a check and a mark, never a clear. Moves
 
 ### Manual trigger — WPF only
 
-Proposed, as steps 2–6: **the debug button goes through the handler** —
+**Decided, as steps 2–6: the debug button goes through the handler** —
 `ComputeOutputAsync` reads `Step06Json` for the run bar's run, runs the
 agent, stores nothing.
 
@@ -231,7 +234,7 @@ flowchart LR
   llm -- "jumped further" --> out
 ```
 
-Proposed: **a domain-input `RunInMemoryAsync` on `IThesisValidatorAgent`**
+**Decided: a domain-input `RunInMemoryAsync` on `IThesisValidatorAgent`**
 — company, week, run id, fund records in; a `DataLoaderOutput` out. Steps
 5 and 6's shape: loop the existing `ProcessFundAsync`, wrap the results,
 warnings into the output. The older `RunInMemoryAsync(DataLoaderOutput)`
@@ -264,7 +267,7 @@ was before its logging row:
 | The caller's cancellation | rethrown | **swallowed** by a bare `catch` — a shutdown mid-call reads as "baseline confirmed" |
 | Agent left behind on a failed delete | Warn | swallowed |
 
-Proposed, as step 6: **the client gets the same treatment, as its own row
+**Decided, as step 6: the client gets the same treatment, as its own row
 before the wiring.** Logging and cancellation only; what the client
 returns does not change, so the contract holds.
 
@@ -276,7 +279,7 @@ retained — LLM refinement unavailable."* The agent cannot tell that from a
 real confirmation, so it stamps the fund **`thesis_method =
 llm_refinement`** — with a rationale that says the opposite.
 
-| | Today | Proposed for this redesign |
+| | Today | Decided for this redesign |
 | --- | --- | --- |
 | `thesis_validity` | the baseline | unchanged — the contract says "use baseline" |
 | `thesis_rationale` | "…LLM refinement unavailable." | unchanged |
@@ -334,7 +337,7 @@ The same move as every step before — **and it changes step 6's code**:
 | — | `FailStep07Async` |
 
 Step 6 keeps its done-signal and its `Succeeded` step event; only the row
-release moves. Proposed, as before: **that change is its own commit.**
+release moves. **Decided, as before: that change is its own commit.**
 
 ### Orphaned runs
 
@@ -385,11 +388,11 @@ and `IIsinProgressRepository`, reads through `IsinProgressOutputLoader`
 with a disk fallback, and checks for a missing agent to say "Configure
 Foundry credentials". All of that leaves the tab. No XAML changes.
 
-## To settle before building
+## Settled before building
 
-Each has a proposal above; none is decided yet.
+All decided 2026-10-18, as proposed.
 
-| # | Choice | Proposed |
+| # | Choice | Decided |
 | --- | --- | --- |
 | 1 | Agent call | a domain-input `RunInMemoryAsync` on `IThesisValidatorAgent`, as steps 5 and 6 |
 | 2 | The client's logging | its own row before the wiring, as step 6's row 3 |
