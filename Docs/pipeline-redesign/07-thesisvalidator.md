@@ -407,8 +407,8 @@ One change per row, each reviewed and committed before the next.
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
 | 1 | ✅ `Step07DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
-| 2 | Domain-input `RunInMemoryAsync` onto `IThesisValidatorAgent` — `ProcessFundAsync` per record, wrapped, warnings into the output. No rule change. Tests in a new file beside `ThesisValidatorAgentTests` | `IThesisValidatorAgent`, `ThesisValidatorAgent`, a new test file | choice 1 |
-| 3 | `FoundryThesisRefinementLlmClient` gets a logger, as `FoundryFundCatalystLlmClient` has — Debug per call and per verdict, Warn per failure reason and per undeleted agent, the caller's cancellation rethrown. Return values unchanged | the client, its registration, its integration test's construction | choice 2 |
+| 2 | ✅ Domain-input `RunInMemoryAsync` onto `IThesisValidatorAgent` — `ProcessFundAsync` per record, wrapped, warnings into the output. No rule change. Tests in a new file beside `ThesisValidatorAgentTests` | `IThesisValidatorAgent`, `ThesisValidatorAgent`, a new test file | choice 1 |
+| 3 | ✅ `FoundryThesisRefinementLlmClient` gets a logger, as `FoundryFundCatalystLlmClient` has — Debug per call and per verdict, Warn per failure reason and per undeleted agent, the caller's cancellation rethrown. Return values unchanged | the client, its registration, its integration test's construction | choice 2 |
 | 4 | `StartStep07Async`, `CompleteStep07Async`, `FailStep07Async`, `ListOrphanedStep07Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 5 | `IStep07ThesisValidator` + handler, step 6's shape without the context read. Not wired. Warnings logged; one line per fund with validity, method and baseline; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 4 |
 | 6 | `IStep07ThesisValidatorEntry` + entry point; registration as step 6's | Application, `InfrastructureModule` | row 5 |

@@ -74,6 +74,38 @@ public sealed class ThesisValidatorAgent : IThesisValidatorAgent
         };
     }
 
+    /// <inheritdoc />
+    public async Task<DataLoaderOutput> RunInMemoryAsync(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+
+        var warnings = new List<string>();
+        var validatedFunds = new List<FundRecord>(funds.Count);
+
+        foreach (var fund in funds)
+        {
+            var result = await ProcessFundAsync(fund, ct);
+            validatedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
+        }
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = validatedFunds,
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality { Warnings = warnings },
+        };
+    }
+
     public async Task<FundProcessingResult> ProcessFundAsync(
         FundRecord fund,
         CancellationToken ct = default)

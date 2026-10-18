@@ -12,6 +12,7 @@ using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Microsoft.Extensions.Configuration;
 using FikaFinans.Domain.Models;
+using NLog;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.ThesisValidator;
 
@@ -101,7 +102,8 @@ public sealed class ThesisValidatorAgentIntegrationTests
             DataQuality     = new DataQuality(),
         };
 
-        var llm = new FoundryThesisRefinementLlmClient(_projectClient, new FoundryDeploymentName(_modelId));
+        var llm = new FoundryThesisRefinementLlmClient(
+            LogManager.GetLogger(nameof(FoundryThesisRefinementLlmClient)), _projectClient, new FoundryDeploymentName(_modelId));
         var sut = new ThesisValidatorAgent(new TestPathsService(), llm);
 
         // Act

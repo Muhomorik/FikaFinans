@@ -361,6 +361,7 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.Register(ctx =>
             new FoundryThesisRefinementLlmClient(
+                LogManager.GetLogger(typeof(FoundryThesisRefinementLlmClient).FullName!),
                 ctx.Resolve<AIProjectClient>(),
                 ResolveDefaultDeploymentName(ctx)))
             .As<IThesisRefinementLlmClient>()
