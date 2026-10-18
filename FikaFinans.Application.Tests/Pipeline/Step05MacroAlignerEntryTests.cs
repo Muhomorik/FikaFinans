@@ -39,7 +39,7 @@ public sealed class Step05MacroAlignerEntryTests
     private Step05MacroAlignerEntry CreateSut() => _fixture.Create<Step05MacroAlignerEntry>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndCompletesLast()
+    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndEmitsLast()
     {
         // Arrange
         var calls = new List<string>();
@@ -55,15 +55,13 @@ public sealed class Step05MacroAlignerEntryTests
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
         _step05.Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
-        _step05.Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("complete")).Returns(Task.CompletedTask);
 
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert
+        // Assert — no complete: step 6 is the chain tail, so the run stays in flight for it.
         Assert.That(calls, Is.EqualTo(new[]
-            { "begin", "load", "assemble", "agent", "persist", "emit", "complete" }));
+            { "begin", "load", "assemble", "agent", "persist", "emit" }));
         _step05.Verify(x => x.FailAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -82,7 +80,7 @@ public sealed class Step05MacroAlignerEntryTests
         // Assert
         _step05.Verify(x => x.LoadFundAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-        _step05.Verify(x => x.CompleteAsync(
+        _step05.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step05.Verify(x => x.FailAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -103,7 +101,7 @@ public sealed class Step05MacroAlignerEntryTests
         // Assert
         Assert.That(thrown, Is.SameAs(boom));
         _step05.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
-        _step05.Verify(x => x.CompleteAsync(
+        _step05.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -144,7 +142,7 @@ public sealed class Step05MacroAlignerEntryTests
     }
 
     [Test]
-    public void HandleAsync_Cancelled_NeitherCompletesNorFails()
+    public void HandleAsync_Cancelled_NeitherEmitsNorFails()
     {
         // Arrange — a shutdown mid LLM call.
         _step05
@@ -155,7 +153,7 @@ public sealed class Step05MacroAlignerEntryTests
         Assert.ThrowsAsync<OperationCanceledException>(() => CreateSut().HandleAsync(Signal));
 
         // Assert
-        _step05.Verify(x => x.CompleteAsync(
+        _step05.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step05.Verify(x => x.FailAsync(
             It.IsAny<Step04DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);

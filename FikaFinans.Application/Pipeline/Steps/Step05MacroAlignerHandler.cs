@@ -314,41 +314,6 @@ public sealed class Step05MacroAlignerHandler : IStep05MacroAligner
     }
 
     /// <inheritdoc />
-    public async Task CompleteAsync(Step04DoneSignal signal, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(signal);
-
-        // Completing a row this run never held would free another run's fund.
-        if (_progressRow is null)
-            throw new InvalidOperationException("BeginProcessingAsync must run before CompleteAsync.");
-
-        _logger.Debug("Step 5 complete — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
-
-        try
-        {
-            _progressRow = await _progress
-                .CompleteStep05Async(signal.Isin, ct)
-                .ConfigureAwait(false);
-
-            _logger.Debug("Step 5 completed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown, not a failure — the row stays in flight until it is restarted.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Not reported: the step's work succeeded and EmitDoneAsync already said so.
-            // Rethrown so the caller can fail the run instead of leaving the row in flight.
-            _logger.Error(
-                ex, "Step 5 complete failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
-
-            throw;
-        }
-    }
-
-    /// <inheritdoc />
     public async Task FailAsync(Step04DoneSignal signal, Exception error, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(signal);

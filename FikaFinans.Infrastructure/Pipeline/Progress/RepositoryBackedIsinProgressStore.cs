@@ -228,10 +228,6 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         => ContinueRunAsync(isin, runId, StepId.MacroAligner, ct);
 
     /// <inheritdoc />
-    public Task<IsinProgressEntity?> CompleteStep05Async(Isin isin, CancellationToken ct = default)
-        => FreeAsync(isin, StepId.MacroAligner, error: null, ct);
-
-    /// <inheritdoc />
     public Task<IsinProgressEntity?> FailStep05Async(Isin isin, string error, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(error);
