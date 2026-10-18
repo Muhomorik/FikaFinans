@@ -454,6 +454,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep04Services(builder);
         RegisterStep05Services(builder);
         RegisterStep06Services(builder);
+        RegisterStep07Services(builder);
     }
 
     /// <summary>
@@ -641,6 +642,34 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step06CatalystTaggerEntry)),
                 ctx.Resolve<Func<IStep06CatalystTagger>>()))
             .As<IStep06CatalystTaggerEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 7 — only what is step 7's own, as for steps 2–6. It has no config
+    /// provider and reads no context: its one input is step 6's record on the progress row.
+    /// It shares step 1's progress store and buses.
+    /// </summary>
+    private static void RegisterStep07Services(ContainerBuilder builder)
+    {
+        // Deliberately not SingleInstance, same as steps 1–6: it carries one run's state in
+        // fields — record, agent output, progress row.
+        builder.Register(ctx => new Step07ThesisValidatorHandler(
+                logger: LogManager.GetLogger(nameof(Step07ThesisValidatorHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                agent: ctx.Resolve<IThesisValidatorAgent>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep07ThesisValidator>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step07ThesisValidatorEntry(
+                LogManager.GetLogger(nameof(Step07ThesisValidatorEntry)),
+                ctx.Resolve<Func<IStep07ThesisValidator>>()))
+            .As<IStep07ThesisValidatorEntry>()
             .SingleInstance();
     }
 
