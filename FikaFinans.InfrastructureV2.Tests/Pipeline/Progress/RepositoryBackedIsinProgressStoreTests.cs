@@ -51,17 +51,17 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     [TearDown]
     public void TearDown() => _connection.Dispose();
 
-    // ── CompleteStep07Async ───────────────────────────────────────────
+    // ── CompleteStep08Async ───────────────────────────────────────────
 
     [Test]
-    public async Task CompleteStep07Async_InFlightRow_FreesRowAndAdvancesAnchorToNavDate()
+    public async Task CompleteStep08Async_InFlightRow_FreesRowAndAdvancesAnchorToNavDate()
     {
         // Arrange
         await SeedInFlightAsync(navDate: Date2, anchor: Date1);
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        await sut.CompleteStep07Async(new Isin(FundIsin));
+        await sut.CompleteStep08Async(new Isin(FundIsin));
 
         // Assert
         var row = await _repo.GetAsync(Partition, FundIsin);
@@ -74,14 +74,14 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     }
 
     [Test]
-    public async Task CompleteStep07Async_PreviousFailure_ClearsLastErrorAndAttemptCount()
+    public async Task CompleteStep08Async_PreviousFailure_ClearsLastErrorAndAttemptCount()
     {
         // Arrange
         await SeedInFlightAsync(navDate: Date2, anchor: Date1, lastError: "old failure", attemptCount: 2);
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        await sut.CompleteStep07Async(new Isin(FundIsin));
+        await sut.CompleteStep08Async(new Isin(FundIsin));
 
         // Assert
         var row = await _repo.GetAsync(Partition, FundIsin);
@@ -93,14 +93,14 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     }
 
     [Test]
-    public async Task CompleteStep07Async_NoNavDate_KeepsAnchor()
+    public async Task CompleteStep08Async_NoNavDate_KeepsAnchor()
     {
         // Arrange
         await SeedInFlightAsync(navDate: null, anchor: Date1);
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        await sut.CompleteStep07Async(new Isin(FundIsin));
+        await sut.CompleteStep08Async(new Isin(FundIsin));
 
         // Assert
         var row = await _repo.GetAsync(Partition, FundIsin);
@@ -108,14 +108,14 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     }
 
     [Test]
-    public async Task CompleteStep07Async_InFlightRow_KeepsRunIdAndStepColumns()
+    public async Task CompleteStep08Async_InFlightRow_KeepsRunIdAndStepColumns()
     {
         // Arrange
         await SeedInFlightAsync(navDate: Date2, anchor: Date1);
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        await sut.CompleteStep07Async(new Isin(FundIsin));
+        await sut.CompleteStep08Async(new Isin(FundIsin));
 
         // Assert
         var row = await _repo.GetAsync(Partition, FundIsin);
@@ -129,14 +129,14 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     }
 
     [Test]
-    public async Task CompleteStep07Async_InFlightRow_RowCanBeStartedAgain()
+    public async Task CompleteStep08Async_InFlightRow_RowCanBeStartedAgain()
     {
         // Arrange
         await SeedInFlightAsync(navDate: Date2, anchor: Date1);
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        await sut.CompleteStep07Async(new Isin(FundIsin));
+        await sut.CompleteStep08Async(new Isin(FundIsin));
         var started = await sut.StartStep01Async(new Isin(FundIsin), Date2.AddDays(1));
 
         // Assert
@@ -144,13 +144,13 @@ public sealed class RepositoryBackedIsinProgressStoreTests
     }
 
     [Test]
-    public async Task CompleteStep07Async_MissingRow_ReturnsNullAndWritesNothing()
+    public async Task CompleteStep08Async_MissingRow_ReturnsNullAndWritesNothing()
     {
         // Arrange
         var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
 
         // Act
-        var completed = await sut.CompleteStep07Async(new Isin(FundIsin));
+        var completed = await sut.CompleteStep08Async(new Isin(FundIsin));
 
         // Assert
         var rows = await _repo.QueryPartitionAsync(Partition);
@@ -1439,28 +1439,6 @@ public sealed class RepositoryBackedIsinProgressStoreTests
         // Act & Assert
         Assert.ThrowsAsync<ArgumentException>(
             () => sut.StartStep08Async(new Isin(FundIsin), new PipelineRunId(string.Empty)));
-    }
-
-    // ── CompleteStep08Async ───────────────────────────────────────────
-
-    [Test]
-    public async Task CompleteStep08Async_InFlightRow_FreesRowAndAdvancesAnchorToNavDate()
-    {
-        // Arrange — the full Complete set stays on step 7 until step 8 takes the tail.
-        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
-        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
-
-        // Act
-        await sut.CompleteStep08Async(new Isin(FundIsin));
-
-        // Assert
-        var row = await _repo.GetAsync(Partition, FundIsin);
-        Assert.Multiple(() =>
-        {
-            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Free));
-            Assert.That(row.ProcessingStartedAt, Is.Null);
-            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date2));
-        });
     }
 
     // ── FailStep08Async ───────────────────────────────────────────────

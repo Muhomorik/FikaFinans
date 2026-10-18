@@ -39,7 +39,7 @@ public sealed class Step07ThesisValidatorEntryTests
     private Step07ThesisValidatorEntry CreateSut() => _fixture.Create<Step07ThesisValidatorEntry>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndCompletesLast()
+    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndEmitsLast()
     {
         // Arrange
         var calls = new List<string>();
@@ -55,15 +55,13 @@ public sealed class Step07ThesisValidatorEntryTests
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
         _step07.Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
-        _step07.Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
-            .Callback(() => calls.Add("complete")).Returns(Task.CompletedTask);
 
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert
+        // Assert — no complete: a later step is the chain tail, so the run stays in flight for it.
         Assert.That(calls, Is.EqualTo(new[]
-            { "begin", "load", "assemble", "agent", "persist", "emit", "complete" }));
+            { "begin", "load", "assemble", "agent", "persist", "emit" }));
         _step07.Verify(x => x.FailAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -82,7 +80,7 @@ public sealed class Step07ThesisValidatorEntryTests
         // Assert
         _step07.Verify(x => x.LoadFundAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
-        _step07.Verify(x => x.CompleteAsync(
+        _step07.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step07.Verify(x => x.FailAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -103,7 +101,7 @@ public sealed class Step07ThesisValidatorEntryTests
         // Assert
         Assert.That(thrown, Is.SameAs(boom));
         _step07.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
-        _step07.Verify(x => x.CompleteAsync(
+        _step07.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -144,7 +142,7 @@ public sealed class Step07ThesisValidatorEntryTests
     }
 
     [Test]
-    public void HandleAsync_Cancelled_NeitherCompletesNorFails()
+    public void HandleAsync_Cancelled_NeitherEmitsNorFails()
     {
         // Arrange — a shutdown mid LLM call.
         _step07
@@ -155,7 +153,7 @@ public sealed class Step07ThesisValidatorEntryTests
         Assert.ThrowsAsync<OperationCanceledException>(() => CreateSut().HandleAsync(Signal));
 
         // Assert
-        _step07.Verify(x => x.CompleteAsync(
+        _step07.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step07.Verify(x => x.FailAsync(
             It.IsAny<Step06DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);

@@ -53,8 +53,8 @@ public sealed class Step06CatalystTaggerEntry : IStep06CatalystTaggerEntry
                 await step06.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
                 // Write, then emit. The reverse order can announce output that was never
-                // stored. No complete: step 7 consumes the done-signal and is the chain
-                // tail, so the run — and the fund's row — stays in flight for it.
+                // stored. No complete: step 7 consumes the done-signal and a later step is
+                // the chain tail, so the run — and the fund's row — stays in flight for it.
                 await step06.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step06.EmitDoneAsync(signal, ct).ConfigureAwait(false);
             }

@@ -53,13 +53,10 @@ public sealed class Step07ThesisValidatorEntry : IStep07ThesisValidatorEntry
                 await step07.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
                 // Write, then emit. The reverse order can announce output that was never
-                // stored.
+                // stored. No complete: step 8 consumes the done-signal and is the chain
+                // tail, so the run — and the fund's row — stays in flight for it.
                 await step07.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step07.EmitDoneAsync(signal, ct).ConfigureAwait(false);
-
-                // Step 7 is the chain tail, so its success ends the run and frees the fund.
-                // Moves on once a later step consumes step 7's done-signal.
-                await step07.CompleteAsync(signal, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

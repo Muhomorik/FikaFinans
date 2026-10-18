@@ -37,8 +37,8 @@ public sealed class PipelineFrontDoorTests
     [Test]
     public async Task HandleAsync_AllPhasesSucceed_EmitsAndLeavesTheRowToStep2()
     {
-        // Arrange — step 2 is the chain tail, so step 1's success ends with the emit: the
-        // row stays in flight for step 2 to complete.
+        // Arrange — a later step is the chain tail, so step 1's success ends with the emit:
+        // the row stays in flight for that step to complete.
 
         // Act
         await CreateSut().HandleAsync(Signal);
