@@ -12,6 +12,7 @@ using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Application.Pipeline.Configs;
 using Microsoft.Extensions.Configuration;
 using FikaFinans.Domain.Models;
+using NLog;
 
 namespace FikaFinans.InfrastructureV2.Tests.Agents.CatalystTagger;
 
@@ -111,7 +112,8 @@ public sealed class CatalystTaggerAgentIntegrationTests
             Warnings         = null,
         };
 
-        var llm = new FoundryFundCatalystLlmClient(_projectClient, new FoundryDeploymentName(_modelId));
+        var llm = new FoundryFundCatalystLlmClient(
+            LogManager.GetLogger(nameof(FoundryFundCatalystLlmClient)), _projectClient, new FoundryDeploymentName(_modelId));
         var sut = new CatalystTaggerAgent(new TestPathsService(), llm);
 
         // Act

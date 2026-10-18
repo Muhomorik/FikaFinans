@@ -11,13 +11,16 @@ using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Domain.Macro;
 using OpenAI.Responses;
 
+using NLog;
+
 namespace FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 
 // Foundry-backed catalyst classifier. Mirrors FoundryThemeAdjacencyLlmClient
 // (step 05): create an ephemeral declarative agent with the system prompt baked
 // in, fire one CreateResponseAsync per fund, then delete the agent. Failures
-// (invalid JSON after one retry, non-Completed status) collapse to an empty
-// classification list — the agent treats that as "no catalyst" and warns.
+// (invalid JSON after one retry, non-Completed status, timeout) collapse to an empty
+// classification list, as the contract says — so each one is logged here at Warn: to
+// the caller it looks like a real "no exposure".
 public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
 {
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(2);
@@ -57,19 +60,23 @@ public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
         Original request follows:
         """;
 
+    private readonly ILogger _logger;
     private readonly AIProjectClient _projectClient;
     private readonly FoundryDeploymentName _deploymentName;
 
+    /// <param name="logger">Where the call, the verdicts and why a failure became "no exposure" are logged.</param>
     /// <param name="projectClient">The Foundry project the ephemeral agent is created in.</param>
     /// <param name="deploymentName">
     /// The Foundry deployment the agent runs on — the name the portal gave the deployment, not
     /// the model family: e.g. <c>gpt-5.4-1</c> or <c>DeepSeek-R1-0528-1</c>, see
     /// <see cref="Infrastructure.Foundry.FoundryModelIds"/>.
     /// </param>
-    public FoundryFundCatalystLlmClient(AIProjectClient projectClient, FoundryDeploymentName deploymentName)
+    public FoundryFundCatalystLlmClient(ILogger logger, AIProjectClient projectClient, FoundryDeploymentName deploymentName)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(projectClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName.Value, nameof(deploymentName));
+        _logger = logger;
         _projectClient = projectClient;
         _deploymentName = deploymentName;
     }
@@ -89,39 +96,81 @@ public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
         var validNames = activeCatalysts.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
         var userPrompt = BuildUserPrompt(fundName, fundCategory, activeCatalysts);
 
+        _logger.Debug("Catalyst LLM call — model {0}, fund '{1}', category '{2}', {3} catalyst(s), timeout {4}",
+            _deploymentName, fundName, fundCategory, activeCatalysts.Count, RunTimeout);
+
         var (agentName, agentVersion) = await CreateAgentAsync(timeoutCts.Token);
+        _logger.Trace("Catalyst LLM agent created — {0} v{1}", agentName, agentVersion);
         try
         {
             var responseClient = _projectClient.ProjectOpenAIClient
                 .GetProjectResponsesClientForAgent(agentName);
 
-            var first = await responseClient.CreateResponseAsync(userPrompt, cancellationToken: timeoutCts.Token);
-            if (first.Value.Status == ResponseStatus.Completed)
+            var first = (await responseClient.CreateResponseAsync(userPrompt, cancellationToken: timeoutCts.Token)).Value;
+            if (first.Status != ResponseStatus.Completed)
             {
-                if (TryParse(first.Value.GetOutputText(), validNames, out var parsed, out var error))
-                    return parsed;
-
-                // One corrective retry per the contract.
-                var retryPrompt = RetryPromptPrefix.Replace("{error}", error ?? "invalid JSON")
-                                  + "\n" + userPrompt;
-                var second = await responseClient.CreateResponseAsync(retryPrompt, cancellationToken: timeoutCts.Token);
-                if (second.Value.Status == ResponseStatus.Completed
-                    && TryParse(second.Value.GetOutputText(), validNames, out var retried, out _))
-                {
-                    return retried;
-                }
+                _logger.Warn("Catalyst LLM response not completed — {0}, status {1}: defaulting to no catalyst",
+                    agentName, first.Status);
+                return Array.Empty<CatalystExposureClassification>();
             }
 
+            var firstText = first.GetOutputText();
+            _logger.Trace("Catalyst LLM response — {0}: {1}", agentName, firstText);
+
+            if (TryParse(firstText, validNames, agentName, out var parsed, out var error))
+                return LogVerdicts(fundName, parsed);
+
+            // One corrective retry per the contract.
+            _logger.Warn("Catalyst LLM answer not parsed — {0}: {1}; retrying once. Raw: {2}",
+                agentName, error, firstText);
+
+            var retryPrompt = RetryPromptPrefix.Replace("{error}", error ?? "invalid JSON")
+                              + "\n" + userPrompt;
+            var second = (await responseClient.CreateResponseAsync(retryPrompt, cancellationToken: timeoutCts.Token)).Value;
+            if (second.Status != ResponseStatus.Completed)
+            {
+                _logger.Warn("Catalyst LLM retry not completed — {0}, status {1}: defaulting to no catalyst",
+                    agentName, second.Status);
+                return Array.Empty<CatalystExposureClassification>();
+            }
+
+            var secondText = second.GetOutputText();
+            _logger.Trace("Catalyst LLM retry response — {0}: {1}", agentName, secondText);
+
+            if (TryParse(secondText, validNames, agentName, out var retried, out var retryError))
+                return LogVerdicts(fundName, retried);
+
+            _logger.Warn("Catalyst LLM retry not parsed — {0}: {1}; defaulting to no catalyst. Raw: {2}",
+                agentName, retryError, secondText);
             return Array.Empty<CatalystExposureClassification>();
         }
-        catch
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            _logger.Warn("Catalyst LLM call timed out — {0}, after {1}: defaulting to no catalyst", agentName, RunTimeout);
+            return Array.Empty<CatalystExposureClassification>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Warn(ex, "Catalyst LLM call failed — {0}: defaulting to no catalyst", agentName);
             return Array.Empty<CatalystExposureClassification>();
         }
         finally
         {
             await TryDeleteAgentAsync(agentName, agentVersion);
         }
+    }
+
+    private IReadOnlyList<CatalystExposureClassification> LogVerdicts(
+        string fundName, IReadOnlyList<CatalystExposureClassification> classifications)
+    {
+        if (classifications.Count == 0)
+            _logger.Debug("Catalyst LLM verdict — fund '{0}': no classifications", fundName);
+
+        foreach (var c in classifications)
+            _logger.Debug("Catalyst LLM verdict — fund '{0}': {1} {2}, rationale: {3}",
+                fundName, c.CatalystName, c.Exposure, c.Rationale ?? "-");
+
+        return classifications;
     }
 
     private static string BuildUserPrompt(
@@ -147,9 +196,10 @@ public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
         return sb.ToString();
     }
 
-    private static bool TryParse(
+    private bool TryParse(
         string raw,
         HashSet<string> validNames,
+        string agentName,
         out IReadOnlyList<CatalystExposureClassification> result,
         out string? error)
     {
@@ -173,10 +223,18 @@ public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
                 var rationale = element.TryGetProperty("rationale", out var r) ? r.GetString() : null;
 
                 if (string.IsNullOrEmpty(name) || !validNames.Contains(name))
-                    continue; // hallucinated name → drop
+                {
+                    // The contract's hallucination guard: drop the entry, warn.
+                    _logger.Warn("Catalyst LLM named unknown catalyst '{0}' — {1}: dropped", name, agentName);
+                    continue;
+                }
 
                 if (!TryParseExposure(typeRaw, out var exposure))
+                {
+                    _logger.Warn("Catalyst LLM gave unknown exposure '{0}' for '{1}' — {2}: dropped",
+                        typeRaw, name, agentName);
                     continue;
+                }
 
                 list.Add(new CatalystExposureClassification
                 {
@@ -270,12 +328,14 @@ public sealed class FoundryFundCatalystLlmClient : IFundCatalystLlmClient
         try
         {
             await _projectClient.AgentAdministrationClient.DeleteAgentVersionAsync(agentName, agentVersion);
+            _logger.Trace("Catalyst LLM agent deleted — {0} v{1}", agentName, agentVersion);
         }
         catch (RequestFailedException ex) when (ex.Status == 404) { }
         catch (ClientResultException ex) when (ex.Status == 404) { }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort cleanup.
+            // Best-effort cleanup; stragglers can be swept later.
+            _logger.Warn(ex, "Catalyst LLM agent not deleted — {0} v{1}, left for a sweep", agentName, agentVersion);
         }
     }
 }

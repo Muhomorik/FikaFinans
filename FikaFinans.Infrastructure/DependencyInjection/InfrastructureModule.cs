@@ -353,6 +353,7 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.Register(ctx =>
             new FoundryFundCatalystLlmClient(
+                LogManager.GetLogger(typeof(FoundryFundCatalystLlmClient).FullName!),
                 ctx.Resolve<AIProjectClient>(),
                 ResolveDefaultDeploymentName(ctx)))
             .As<IFundCatalystLlmClient>()
