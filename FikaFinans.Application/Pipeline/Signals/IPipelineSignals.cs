@@ -16,4 +16,6 @@ public interface IPipelineSignals
     Task PublishAsync(Step04DoneSignal signal, CancellationToken ct = default);
 
     Task PublishAsync(Step05DoneSignal signal, CancellationToken ct = default);
+
+    Task PublishAsync(Step06DoneSignal signal, CancellationToken ct = default);
 }
