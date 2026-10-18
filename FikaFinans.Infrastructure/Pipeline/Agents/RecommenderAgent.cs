@@ -34,6 +34,11 @@ public sealed class RecommenderAgent : IRecommenderAgent
         return output;
     }
 
+    /// <summary>
+    /// Recommends for every fund of a whole step-7 output, carrying its envelope through
+    /// unchanged.
+    /// </summary>
+    /// <remarks>Not on the interface — kept for <see cref="Run"/> and its tests.</remarks>
     public DataLoaderOutput RunInMemory(DataLoaderOutput thesisValidated)
     {
         var warnings = new List<string>(thesisValidated.DataQuality.Warnings);
@@ -66,6 +71,37 @@ public sealed class RecommenderAgent : IRecommenderAgent
                 CoreCount     = thesisValidated.DataQuality.CoreCount,
                 Warnings      = warnings,
             },
+        };
+    }
+
+    /// <inheritdoc />
+    public DataLoaderOutput RunInMemory(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+
+        var warnings = new List<string>();
+        var recommendedFunds = new List<FundRecord>(funds.Count);
+
+        foreach (var fund in funds)
+        {
+            var result = ProcessFund(fund);
+            recommendedFunds.Add(result.Fund);
+            warnings.AddRange(result.Warnings);
+        }
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = recommendedFunds,
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality { Warnings = warnings },
         };
     }
 
