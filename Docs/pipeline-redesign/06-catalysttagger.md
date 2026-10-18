@@ -423,7 +423,7 @@ One change per row, each reviewed and committed before the next.
 | 3 | ✅ `FoundryFundCatalystLlmClient` gets a logger, as `FoundryThemeAdjacencyLlmClient` has — Debug per call and per verdict, Warn per failure reason and per undeleted agent, the caller's cancellation rethrown. Return values unchanged | the client, its registration, its integration test's construction | — |
 | 4 | ✅ `StartStep06Async`, `CompleteStep06Async`, `FailStep06Async`, `ListOrphanedStep06Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 5 | ✅ `IStep06CatalystTagger` + handler, step 5's shape. Not wired. Load reads `Step05Json` and the context — newest up to the week, fail when none; the agent phase passes the context's catalysts; warnings logged; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 4; "Which context" |
-| 6 | `IStep06CatalystTaggerEntry` + entry point; registration as step 5's | Application, `InfrastructureModule` | row 5 |
+| 6 | ✅ `IStep06CatalystTaggerEntry` + entry point; registration as step 5's | Application, `InfrastructureModule` | row 5 |
 | 7a | **Step 5 gives up the tail** — `CompleteStep05Async`, step 5's `CompleteAsync` and the entry's call removed; complete tests move to step 6 | step 5's handler, entry point and tests, `IIsinProgressStore` | row 6 |
 | 7b | Subscription `Step05DoneSignal` → step 6's entry point | `MainWindowViewModel` | 7a, row 3 |
 | 8 | Step 6's tab goes passive, shaped like step 5's | `Step6CatalystTaggerViewModel`, no XAML | row 7b |

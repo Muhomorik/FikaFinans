@@ -452,6 +452,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep03Services(builder);
         RegisterStep04Services(builder);
         RegisterStep05Services(builder);
+        RegisterStep06Services(builder);
     }
 
     /// <summary>
@@ -610,6 +611,35 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step05MacroAlignerEntry)),
                 ctx.Resolve<Func<IStep05MacroAligner>>()))
             .As<IStep05MacroAlignerEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 6 — only what is step 6's own, as for steps 2–5. It has no config
+    /// provider: its prompt is a constant in the LLM client. It reads step 3's context store,
+    /// registered there, and shares step 1's progress store and buses.
+    /// </summary>
+    private static void RegisterStep06Services(ContainerBuilder builder)
+    {
+        // Deliberately not SingleInstance, same as steps 1–5: it carries one run's state in
+        // fields — record, context, agent output, progress row.
+        builder.Register(ctx => new Step06CatalystTaggerHandler(
+                logger: LogManager.GetLogger(nameof(Step06CatalystTaggerHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                contexts: ctx.Resolve<IMacroContextStore>(),
+                agent: ctx.Resolve<ICatalystTaggerAgent>(),
+                signals: ctx.Resolve<IPipelineSignals>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep06CatalystTagger>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per signal without knowing a container exists.
+        builder.Register(ctx => new Step06CatalystTaggerEntry(
+                LogManager.GetLogger(nameof(Step06CatalystTaggerEntry)),
+                ctx.Resolve<Func<IStep06CatalystTagger>>()))
+            .As<IStep06CatalystTaggerEntry>()
             .SingleInstance();
     }
 
