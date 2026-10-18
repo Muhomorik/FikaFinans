@@ -17,7 +17,7 @@
 
 # Pipeline Redesign
 
-**This folder started as a design.** Steps 1 to 7 are now implemented
+**This folder started as a design.** Steps 1 to 8 are now implemented
 for the local (WPF) host — each page's status line says how far; every
 other page is still design only, and no page is a record of current
 behaviour beyond what its status says.
@@ -72,6 +72,6 @@ already settled; it may not settle one on its own.
 | 5 | MacroAligner | [05-macroaligner.md](./05-macroaligner.md) — implemented locally; two inputs, step 4's record and step 3's context; the chain tail |
 | 6 | CatalystTagger | [06-catalysttagger.md](./06-catalysttagger.md) — implemented locally; step 5's shape with catalysts, but the LLM runs for every fund |
 | 7 | ThesisValidator | [07-thesisvalidator.md](./07-thesisvalidator.md) — implemented locally; one input, no context; hybrid like step 5 — the LLM only on conflicting matrix rows |
-| 8 | Recommender | [08-recommender.md](./08-recommender.md) — design; code-only and synchronous, step 4's agent call on step 7's chain; the last per-fund link and the chain tail |
+| 8 | Recommender | [08-recommender.md](./08-recommender.md) — implemented locally; code-only and synchronous, step 4's agent call on step 7's chain; the last per-fund link and the chain tail |
 | 9 | UniverseEnricher | not written — universe-wide barrier, translation unresolved |
 | 10 | PortfolioConstructor | not written — runs on a daily timer, outside the per-fund chain |

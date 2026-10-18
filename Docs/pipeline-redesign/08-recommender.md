@@ -1,7 +1,7 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: being built for the local (WPF) host, 2026-10-18 — see the ✅
-  marks in "Proposed implementation order". Follows step 7's chain, so the
+  STATUS: implemented for the local (WPF) host, 2026-10-18 — every row of
+  "Proposed implementation order" is done; the cloud host is not. Follows step 7's chain, so the
   trigger and the input column are not new choices. Code-only, so there is
   no LLM client and no client logging row. Decided 2026-10-18, as
   proposed: a synchronous domain-input RunInMemory, as step 4; no rule
@@ -404,7 +404,7 @@ One change per row, each reviewed and committed before the next. Step
 | 5 | ✅ `IStep08RecommenderEntry` + entry point; registration as step 7's | Application, `InfrastructureModule` | row 4 |
 | 6a | ✅ **Step 7 gives up the tail** — `CompleteStep07Async`, step 7's `CompleteAsync` and the entry's call removed; complete tests move to step 8 | step 7's handler, entry point and tests, `IIsinProgressStore` | row 5, choice 3 |
 | 6b | ✅ Subscription `Step07DoneSignal` → step 8's entry point, `RunStep08Async` catching and logging as step 7's | `MainWindowViewModel` | 6a |
-| 7 | Step 8's tab goes passive, shaped like step 7's | `Step8RecommenderViewModel`, no XAML | row 6b, choice 4 |
+| 7 | ✅ Step 8's tab goes passive, shaped like step 7's | `Step8RecommenderViewModel`, no XAML | row 6b, choice 4 |
 
 Rows 6a and 6b go in back to back: between them a fund's run would
 finish at step 7 and step 8 would never be reached — harmless, since
@@ -430,4 +430,8 @@ not settled here.
   cloud, step outputs too large for Tables, the fresh-handler factory,
   how the envelope is stored — all on step 2's page; step 6's verdict
   instability, which reaches step 8 through step 7's thesis — on step 6's
-  and step 7's pages.
+  and step 7's pages. Seen end to end in the first local run, 2026-10-18:
+  the fund step 7's page names was tagged Indirect again, so step 7 asked
+  the LLM, which confirmed Invalid, and step 8 said **ThesisExit**; in the
+  run before, untagged, the same fund would have been Partial →
+  **MomentumExit**. Same fund, same context — a different recommendation.
