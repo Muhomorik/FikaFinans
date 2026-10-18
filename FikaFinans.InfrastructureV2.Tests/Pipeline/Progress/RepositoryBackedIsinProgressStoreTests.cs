@@ -1001,6 +1001,194 @@ public sealed class RepositoryBackedIsinProgressStoreTests
         Assert.That(orphaned.Select(r => r.Isin), Is.EquivalentTo(new[] { "LU0000000051", "LU0000000055" }));
     }
 
+    // ── StartStep06Async ──────────────────────────────────────────────
+
+    [Test]
+    public async Task StartStep06Async_InFlightSameRunAtStep5_MovesCurrentStepTo6()
+    {
+        // Arrange
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.StartStep05Async(new Isin(FundIsin), RunId);
+
+        // Act
+        var started = await sut.StartStep06Async(new Isin(FundIsin), RunId);
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(started, Is.Not.Null);
+            Assert.That(row!.CurrentStep, Is.EqualTo(6));
+        });
+    }
+
+    [Test]
+    public async Task StartStep06Async_InFlightSameRun_KeepsEverythingElse()
+    {
+        // Arrange — step 5's output is step 6's input, so nothing is cleared.
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1, lastError: "old failure", attemptCount: 1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.StartStep06Async(new Isin(FundIsin), RunId);
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Processing));
+            Assert.That(row.RunId, Is.EqualTo(RunId));
+            Assert.That(row.NavDate, Is.EqualTo(Date2));
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date1));
+            Assert.That(row.ProcessingStartedAt, Is.EqualTo(StartedAt));
+            Assert.That(row.LastError, Is.EqualTo("old failure"));
+            Assert.That(row.AttemptCount, Is.EqualTo(1));
+            Assert.That(row.Step01Json, Is.EqualTo("step1"));
+        });
+    }
+
+    [Test]
+    public async Task StartStep06Async_DifferentRunId_ReturnsNullAndLeavesRowAlone()
+    {
+        // Arrange — a late signal: a newer run has started step 1 on the fund since.
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var started = await sut.StartStep06Async(new Isin(FundIsin), new PipelineRunId("older-run"));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(started, Is.Null);
+            Assert.That(row!.CurrentStep, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task StartStep06Async_RowFree_ReturnsNull()
+    {
+        // Arrange — the run already ended, so a signal from it is late too.
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.FailStep05Async(new Isin(FundIsin), "Step 5 exploded");
+
+        // Act
+        var started = await sut.StartStep06Async(new Isin(FundIsin), RunId);
+
+        // Assert
+        Assert.That(started, Is.Null);
+    }
+
+    [Test]
+    public async Task StartStep06Async_MissingRow_ReturnsNullAndWritesNothing()
+    {
+        // Arrange
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var started = await sut.StartStep06Async(new Isin(FundIsin), RunId);
+
+        // Assert
+        var rows = await _repo.QueryPartitionAsync(Partition);
+        Assert.Multiple(() =>
+        {
+            Assert.That(started, Is.Null);
+            Assert.That(rows, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void StartStep06Async_EmptyRunId_ThrowsArgumentException()
+    {
+        // Arrange
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act & Assert
+        Assert.ThrowsAsync<ArgumentException>(
+            () => sut.StartStep06Async(new Isin(FundIsin), new PipelineRunId(string.Empty)));
+    }
+
+    // ── CompleteStep06Async ───────────────────────────────────────────
+    // The rest of the complete cases move here from step 5 when step 5 gives up the tail.
+
+    [Test]
+    public async Task CompleteStep06Async_InFlightRow_FreesRowAndAdvancesAnchorToNavDate()
+    {
+        // Arrange
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.CompleteStep06Async(new Isin(FundIsin));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Free));
+            Assert.That(row.ProcessingStartedAt, Is.Null);
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date2));
+        });
+    }
+
+    // ── FailStep06Async ───────────────────────────────────────────────
+
+    [Test]
+    public async Task FailStep06Async_InFlightRow_FreesRowAndKeepsAnchor()
+    {
+        // Arrange
+        await SeedInFlightAsync(navDate: Date2, anchor: Date1);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.FailStep06Async(new Isin(FundIsin), "no macro context for 2026-W23 or earlier");
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.State, Is.EqualTo(IsinProgressState.Free));
+            Assert.That(row.ProcessingStartedAt, Is.Null);
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date1));
+            Assert.That(row.LastError, Is.EqualTo("no macro context for 2026-W23 or earlier"));
+            Assert.That(row.AttemptCount, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void FailStep06Async_EmptyError_ThrowsArgumentException()
+    {
+        // Arrange
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act & Assert
+        Assert.ThrowsAsync<ArgumentException>(
+            () => sut.FailStep06Async(new Isin(FundIsin), string.Empty));
+    }
+
+    // ── ListOrphanedStep06Async ───────────────────────────────────────
+
+    [Test]
+    public async Task ListOrphanedStep06Async_MixedRows_ReturnsOnlyStep6RunsStartedBeforeSession()
+    {
+        // Arrange
+        await SeedRowAsync("LU0000000061", IsinProgressState.Processing, step: 6, startedAt: SessionStart.AddHours(-1));
+        await SeedRowAsync("LU0000000062", IsinProgressState.Processing, step: 5, startedAt: SessionStart.AddHours(-1));
+        await SeedRowAsync("LU0000000063", IsinProgressState.Processing, step: 6, startedAt: SessionStart.AddMinutes(5));
+        await SeedRowAsync("LU0000000064", IsinProgressState.Free, step: 6, startedAt: null);
+        await SeedRowAsync("LU0000000065", IsinProgressState.Processing, step: 6, startedAt: null);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var orphaned = await sut.ListOrphanedStep06Async(SessionStart);
+
+        // Assert
+        Assert.That(orphaned.Select(r => r.Isin), Is.EquivalentTo(new[] { "LU0000000061", "LU0000000065" }));
+    }
+
     private Task SeedRowAsync(string isin, IsinProgressState state, int step, DateTimeOffset? startedAt)
         => _repo.UpsertAsync(new IsinProgressEntity
         {

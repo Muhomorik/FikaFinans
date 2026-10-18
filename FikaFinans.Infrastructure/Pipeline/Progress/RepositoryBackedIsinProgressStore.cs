@@ -244,6 +244,28 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         DateTimeOffset startedBefore, CancellationToken ct = default)
         => ListOrphanedAsync(StepId.MacroAligner, startedBefore, ct);
 
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> StartStep06Async(
+        Isin isin, PipelineRunId runId, CancellationToken ct = default)
+        => ContinueRunAsync(isin, runId, StepId.CatalystTagger, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> CompleteStep06Async(Isin isin, CancellationToken ct = default)
+        => FreeAsync(isin, StepId.CatalystTagger, error: null, ct);
+
+    /// <inheritdoc />
+    public Task<IsinProgressEntity?> FailStep06Async(Isin isin, string error, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(error);
+
+        return FreeAsync(isin, StepId.CatalystTagger, error, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep06Async(
+        DateTimeOffset startedBefore, CancellationToken ct = default)
+        => ListOrphanedAsync(StepId.CatalystTagger, startedBefore, ct);
+
     /// <summary>
     /// The one way a run moves on to a later step, whichever step is starting: a check that
     /// the run still holds the row, and a mark of the step it has reached.
