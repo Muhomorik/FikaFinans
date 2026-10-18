@@ -1,8 +1,9 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design only, 2026-10-18 — nothing in "Proposed implementation
-  order" is built. Follows step 5's chain, so the trigger and the input
-  column are not new choices. Decided 2026-10-18: the same context read
+  STATUS: implemented for the local (WPF) host, 2026-10-18 — every row of
+  "Proposed implementation order" is done; the cloud host is not. The
+  verdict cache is not built. Follows step 5's chain, so the trigger and
+  the input column are not new choices. Decided 2026-10-18: the same context read
   as step 5 (A); a domain-input RunInMemoryAsync that filters catalysts,
   as step 5's; the catalyst LLM client gains step 5's client's logging
   before the chain reaches it; step 6 becomes the chain tail in its own
@@ -426,7 +427,7 @@ One change per row, each reviewed and committed before the next.
 | 6 | ✅ `IStep06CatalystTaggerEntry` + entry point; registration as step 5's | Application, `InfrastructureModule` | row 5 |
 | 7a | ✅ **Step 5 gives up the tail** — `CompleteStep05Async`, step 5's `CompleteAsync` and the entry's call removed; complete tests move to step 6 | step 5's handler, entry point and tests, `IIsinProgressStore` | row 6 |
 | 7b | ✅ Subscription `Step05DoneSignal` → step 6's entry point | `MainWindowViewModel` | 7a, row 3 |
-| 8 | Step 6's tab goes passive, shaped like step 5's | `Step6CatalystTaggerViewModel`, no XAML | row 7b |
+| 8 | ✅ Step 6's tab goes passive, shaped like step 5's | `Step6CatalystTaggerViewModel`, no XAML | row 7b |
 | — | Verdict cache — **not scheduled**, waits on the open question | the handler's registration or a new store; `IFundCatalystLlmClient` | the cache question |
 
 Rows 7a and 7b go in back to back: between them a fund's run would

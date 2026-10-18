@@ -70,7 +70,7 @@ already settled; it may not settle one on its own.
 | 3 | MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) — implemented locally; a per-fund hop doing per-week work |
 | 4 | SignalScorer | [04-signalscorer.md](./04-signalscorer.md) — implemented locally; a code-only hop, step 2's pattern |
 | 5 | MacroAligner | [05-macroaligner.md](./05-macroaligner.md) — implemented locally; two inputs, step 4's record and step 3's context; the chain tail |
-| 6 | CatalystTagger | [06-catalysttagger.md](./06-catalysttagger.md) — design only; step 5's shape with catalysts, but the LLM runs for every fund |
+| 6 | CatalystTagger | [06-catalysttagger.md](./06-catalysttagger.md) — implemented locally; step 5's shape with catalysts, but the LLM runs for every fund; the chain tail |
 | 7 | ThesisValidator | not written |
 | 8 | Recommender | not written |
 | 9 | UniverseEnricher | not written — universe-wide barrier, translation unresolved |
