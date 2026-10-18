@@ -392,46 +392,6 @@ public sealed class Step06CatalystTaggerHandlerTests
         });
     }
 
-    // ── CompleteAsync ─────────────────────────────────────────────────
-
-    [Test]
-    public async Task CompleteAsync_AfterStart_CompletesStep06()
-    {
-        // Arrange
-        var sut = CreateSut();
-        await sut.BeginProcessingAsync(Signal);
-
-        // Act
-        await sut.CompleteAsync(Signal);
-
-        // Assert
-        _progress.Verify(x => x.CompleteStep06Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public void CompleteAsync_BeforeStart_ThrowsInvalidOperationException()
-    {
-        // Arrange — completing a row this run never held would free another run's fund.
-        var sut = CreateSut();
-
-        // Act & Assert
-        Assert.ThrowsAsync<InvalidOperationException>(() => sut.CompleteAsync(Signal));
-    }
-
-    [Test]
-    public async Task CompleteAsync_StoreThrows_Rethrows()
-    {
-        // Arrange — rethrown so the caller fails the run instead of leaving it in flight.
-        _progress
-            .Setup(x => x.CompleteStep06Async(Signal.Isin, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("store unreachable"));
-        var sut = CreateSut();
-        await sut.BeginProcessingAsync(Signal);
-
-        // Act & Assert
-        Assert.ThrowsAsync<InvalidOperationException>(() => sut.CompleteAsync(Signal));
-    }
-
     // ── FailAsync ─────────────────────────────────────────────────────
 
     [Test]

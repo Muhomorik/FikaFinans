@@ -59,7 +59,7 @@ public sealed class Step04SignalScorerEntryTests
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert — no complete: step 5 is the chain tail, so the run stays in flight for it.
+        // Assert — no complete: a later step is the chain tail, so the run stays in flight for it.
         Assert.That(calls, Is.EqualTo(new[]
             { "begin", "load", "assemble", "agent", "persist", "emit" }));
         _step04.Verify(x => x.FailAsync(

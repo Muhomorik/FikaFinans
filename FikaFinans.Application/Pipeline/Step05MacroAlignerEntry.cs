@@ -53,8 +53,8 @@ public sealed class Step05MacroAlignerEntry : IStep05MacroAlignerEntry
                 await step05.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
                 // Write, then emit. The reverse order can announce output that was never
-                // stored. No complete: step 6 consumes the done-signal and is the chain
-                // tail, so the run — and the fund's row — stays in flight for it.
+                // stored. No complete: step 6 consumes the done-signal and a later step is
+                // the chain tail, so the run — and the fund's row — stays in flight for it.
                 await step05.PersistAsync(signal, ct).ConfigureAwait(false);
                 await step05.EmitDoneAsync(signal, ct).ConfigureAwait(false);
             }

@@ -412,7 +412,7 @@ One change per row, each reviewed and committed before the next.
 | 4 | ✅ `StartStep07Async`, `CompleteStep07Async`, `FailStep07Async`, `ListOrphanedStep07Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 5 | ✅ `IStep07ThesisValidator` + handler, step 6's shape without the context read. Not wired. Warnings logged; one line per fund with validity, method and baseline; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 4 |
 | 6 | ✅ `IStep07ThesisValidatorEntry` + entry point; registration as step 6's | Application, `InfrastructureModule` | row 5 |
-| 7a | **Step 6 gives up the tail** — `CompleteStep06Async`, step 6's `CompleteAsync` and the entry's call removed; complete tests move to step 7 | step 6's handler, entry point and tests, `IIsinProgressStore` | row 6, choice 4 |
+| 7a | ✅ **Step 6 gives up the tail** — `CompleteStep06Async`, step 6's `CompleteAsync` and the entry's call removed; complete tests move to step 7 | step 6's handler, entry point and tests, `IIsinProgressStore` | row 6, choice 4 |
 | 7b | Subscription `Step06DoneSignal` → step 7's entry point | `MainWindowViewModel` | 7a, row 3 |
 | 8 | Step 7's tab goes passive, shaped like step 6's | `Step7ThesisValidatorViewModel`, no XAML | row 7b, choice 5 |
 
