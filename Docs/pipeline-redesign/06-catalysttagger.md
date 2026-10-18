@@ -425,7 +425,7 @@ One change per row, each reviewed and committed before the next.
 | 5 | ✅ `IStep06CatalystTagger` + handler, step 5's shape. Not wired. Load reads `Step05Json` and the context — newest up to the week, fail when none; the agent phase passes the context's catalysts; warnings logged; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 4; "Which context" |
 | 6 | ✅ `IStep06CatalystTaggerEntry` + entry point; registration as step 5's | Application, `InfrastructureModule` | row 5 |
 | 7a | ✅ **Step 5 gives up the tail** — `CompleteStep05Async`, step 5's `CompleteAsync` and the entry's call removed; complete tests move to step 6 | step 5's handler, entry point and tests, `IIsinProgressStore` | row 6 |
-| 7b | Subscription `Step05DoneSignal` → step 6's entry point | `MainWindowViewModel` | 7a, row 3 |
+| 7b | ✅ Subscription `Step05DoneSignal` → step 6's entry point | `MainWindowViewModel` | 7a, row 3 |
 | 8 | Step 6's tab goes passive, shaped like step 5's | `Step6CatalystTaggerViewModel`, no XAML | row 7b |
 | — | Verdict cache — **not scheduled**, waits on the open question | the handler's registration or a new store; `IFundCatalystLlmClient` | the cache question |
 

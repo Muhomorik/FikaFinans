@@ -264,18 +264,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Subscribe(done => RunStep04Async(step04Entry, done));
         _disposables.Add(step04Sub);
 
-        // Step 4's done-signal: the local stand-in for step 5's queue trigger. Step 5 is the
-        // chain tail, so it is the one that frees the fund's row.
+        // Step 4's done-signal: the local stand-in for step 5's queue trigger.
         var step05Entry = _scope.Resolve<IStep05MacroAlignerEntry>();
         var step05Sub = pipelineSignals.Signals
             .OfType<Step04DoneSignal>()
             .Subscribe(done => RunStep05Async(step05Entry, done));
         _disposables.Add(step05Sub);
+
+        // Step 5's done-signal: the local stand-in for step 6's queue trigger. Step 6 is the
+        // chain tail, so it is the one that frees the fund's row. Calls the LLM per fund.
+        var step06Entry = _scope.Resolve<IStep06CatalystTaggerEntry>();
+        var step06Sub = pipelineSignals.Signals
+            .OfType<Step05DoneSignal>()
+            .Subscribe(done => RunStep06Async(step06Entry, done));
+        _disposables.Add(step06Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 5
-    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep05Async"/>; steps 6-10
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 6
+    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep06Async"/>; steps 7-10
     /// still run through <see cref="IPipelineRunner"/> from the Run All button.
     /// </summary>
     /// <remarks>
@@ -397,6 +404,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 5 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-5 done-signal to step 6's entry point, off the Rx callback — the bus
+    /// publishes inside step 5's emit, so running step 6 inline would hold step 5 up.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
+    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
+    /// </remarks>
+    private void RunStep06Async(IStep06CatalystTaggerEntry step06Entry, Step05DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step06Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 6 cancelled for {Isin}", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 6 failed for {Isin}", signal.Isin.Value);
             }
         });
 
