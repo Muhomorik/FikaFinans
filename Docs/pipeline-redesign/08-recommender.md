@@ -1,9 +1,14 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design, 2026-10-18 — nothing built yet. Follows step 7's chain,
-  so the trigger and the input column are not new choices. Code-only, so
-  there is no LLM client and no logging row. The choices still open are
-  in "To settle before building"; the open questions are at the end.
+  STATUS: being built for the local (WPF) host, 2026-10-18 — see the ✅
+  marks in "Proposed implementation order". Follows step 7's chain, so the
+  trigger and the input column are not new choices. Code-only, so there is
+  no LLM client and no client logging row. Decided 2026-10-18, as
+  proposed: a synchronous domain-input RunInMemory, as step 4; no rule
+  change for Weakness + Valid or Strength + Invalid; step 7 gives up the
+  tail in its own commit; the debug button goes through the handler;
+  logging in the handler, the agent stays logger-free. The open questions
+  are at the end.
 -->
 
 # Step 8 — Recommender
@@ -373,9 +378,11 @@ Same as step 7's tab:
 disk fallback, and runs `Run` on the button. All of that leaves the tab.
 No XAML changes.
 
-## To settle before building
+## Settled before building
 
-| # | Choice | Proposed |
+All decided 2026-10-18, as proposed.
+
+| # | Choice | Decided |
 | --- | --- | --- |
 | 1 | Agent call | a domain-input `RunInMemory` on `IRecommenderAgent`, **synchronous**, as step 4 — not async as steps 5–7 |
 | 2 | Weakness + Valid, Strength + Invalid | no rule change; open question for the contract |
@@ -390,7 +397,7 @@ One change per row, each reviewed and committed before the next. Step
 
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
-| 1 | `Step08DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
+| 1 | ✅ `Step08DoneSignal` and its overload | `Pipeline/Signals`, `LocalRxPipelineSignalBus` | — |
 | 2 | Domain-input `RunInMemory` onto `IRecommenderAgent` — `ProcessFund` per record, wrapped, warnings into the output, portfolio fields empty. No rule change. Tests in a new file beside `RecommenderAgentTests` | `IRecommenderAgent`, `RecommenderAgent`, a new test file | choice 1 |
 | 3 | `StartStep08Async`, `CompleteStep08Async`, `FailStep08Async`, `ListOrphanedStep08Async` | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
 | 4 | `IStep08Recommender` + handler, step 7's shape with a synchronous agent call. Not wired. Logging per "Logging — in the handler": Debug per phase, a Debug verdict line per fund with signal, thesis, exposure, held, recommendation and reason, Warn per agent warning, Error per failed phase; `CompleteAsync`, `ReadOutputAsync`, `ComputeOutputAsync` included | Application, `Pipeline/Steps` | rows 1, 2, 3, choice 5 |
