@@ -73,5 +73,5 @@ already settled; it may not settle one on its own.
 | 6 | CatalystTagger | [06-catalysttagger.md](./06-catalysttagger.md) — implemented locally; step 5's shape with catalysts, but the LLM runs for every fund |
 | 7 | ThesisValidator | [07-thesisvalidator.md](./07-thesisvalidator.md) — implemented locally; one input, no context; hybrid like step 5 — the LLM only on conflicting matrix rows |
 | 8 | Recommender | [08-recommender.md](./08-recommender.md) — implemented locally; code-only and synchronous, step 4's agent call on step 7's chain; the last per-fund link and the chain tail |
-| 9 | UniverseEnricher | [09-universeenricher.md](./09-universeenricher.md) — design, shape not settled; proposes leaving the per-fund chain for one universe pass on step 10's trigger |
+| 9 | UniverseEnricher | [09-universeenricher.md](./09-universeenricher.md) — design; a universe-wide barrier — waits for every fund's step 8 record; when the barrier closes is open |
 | 10 | PortfolioConstructor | not written — runs on a daily timer, outside the per-fund chain |

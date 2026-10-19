@@ -1,12 +1,11 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design, 2026-10-19 — nothing built, and the shape is not settled.
-  Step 9 is the first step that cannot be one more link in the per-fund
-  chain: most of its work compares a fund with every other fund. This page
-  answers the parent plan's barrier question for step 9 the way step 3's
-  page answered it for step 3 — by asking what the step actually reads.
-  The choices are in "To settle before building"; the open questions are
-  at the end.
+  STATUS: design, 2026-10-19 — nothing built. Step 9 is a universe-wide
+  barrier: its contract takes every fund's step 8 record, and the code
+  already runs it that way after the per-fund block. What signal-driven
+  runs add is one question — how the barrier knows it has closed. The
+  choices are in "To settle before building"; the open questions are at
+  the end.
 -->
 
 # Step 9 — UniverseEnricher
@@ -14,16 +13,14 @@
 > **Related:**
 >
 > - What every step stores and reads — the per-fund row and its
->   `Step01Json` … `Step09Json` columns, the macro context, step
+>   `Step01Json` … `Step09Json` columns, the row lifecycle, step
 >   configuration: [pipeline-data.md](./pipeline-data.md)
 > - The cross-cutting design this follows from, and its "barrier steps
 >   versus the queue chain" open question:
 >   [event-driven-orchestration-plan.md](./event-driven-orchestration-plan.md)
-> - The step before it, which stays the per-fund chain's tail if step 9
->   leaves the chain: [08-recommender.md](./08-recommender.md)
-> - The other barrier, and how its page settled the same question:
->   [03-macroanalyst.md](./03-macroanalyst.md)
-> - The queue layout that draws step 9 as a per-fund hop, and step 10's
+> - The step before it — the per-fund chain's tail:
+>   [08-recommender.md](./08-recommender.md)
+> - The queue layout, which draws step 9 as a per-fund hop, and step 10's
 >   daily timer: [backend-nav-sync-plan.md](../backend-nav-sync-plan.md)
 > - What this step does **today** — the four passes, conviction scoring,
 >   rank, alternatives, rotation pairing, failure modes:
@@ -32,213 +29,146 @@
 `StepId.UniverseEnricher`, implemented by `UniverseEnricherAgent` behind
 `IUniverseEnricherAgent`, surfaced in the desktop app as
 `Step9UniverseEnricherViewModel`. This page covers only what the move to
-signal-driven, per-fund processing changes — and, for step 9, whether it
-moves at all.
+signal-driven processing changes.
 
-Step 9 is hybrid: code scores, pairs and ranks; an LLM writes one-line
-differentiators for each Buy's alternatives. Unlike every step before
-it, **most of its work needs the other funds**. `PipelineRunner` runs it
-once over the whole universe, after the per-fund block.
+## A barrier
 
-## What step 9 reads
+Steps 1–8 work on one fund at a time: a fund's record goes from
+DataLoader to Recommender without looking at any other fund. Step 3 is
+one shared run per week, but it does not depend on other funds either.
 
-### The four passes, by scope
+Step 9 is the first step that has to **wait for every fund** to get
+through steps 1–8 before it can start. Its contract says so throughout:
 
-The contract runs four passes. Only one of them is about one fund:
-
-| Pass | Needs | Scope |
-| --- | --- | --- |
-| 1 — rotation pairing | every fund's recommendation and matched theme — a theme pairs when it holds an Exit **and** an Entry | **universe** |
-| 2 — alternatives + LLM differentiators | every fund in the Buy's category, ranked by Sharpe 12w | **universe** (peers), one LLM call per Buy |
-| 3 — conviction, four of five components | the fund's own signal, metrics, macro alignment, thesis | per fund |
-| 3 — conviction, universe context | whether pass 1 paired the fund, or pass 2 found it peers | **universe** |
-| 4 — universe rank | every fund with the same recommendation, by conviction | **universe** |
-
-So the per-fund part is four arithmetic components. Everything that
-makes step 9 *step 9* — pairs, peers, context, rank — is a statement
-about the fund relative to the rest.
-
-### What reads step 9's output
-
-| Reader | Reads |
+| The contract | Says |
 | --- | --- |
-| `PortfolioConstructorAgent` (step 10) | `ConvictionScore` — gates and sizes trades; `RotationPairId` — flags a pair executed on one leg |
-| `PortfolioConstructorAgent` | **not** `UniverseRank`, although step 10's contract says step 10 uses it to pick which Buys to fund and which Sell to take; today it scales Buys proportionally |
-| `Step9UniverseEnricherViewModel` | the whole output — the signals chart |
-| `FundDetailViewModel` | step 9's file, for one fund |
+| Inputs | "All per-fund records with full context including recommendation" |
+| What it does | starts from "all funds + recommendation" |
+| Rotation pairing | a theme pairs when it holds an Exit **and** an Entry — across funds |
+| Alternatives | peers in the Buy's category — other funds |
+| Universe rank | `of_total_in_recommendation` — a count over the whole set |
+| Evaluation rubric | is given "the full universe of fund records" |
 
-Step 10 is itself universe-wide: it sizes trades against the whole
-portfolio's cash. Every consumer of step 9 that acts on it is.
+Only four of the five conviction components are about one fund. Pairs,
+peers, universe context and rank are statements about the set, so step
+9 cannot run per fund — and it is not a per-fund hop in the queue sense,
+whatever [backend-nav-sync-plan.md](../backend-nav-sync-plan.md)'s
+layout draws.
 
-## What "the universe" is under signal-driven runs
+## What the code does today
 
-Under `PipelineRunner`, the universe is the run: every fund went through
-steps 1–8 together, under one run id, for one week. Under signal-driven
-processing none of that holds:
-
-| | `PipelineRunner` | Signal-driven |
-| --- | --- | --- |
-| Run id | one for the universe | one per fund — step 1 mints it |
-| Week | one | each fund's own trading date |
-| "Every fund is done" | after the per-fund block | **never** — NAV signals arrive one fund at a time, any day |
-| A fund mid-run | — | its step 2–8 columns are empty: step 1's claim clears them |
-| A fund whose latest run failed | the run halts | its later columns are empty until a retry succeeds |
-
-So the only universe there ever is, is **a snapshot of the rows**: every
-fund whose latest run reached step 8, each at its own date, read at some
-moment. Which moment is the real question — and it is the same question
-step 10 already answers with its daily timer in
-[backend-nav-sync-plan.md](../backend-nav-sync-plan.md).
-
-`ReadStepOutputAsync` cannot take that snapshot today: it reads one run's
-records by run id, and a universe spans many runs. Any shape below needs
-a new read — "the latest step 8 record on every row" *(new)*.
-
-## Four shapes
-
-| | A — per-fund hop, reads the universe | B — split: per-fund 9a, universe 9b | C — leaves the chain, runs with step 10 | D — fan-in barrier |
-| --- | --- | --- | --- | --- |
-| Triggered by | `Step08DoneSignal`, per fund | 9a: `Step08DoneSignal`; 9b: step 10's trigger | step 10's trigger | "every fund finished step 8" |
-| Computes for | the one fund, against the snapshot | 9a: the four per-fund components; 9b: pairs, peers, context, rank | every fund, against one snapshot | every fund |
-| Ranks and pairs | **inconsistent** — see below | consistent | consistent | consistent |
-| LLM differentiator calls | one per Buy, per Buy's own run | one per Buy, per 9b run | one per Buy, per run | — |
-| Chain tail | step 9 | step 9a | **step 8 stays** | — |
-| Matches the queue layout | yes — `step08-done` → step 9 as drawn | half | no — `step08-done` has no consumer | no |
-| Fits signal-driven runs | yes | yes | yes | **no** — there is never an "every fund" |
-
-D is listed only to rule it out, as step 3's page ruled out its own.
-
-### Why A does not work for step 9
-
-Step 3 could be a per-fund hop because its output depends on the week,
-not on the funds. Step 9's output depends on the funds — so computing it
-per fund, at each fund's own moment, gives every fund a different
-universe:
-
-| Problem | Example |
-| --- | --- |
-| Ranks collide | fund X runs Monday, ranks 1 of 2 MomentumEntries; fund Y runs Tuesday with higher conviction, ranks 1 of 3. X still says 1. Two "rank 1"s, nothing ever refreshes X |
-| Pairs are one-sided | an energy Exit runs Monday with no energy Entry yet — unpaired, universe context 0. The Entry runs Tuesday, sees the Exit, gets a pair id and context 1.0. The Exit never learns it was paired |
-| Pair ids clash | `rot_{week}_{letter}` letters are handed out by bucket size across the whole universe; two funds computed on different days can be given the same letter for different themes |
-| Conviction drifts with arrival order | universe context is 15% of conviction, so the same fund scores differently depending on who ran before it |
-
-Each of these is a property of the *set*, so no per-fund computation can
-fix it. Step 10, reading these records, would ration cash on numbers
-that disagree with each other.
-
-### B or C
-
-Both keep the set-wide work in one pass over one snapshot. They differ in
-whether anything is left worth doing per fund:
-
-| | B | C |
-| --- | --- | --- |
-| Per-fund hop | 9a — four arithmetic components, no LLM, no peers | none |
-| What 9a saves the universe pass | four switch statements per fund | — |
-| Types | two handlers, two signals, two tabs' worth of wiring | one handler |
-| Conviction | split across two writes — 9a's partial, 9b's final | one write |
-
-The pipeline-step-flow plan floated the 9a/9b split for streaming's
-sake. Under signal-driven runs there is no stream to keep moving: the
-per-fund part is too small to earn its own hop.
-
-**Proposed: C.** Step 9 leaves the per-fund chain and runs as one
-universe pass over the rows, on the same trigger as step 10. This
-answers the parent plan's barrier question for step 9 only — and
-disagrees with the queue layout in
-[backend-nav-sync-plan.md](../backend-nav-sync-plan.md), which draws
-`step08-done` → step 9. That layout predates this analysis; if C is
-chosen, that plan is where the change belongs, not here.
-
-**The rest of this page builds on C**, marking where A would differ.
-
-## What C means for the chain
+`PipelineRunner`'s streaming run already treats step 9 as a barrier:
 
 ```mermaid
 flowchart LR
-  subgraph perfund["per fund — on NAV signals"]
-    s7["Step 7"] -->|"Step07DoneSignal"| s8["Step 8<br/>chain tail — completes"]
-  end
-  row[("per-ISIN rows<br/>Step08Json")]
-  s8 -->|"writes"| row
-  subgraph universe["universe — on step 10's trigger"]
-    s9["Step 9<br/>one pass, one snapshot"] --> s10["Step 10"]
-  end
-  row -->|"latest step 8 record,<br/>every row"| s9
+  s1["Step 1<br/>universe"] --> blk["per-fund block<br/>steps 2 → 8, every fund"]
+  blk --> load["load universe<br/>Step08Json, every row"]
+  load --> s9["Step 9<br/>one pass"]
+  s9 --> w9["write Step09Json<br/>every row"]
+  w9 --> s10["Step 10<br/>reads Step09Json, every row"]
 ```
 
-| | Today, after step 8's build | Under C |
+| Piece | Exists as | Does |
 | --- | --- | --- |
-| Chain tail | step 8 | **step 8 — unchanged**; no tail move, as step 8's page expected |
-| `Step08DoneSignal` | consumed by the step 8 tab only | the same — nothing does work on it |
-| Step 9's trigger | the Run All button, inside `PipelineRunner` | step 10's — **owned by step 10's page**; see below |
-| Step 9's input | the step 8 file, one run | the latest step 8 record on every row |
+| The barrier | the runner's order: the per-fund block ends before step 9 starts | — |
+| Universe read | `IStreamingPipelineGateway.LoadUniverseFromIsinProgressAsync`, with step 8 as source | reads every progress row's `Step08Json`, in step 1's fund order; **drops funds with no record** — "failed-fund case" |
+| The pass | `IUniverseEnricherAgent.RunFromInputAsync` | the four passes over the loaded universe |
+| Per-row write | `IStreamingPipelineGateway.WriteIsinProgressStep9Async` | `Step09Json` on every fund's row |
+| Step 10 | the same universe read, with step 9 as source | — |
 
-### The trigger belongs to step 10
+So under the runner: a failed fund does **not** hold the barrier — it is
+dropped and step 9 runs on the rest.
 
-Step 9 has nothing to run on except "it is time to look at the whole
-universe" — and that moment exists only because step 10 needs it. So
-step 9 does not choose its trigger; it runs immediately before step 10,
-on whatever step 10's page decides. In cloud that is the daily timer
-the backend plan already describes; locally there is no timer today.
+### What does not carry over to signal-driven runs
 
-Until step 10's page exists, step 9 can be built and run from its tab —
-see "Manual trigger" below — but not wired to anything automatic.
+| Piece | Why not |
+| --- | --- |
+| The barrier | there is no runner: funds arrive one at a time, any day, each with its own run id. Nothing says "the block is over" |
+| The universe read's template | it takes the fund list, week, family and portfolio fields from **step 1's universe output**. A signal-driven step 1 writes one fund |
+| The per-row write | it writes `State = Processing`, `CurrentStep = 9` and the runner's run id on every row — fine inside the runner, which releases the rows afterwards; under signal-driven runs it would **lock every fund** with nothing to free them |
+| The pass's envelope | `RunFromInputAsync` copies week, run id and family from its input envelope; there is no one input envelope |
 
-## Names
+The agent's four passes carry over unchanged.
 
-Under C there is no done-signal to consume, so step 9 does not get an
-entry point shaped like steps 2–8's. Its handler is universe-scoped.
+## When the barrier closes
 
-| Role | Step 8 (exists) | Step 9 under C *(new)* |
+The one new design question. Under signal-driven runs, "every fund is
+through steps 1–8" has to be read off the rows.
+
+`NavChangeDetector.DescribeAsync` already classifies every fund in the
+universe — the company-filtered funds `ILatestNavProvider` returns, the
+same set the NAV sync works from — against its row:
+
+| Status | Row says | Through 1–8? |
 | --- | --- | --- |
-| Handler interface | `IStep08Recommender` | `IStep09UniverseEnricher` — universe-scoped phases |
-| Handler | `Step08RecommenderHandler` | `Step09UniverseEnricherHandler` |
-| Entry point | `IStep08RecommenderEntry`, one signal in | — none until step 10's trigger exists; the tab calls the handler |
-| Done-signal | `Step08DoneSignal`, per fund | open — see "Emit" |
-| Config provider | — | `IStep09ConvictionConfigProvider`, as step 4's — see "Config" |
-| Store read | `ReadStepOutputAsync`, by run id | plus "latest step 8 record on every row" |
-| Row methods | start / complete / fail / orphaned | — **none**: step 9 claims no fund's row |
-| Agent call | `IRecommenderAgent.RunInMemory` | `IUniverseEnricherAgent` — a domain-input universe call |
+| `UpToDate` | anchor at or past the fund's latest trading date | **yes** — step 8's complete is what moves the anchor |
+| `Processing` | in flight | no |
+| `Changed` | latest trading date newer than the anchor | not yet — **or** its run failed: fail keeps the anchor |
+| `New` | no anchor | never processed |
 
-### No row methods
+What the docs already settle:
 
-Every step so far started, completed or failed **one fund's row**. A
-universe pass holds no fund's row — the funds it reads are free, between
-runs, or mid-run (and then invisible, since their columns are clear). So
-there is nothing to start, nothing to free and nothing to orphan. A
-failure fails the pass, not a fund: logged, reported as a step event,
-and retried on the next trigger.
+| Question | Settled by |
+| --- | --- |
+| Which funds are the universe | `NavSyncOptions.CompanyFilter` — the funds whose company matches it, case-insensitive; empty means every fund. The NAV sync's `NavChangeDetector` and step 3's `IFundMetadataProvider.ListMetadataAsync` both apply it. ([pipeline-plan.md](../../FikaFinans.InfrastructureV2.Tests/docs/pipeline-plan.md)'s glossary still says "defined by `metadata.csv`" — the CSV-era wording of the same thing) |
+| Step 9 needs all of it | the same plan, §4.9: "All fund records with recommendations (full universe required)" |
+| A failed fund | [pipeline-step-flow-plan.md](../pipeline-step-flow-plan.md) "Error routing", resolved 2026-05-27: failed funds are dropped, "so downstream consumers see a smaller-but-clean universe" — the barrier does not wait for them |
+
+One gap between `DescribeAsync`'s statuses and those rules: **a failed
+fund reads `Changed`**, the same as one not yet started, so the status
+alone cannot say "finished, failed". The row can — a fail leaves its
+`NavDate` at the fund's latest trading date and sets `LastError`.
+
+A fund whose NAV did not move is `UpToDate` already, with its last run's
+record — through, matching step 10's rule in
+[pipeline-data.md](./pipeline-data.md): a fund is represented by its last
+completed run.
+
+### Who checks, and when
+
+**Decided 2026-10-19: two triggers — step 8's done-signal and a timer.**
+Step 9 is its own entry point; each trigger checks whether the barrier
+has closed and, if so, runs the pass.
+
+| Trigger | Locally | In cloud | Catches |
+| --- | --- | --- | --- |
+| Step 8 done | `Step08DoneSignal` | the step 8 Function, after its complete | the normal case — the pass runs as soon as the last fund completes |
+| Timer | a local timer *(new)*, once a day before step 10; **the Run All button** is the same call — it runs all funds | a timer-triggered Function *(new)*, once a day before step 10's 23:00 timer | barriers that closed **without** a step 8 completion |
+
+**Decided 2026-10-19: the timer fires once a day, shortly before step
+10.** It is a safety net for the day's trades: if the last fund fails in
+the morning, step 9's output waits until the evening run — but nothing
+acts on it before step 10 does. One run a day keeps the repeated LLM
+calls to one extra pass at most.
+
+Why the done-signal alone is not enough: `Step08DoneSignal` fires only
+when a fund **succeeds** at step 8. A fund that fails at an earlier step,
+or whose run is cleared by orphaned-run recovery, ends with no step 8
+completion. If it is the last fund to finish, the barrier is closed — a
+failed fund counts as finished — but nothing after it checks. The timer
+does.
+
+With two triggers, step 9 will often run twice over the same records —
+the timer firing after the done-signal already ran it, or two step 8
+completions both seeing the barrier closed.
+
+**Decided 2026-10-19: run again and overwrite.** The second run sees the
+same records, produces the same conviction, ranks and rotation pairs,
+and overwrites `Step09Json` with them — step 10's rule in
+[backend-nav-sync-plan.md](../backend-nav-sync-plan.md) §"Failure
+handling — daily timer": "idempotent at the day level". No memory of the
+last run is kept. The cost, accepted: each run pays every Buy's LLM
+differentiator call again, and the differentiator text may differ from
+the run before.
 
 ## Input data — what the step reads
 
-| Input data | Current | Under C, WPF | Under C, cloud |
+| Input data | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| **Every fund's step 8 record** | `08-recommendation-…json`, one run (button), or the in-memory output (runner) | the latest `Step08Json` on every row *(new read)* | same, Tables — a partition scan |
-| **The conviction config** | **never read** — see "Config" | `config-09-conviction.json` through a provider | app settings or a blob — open |
+| **Every fund's step 8 record** | `Step08Json` from every row, in step 1's order (runner); the step 8 file (button) | `Step08Json` from every row — the universe read without step 1's template | same, Tables — a partition scan |
+| **The universe's fund list** | step 1's universe output | the funds matching `NavSyncOptions.CompanyFilter` — the same set the NAV sync and step 3 use | same, bound from app settings |
+| **The conviction config** | **never read** — see "Config through a seam" | `config-09-conviction.json` through `IStep09ConvictionConfigProvider` *(new)* | another source — open, as on [pipeline-data.md](./pipeline-data.md) |
 | **Foundry project + model id** | settings, `az login` | unchanged | app settings, managed identity |
-
-### Which records count
-
-| Row | In the snapshot |
-| --- | --- |
-| Free, latest run finished | yes — its `Step08Json` |
-| Free, latest run failed before step 8 | **no** — the claim cleared `Step08Json`, and the failed run never refilled it |
-| Processing | **no** — same reason |
-| Never run | no |
-
-The same rule the backend plan gives step 10 for `Step09Json`: a fund is
-represented by its last *completed* run, or not at all. It also means a
-fund that keeps failing quietly drops out of the portfolio's view —
-raised as an open question.
-
-### Mixed weeks
-
-Each record carries its own fund's week. The pair id embeds a week
-(`rot_{iso_week}_{letter}`): under C, the week of the pass, not of any
-one fund. A record from a fund whose last run was weeks ago still pairs
-and ranks against this week's records — the backend plan's stated trade
-for step 10, inherited here.
 
 ## Agent work
 
@@ -247,178 +177,166 @@ Hybrid. Contract:
 The four passes, the weights check, the scoring rules, the tie-breaks
 and the LLM degradation do not change.
 
-`UniverseEnricherAgent.RunInMemoryAsync` already takes a whole
-`DataLoaderOutput` and returns one — it is close to what a universe pass
-needs, but it copies its envelope (week, run id, family, portfolio
-fields) from the input, and under C there is no one input envelope.
-**Proposed: a domain-input `RunInMemoryAsync`** — company, week, the
-records, the config — stamping the week of the pass, as steps 4–8's
-domain-input calls stamp theirs. The current one stays for `RunAsync`.
+`RunInMemoryAsync` takes a whole `DataLoaderOutput` and copies its
+envelope through. A signal-driven pass has records but no envelope, so
+it needs the domain-input shape steps 4–8 got — company, week, the
+records, the config.
 
-### Config — the file is never read
+The rotation pair id — `rot_{iso_week}_{letter}`, the label step 9 puts
+on an Exit and an Entry in the same theme — carries a week. One run can
+mix funds whose records come from different weeks. **Decided
+2026-10-19: the week the run happens in**, so every pair from one run
+shares it. Step 10 only compares the ids for equality.
 
-`config-09-conviction.json` is seeded at startup and editable from step
-9's tab — `HasConfig` is true — but **no code reads it**. Autofac builds
-`UniverseEnricherAgent` through its two-argument constructor, which uses
-`UniverseEnricherConfig.Default`. An edit to the weights changes nothing.
+### Config through a seam
 
-**Proposed: a config provider, as step 4's** — read per pass, so an edit
-takes effect on the next run, and the weights check fails the pass, not
-the app. Step 4's page settled the same pattern for `config-04-signals`.
+Today `config-09-conviction.json` is seeded at startup and editable from
+step 9's tab — "Edit config…", `HasConfig` true — but **no code reads
+it**. Autofac builds `UniverseEnricherAgent` through its two-argument
+constructor, which uses `UniverseEnricherConfig.Default`. An edit to the
+weights changes nothing.
 
-### The LLM client is silent — the same fix as steps 6 and 7
+The step reads its config through a provider, never a file — step 2's
+pattern, which step 2's page said steps 4, 9 and 10 inherit, and step 4
+built.
 
-`FoundryDifferentiatorLlmClient` has no logger, as steps 6 and 7's
-clients had none before their logging rows. The agent catches its
+| Interface | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| `IStep09ConvictionConfigProvider` *(new)* — returns `UniverseEnricherConfig`, which exists | none — the agent uses `UniverseEnricherConfig.Default`; the file is never read | `JsonBackedStep09ConvictionConfigProvider` *(new)* — `config-09-conviction.json` via `IPathsService`, read fresh on every run so an edit takes effect on the next one | another source — open, as for steps 2 and 4 |
+
+```mermaid
+flowchart LR
+  h["Step09UniverseEnricherHandler (new)"] --> p["IStep09ConvictionConfigProvider (new)"]
+  p -->|local| json["config-09-conviction.json<br/>via IPathsService"]
+  p -->|cloud| other["other source<br/>open"]
+```
+
+The weights check — the five weights must sum to 1.0 — stays in the
+agent, so a bad edit fails the run, not the app. "Conviction" after the
+file's name, as "Signals" is after `config-04-signals.json`.
+
+### The LLM client is silent
+
+`FoundryDifferentiatorLlmClient` takes no logger, as steps 6 and 7's
+clients took none before their logging rows. The agent catches its
 failures and warns into the output, so an outage leaves empty
-differentiators and one warning line per Buy — but no trace of *why*.
-
-**Proposed: the same treatment, as its own row** — Debug per call and
-per answer, Warn per failure, the caller's cancellation rethrown. Return
-values unchanged.
-
-### The LLM call per run
-
-| | Step 7 | Step 9 |
-| --- | --- | --- |
-| Calls | 0 or 1 per fund | 1 per Buy with at least one peer, per pass |
-| Typical count | small — conflicting rows only | small — Buys are a minority of a normal week |
-| Repeats | once per NAV signal | **once per pass, whether or not the Buy changed** — a daily trigger repeats yesterday's calls for unchanged funds |
-
-The repeat is new: earlier steps called the LLM when a fund's own NAV
-moved. A cache keyed on (Buy, peers, their metrics) would avoid it — not
-proposed; it joins the cache question steps 5–7 already raised.
+differentiators and one warning per Buy — but no trace of *why*.
 
 ### Logging
 
-As step 8's page set out, in the handler: Debug per phase; one Debug line
-per **ranked** fund — recommendation, conviction, rank, pair id; Warn per
-agent warning; Error per failed phase; Info per pass with the snapshot's
-size and how many rows were skipped as mid-run or failed. The agent stays
-logger-free.
+In the handler, as steps 4–8: Debug per phase; one Debug line per ranked
+fund — recommendation, conviction, rank, pair id; Warn per agent warning;
+Error per failed phase; Info per pass with the universe's size and how
+many funds were left out. The agent stays logger-free.
 
 ## Output
 
-| Written | Current | Under C |
-| --- | --- | --- |
-| Each fund's enriched record | `Step09Json` via the gateway's write after the universe pass (runner), or `09-enrichment-…json` (button) | open — see below |
-| Rows freed | — step 9 never held one | — |
+Each fund's enriched record — the five fields step 9 adds, the rotation
+pair id among them — lands wherever the record lands:
 
-### Where the output goes
+| | Current | WPF | Cloud |
+| --- | --- | --- | --- |
+| **Run All button** (`PipelineRunner`) | `Step09Json` on every fund's row in SQLite, through `WriteIsinProgressStep9Async`, **plus** the file `09-enrichment-{iso_week}-{run_id}.json` | **the same as a timer run** — it runs all funds, so step 9 runs over every row; see the timer row | — no button |
+| **Step 9 tab's "Run step" button** | the file only — `RunAsync` reads the step 8 file and writes the step 9 file | through the step 9 handler, as steps 2–8's buttons | — no tabs |
+| **Done-signal or timer run** | — does not exist | `Step09Json` on every fund's row in SQLite, through a step 9 save *(new)* that leaves `State` and `RunId` alone. **No file**, as steps 2–8's signal-driven runs | `Step09Json` on every fund's row in Azure Tables, the same save |
+| **Read by** | step 10 (Run All), from `Step09Json`; the step 9 tab and the fund detail, from `Step09Json` or the file | step 10, from `Step09Json` on every row; the step 9 tab | step 10's daily Function, from `Step09Json` on every row — [pipeline-data.md](./pipeline-data.md) |
 
-| | Per-row `Step09Json` | Handed to step 10 in memory |
-| --- | --- | --- |
-| Step 10 reads | the rows — as the backend plan already says | the pass's result |
-| A fund's record shows its conviction | yes, on its row — the tab and the fund detail read it there | only through step 10's output |
-| Writes per pass | one per fund in the snapshot | none |
-| Overwrites | `Step09Json` on rows whose run finished long ago — step 9's column no longer belongs to the row's run | — |
+Two things in that table are still open: the step 9 save — the existing
+`WriteIsinProgressStep9Async` sets `State = Processing` on every row, so
+it cannot be reused as is; and whether `Step09Json` fits an Azure Tables
+property at all — [pipeline-data.md](./pipeline-data.md) §"Size against
+Azure Tables", which applies to every step column.
 
-**Proposed: per-row `Step09Json`**, written by the pass for every fund in
-the snapshot. It keeps "one row tells you everything about a fund" and
-matches what the backend plan has step 10 reading. The overwrite is the
-cost: the column is stamped by the pass, not by the fund's run, which
-`SaveStepOutputAsync`'s "names the run that produced it" contract does
-not describe today — a new save *(new)*, or a decided exception.
+A fund mid-run when step 9 writes has had its columns cleared by step 1's
+start; step 9 has no record for it and writes nothing. Whether the
+column then names the fund's run or the pass — [pipeline-data.md](./pipeline-data.md)'s
+"whether step 9 stores a pass or a run" — is open.
 
 ### Emit
 
-Under C nothing per fund follows step 9 — step 10 runs straight after,
-in the same trigger. A universe-scoped done-signal would have one reader:
-step 9's tab. The empty `IStepDoneSignal` marker was left empty for
-exactly this case, per the parent plan's 2026-08-25 decision.
-
-**Proposed: decide on step 10's page.** Whether "step 9 is done" is a
-signal, a phase inside one daily job, or a queue between two Functions
-depends on how step 10 is triggered.
-
-## Manual trigger — WPF only
-
-Every earlier tab's button is a debug run: computes, stores nothing. For
-step 9 under C, until step 10 is wired, the button is the **only** way
-the step runs at all.
-
-| | Debug, as steps 2–8 | Stored |
-| --- | --- | --- |
-| Button computes over the snapshot | yes | yes |
-| Writes `Step09Json` | no | yes |
-| Before step 10 is wired | step 9 never stores anything | step 9 works end to end from the tab |
-
-**Proposed: a stored run from the button, until step 10's page gives
-step 9 a trigger** — then the button goes back to debug, as the others.
+Step 10 runs on its own daily timer and reads the rows, so nothing has to
+follow step 9. Whether "step 9 done" is a signal at all is step 10's
+page.
 
 ## What a frontend reads when the user opens the view
 
-| The tab | Today | Under C |
+| The tab | Today | Signal-driven |
 | --- | --- | --- |
-| Reads | `Step09Json` by the run bar's run id, disk fallback | the latest `Step09Json` on every row — a universe, not a run |
-| Runs | `IUniverseEnricherAgent.RunAsync` over the run bar's step 8 file | the handler's universe pass |
+| Reads | `Step09Json` by the run bar's run id, disk fallback | `Step09Json` from every row — a universe, not one run |
+| Runs | `IUniverseEnricherAgent.RunAsync` over the run bar's step 8 file | the universe pass, through the handler |
 | Chart | signals chart from the funds | unchanged |
 | Config editor | edits a file nothing reads | edits the file the provider reads |
-| Run bar | picks the run | **does not apply** — step 9 is no longer one run's |
-
-`FundDetailViewModel` reads the step 9 file from disk, as it reads step
-8's. Not changed here.
 
 ## To settle before building
 
-| # | Choice | Proposed |
+Settled by the docs and code, not choices: the universe is the funds
+matching `NavSyncOptions.CompanyFilter`;
+step 9 waits for every fund in it to finish steps 1–8; a failed fund
+counts as finished and is dropped. See "When the barrier closes".
+
+| # | Still open | Options |
 | --- | --- | --- |
-| 1 | The shape | **C** — step 9 leaves the per-fund chain; one universe pass, on step 10's trigger; step 8 stays the tail |
-| 2 | What the universe is | the latest `Step08Json` on every row; mid-run and failed-latest-run funds absent |
-| 3 | Config | a provider, as step 4's; the file starts being read |
-| 4 | The LLM client | gets steps 6 and 7's logging, as its own row |
-| 5 | Agent call | a domain-input universe `RunInMemoryAsync`, stamping the pass's week |
-| 6 | Output | per-row `Step09Json`, stamped by the pass |
-| 7 | The button | a stored run until step 10 gives step 9 a trigger |
-| 8 | Done-signal | decided on step 10's page |
+| 1 | Config | a provider, step 4's pattern |
+| 2 | The LLM client | steps 6 and 7's logging, as its own row |
+| 3 | The per-row write | a step 9 save that leaves the row's lock and run alone |
+
+Decided: **the trigger** — step 8's done-signal and a timer, each
+checking the barrier; **the timer** — once a day, before step 10; **a
+second run over the same records** runs again and overwrites — see "Who
+checks, and when"; **the week in the pair ids** — the run's — see
+"Agent work".
 
 ## Proposed implementation order
 
-Only if choice 1 is C. One change per row, each reviewed and committed
-before the next.
+One change per row, each reviewed and committed before the next. Every
+new name is *(new)*. Logging is part of each row that adds code which
+runs, not a row of its own — except the LLM client, as on steps 6 and 7.
 
 | # | Work | Touches | Blocked on |
 | --- | --- | --- | --- |
-| 1 | `IStep09ConvictionConfigProvider` + JSON-backed provider, as step 4's | Application `Pipeline/Configs`, Infrastructure, registration | choice 3 |
-| 2 | `FoundryDifferentiatorLlmClient` gets a logger — Debug per call and answer, Warn per failure, cancellation rethrown; return values unchanged | the client, its registration, its integration test's construction | choice 4 |
-| 3 | Store read: the latest step 8 record on every row, skipping rows without one; and the save that stamps a pass, not a run | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | choices 2, 6 |
-| 4 | Domain-input universe `RunInMemoryAsync` on `IUniverseEnricherAgent`, config passed in. No rule change | `IUniverseEnricherAgent`, `UniverseEnricherAgent`, a new test file | choice 5 |
-| 5 | `IStep09UniverseEnricher` + handler — read the snapshot, load the config, run, save per row, report; logging as above. Not wired | Application, `Pipeline/Steps`, registration | rows 1, 3, 4 |
-| 6 | Step 9's tab calls the handler — stored run, reads the latest `Step09Json` on every row, run bar ignored | `Step9UniverseEnricherViewModel` | row 5, choice 7 |
-| — | Automatic trigger | — | **step 10's page** |
+| 1 | `IStep09ConvictionConfigProvider` in Application, `JsonBackedStep09ConvictionConfigProvider` in Infrastructure — step 4's pattern, read fresh on every call; see "Config through a seam" | Application `Pipeline/Configs`, Infrastructure, `InfrastructureModule` | — |
+| 2 | `FoundryDifferentiatorLlmClient` gets a logger — Debug per call and answer, Warn per failure, the caller's cancellation rethrown; return values unchanged | the client, its registration, its integration test's construction | — |
+| 3 | Store: read `Step08Json` for every fund in the universe, skipping funds without one; and the step 9 save — `Step09Json` on each fund's row, `State` and `RunId` left alone | `IIsinProgressStore`, `RepositoryBackedIsinProgressStore` | — |
+| 4 | The barrier check — is every fund matching `CompanyFilter` finished: `UpToDate`, or failed on its latest trading date. Built on what `NavChangeDetector.DescribeAsync` reads; logs which funds still hold it open | Application `Pipeline/Signals` or `Pipeline/Steps` | — |
+| 5 | Domain-input universe `RunInMemoryAsync` on `IUniverseEnricherAgent` — company, the run's week, the records, the config. No rule change. Tests in a new file beside `UniverseEnricherAgentTests` | `IUniverseEnricherAgent`, `UniverseEnricherAgent`, a new test file | row 1 |
+| 6 | `IStep09UniverseEnricher` + handler — load the universe, load the config, run, save per row, report step events; `ReadOutputAsync`, and `ComputeOutputAsync` for the "Run step" button. No row methods. Not wired | Application, `Pipeline/Steps` | rows 3, 5 |
+| 7 | `IStep09UniverseEnricherEntry` + entry point — one call per trigger: check the barrier, run the handler if closed, log either way; registration | Application, `InfrastructureModule` | rows 4, 6 |
+| 8 | Subscription `Step08DoneSignal` → step 9's entry point, caught and logged as `RunStep08Async` | `MainWindowViewModel` | row 7 |
+| 9 | A local daily timer → step 9's entry point, before step 10 | `MainWindowViewModel` or a host service | row 7 |
+| 10 | Run All runs step 9 through the entry point — the same call as the timer — instead of `PipelineRunner`'s own step 9 section | `PipelineRunner` or `MainWindowViewModel` | row 7 |
+| 11 | Step 9's tab goes passive, as steps 2–8's: follows step events, reads `Step09Json` from every row; "Run step" goes through the handler | `Step9UniverseEnricherViewModel`, no XAML | rows 6, 7 |
 
-No tail move and no subscription — the two rows every earlier step
-needed.
+No tail move: step 8 stays the per-fund chain's tail, and step 9 frees
+no row.
+
+Row 10 touches the runner every earlier step has left alone; how much of
+`PipelineRunner` stays once Run All is a timer call is not decided here.
+Row 9's time of day locally is not decided either — there is no local
+step 10 timer to sit before yet.
 
 ## Open questions
 
 Raised by this page; they belong in the parent plan's Open Questions,
 not settled here.
 
-- **Step 9's shape — the barrier question.** Proposed C above; until it
-  is settled, the parent plan's "barrier steps versus the queue chain"
-  stays open for step 9. If C is chosen,
-  [backend-nav-sync-plan.md](../backend-nav-sync-plan.md)'s queue layout
-  loses `step08-done` and its "step 9 is the per-ISIN terminal step".
+- **The queue layout.** [backend-nav-sync-plan.md](../backend-nav-sync-plan.md)
+  draws `step08-done` → step 9 as a per-fund hop and calls step 9 "the
+  per-ISIN terminal step". Under this page `step08-done` still reaches
+  step 9, but as a barrier check, not per-fund work — and step 9 gains a
+  timer beside step 10's. That plan is where the layout changes.
 - **Step 10 does not read `UniverseRank`.** Its contract says ranks
   decide which Buys are funded first and which Sell is taken; the code
-  scales Buys proportionally. Either the contract or the code is wrong —
-  step 10's page.
-- **Funds that keep failing drop out of the portfolio's view.** A fund
-  whose latest run failed has no step 8 record, so neither step 9 nor
-  step 10 sees it — even if it is held. A held fund disappearing from
-  the trade view is the case that matters.
-- **`Step09Json` no longer belongs to the row's run.** Under C the pass
-  stamps it. Whether that needs its own column semantics, or step 9's
-  output belongs off the per-ISIN row altogether, sits with step 10's
-  output question in the backend plan.
-- **Repeated LLM calls for unchanged Buys.** Joins the cache question on
+  scales Buys proportionally. Step 10's page.
+- **A held fund that keeps failing** has no step 8 record, so neither
+  step 9 nor step 10 sees it — the "smaller-but-clean universe" rule
+  drops it, held or not.
+- **Repeated LLM calls for unchanged Buys.** Every pass asks again for
+  every Buy, whether or not it changed. Joins the cache question on
   steps 5–7's pages.
-- **Where the conviction config lives in cloud.** As for step 4's.
 - **The portfolio-wide fields.** Step 9 copies frozen positions and cash
-  through for step 10; no per-fund record carries them. Step 10's page,
-  as step 8's page said.
+  through for step 10; no per-fund record carries them —
+  [pipeline-data.md](./pipeline-data.md)'s envelope question.
 - **Carried over unchanged:** the cloud host, step outputs too large for
   Tables, how the envelope is stored — on step 2's page; step 6's verdict
-  instability, which now moves conviction and rank — on steps 6, 7 and
-  8's pages.
+  instability, which moves conviction and rank — on steps 6, 7 and 8's
+  pages.

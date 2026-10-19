@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.IO;
 using System.Reactive.Concurrency;
 using System.Windows.Input;
@@ -8,7 +7,6 @@ using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Domain.Funds;
-using FikaFinans.Domain.Macro;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Wpf.Services;
 using FikaFinans.Wpf.Views.Charts;
