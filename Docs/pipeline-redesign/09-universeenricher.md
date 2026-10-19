@@ -13,6 +13,9 @@
 
 > **Related:**
 >
+> - What every step stores and reads — the per-fund row and its
+>   `Step01Json` … `Step09Json` columns, the macro context, step
+>   configuration: [pipeline-data.md](./pipeline-data.md)
 > - The cross-cutting design this follows from, and its "barrier steps
 >   versus the queue chain" open question:
 >   [event-driven-orchestration-plan.md](./event-driven-orchestration-plan.md)

@@ -1,9 +1,10 @@
-# Pipeline storage
+# Pipeline data and configuration
 
-What the signal-driven pipeline keeps between steps — which table, which
-column, which step writes it, which step reads it. Written for the steps
-that read across the chain: step 9 reads every fund's step 8 record,
-step 10 every fund's envelope.
+What every step reads and writes outside its own code — the tables the
+pipeline keeps between steps (which column, which step writes it, which
+step reads it), and the configuration each step reads but never writes.
+Written for the steps that read across the chain: step 9 reads every
+fund's step 8 record, step 10 every fund's envelope.
 
 ## At a glance
 
@@ -323,6 +324,38 @@ Where step 10 writes is open:
 | For | step 10's output is portfolio-wide by nature | keeps "one row tells you everything" |
 | Against | — | duplicated storage, a write per fund |
 
+## Step configuration
+
+What each step reads besides the pipeline's data — config files,
+prompts, settings. Read-only to the pipeline; nothing here is written by
+a run. Settings shared by several steps sit at the bottom with every
+step that reads them.
+
+| Step | Interface | Current | WPF | Cloud |
+| --- | --- | --- | --- | --- |
+| 1 DataLoader | `NavSyncOptions` — YieldRaccoon DB path, company filter | built from `AppSettings` | unchanged | bound from app settings |
+| 2 MetricsCalculator | `IStep02MetricsConfigProvider` | none — the agent's `Run` and `StreamingPipelineGateway.LoadMetricsConfig` each read the file | `JsonBackedStep02MetricsConfigProvider` — `config-02-metrics.json` via `IPathsService` | another source — open |
+| 3 MacroAnalyst | `IStep03MacroAnalystPromptsProvider` — system, user template, retry | none — the agent's constructor reads `MacroAnalystPromptsDir` | `FileBackedStep03MacroAnalystPromptsProvider` — same folder, embedded defaults extracted when missing | embedded defaults, app settings or blob — open |
+| 3 MacroAnalyst | `NavSyncOptions` — the universe read, same company filter | — | unchanged, through `IFundMetadataProvider` | bound from app settings |
+| 4 SignalScorer | `IStep04SignalsConfigProvider` | none — the agent's `Run` and `StreamingPipelineGateway.LoadSignalConfig` each read the file | `JsonBackedStep04SignalsConfigProvider` — `config-04-signals.json` via `IPathsService` | another source — open |
+| 5 MacroAligner | adjacency prompt — no config | a constant in `FoundryThemeAdjacencyLlmClient` | unchanged | unchanged |
+| 6 CatalystTagger | classification prompt — no config | a constant in `FoundryFundCatalystLlmClient` | unchanged | unchanged |
+| 7 ThesisValidator | refinement prompt — no config | a constant in `FoundryThesisRefinementLlmClient` | unchanged | unchanged |
+| 8 Recommender | no config — "None. Pure deterministic mapping." | — | — | — |
+| 9 UniverseEnricher | `IStep09ConvictionConfigProvider` *(new)* | **never read** — `config-09-conviction.json` is seeded and editable from the tab, but nothing reads it | `config-09-conviction.json` through a provider, step 4's pattern | app settings or a blob — open |
+| 9 UniverseEnricher | differentiator prompt — system and retry | constants in `FoundryDifferentiatorLlmClient` | unchanged | unchanged |
+| 10 PortfolioConstructor | `config-10-portfolio.json` | in the inputs folder, read by `PortfolioConstructorAgent` | unchanged | open — step 10's page not written |
+| 2, 4, 9, 10 | `IPathsService` — the inputs folder the config files live in | settings path, `SettingsBackedPathsService` | unchanged | **no filesystem** — every file row must find another home first |
+| 3, 5, 6, 7, 9 | Foundry project + model id | settings, `az login` | unchanged | app settings, managed identity |
+
+Steps 2, 3, 4, 9 and 10 share one open question: what replaces the
+file in cloud. Prompts held as constants in an LLM client move with the
+build and need nothing.
+
+Sources: each step page's "What is the same in both hosts" and "Input
+data" tables, and [01-dataloader.md](./01-dataloader.md) §"Input data"
+for the step configs and the inputs folder.
+
 ## Edge cases and open questions
 
 <details>
@@ -390,6 +423,9 @@ rather than in production.
   timer Function of its own.
 - **Where step 10 writes** — one portfolio row per day, or a column per
   fund.
+- **Where the step configs and step 3's prompts live in cloud** — app
+  settings, a blob, or embedded defaults; and whether a missing file
+  falls back to defaults or fails. Steps 2, 3, 4 and 9's pages.
 
 </details>
 
