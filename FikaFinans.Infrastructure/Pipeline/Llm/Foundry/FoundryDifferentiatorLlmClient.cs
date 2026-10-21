@@ -1,64 +1,78 @@
 using FikaFinans.Application.Pipeline.Llm;
 using FikaFinans.Domain.Models;
+
 using System.ClientModel;
 using System.Text;
 using System.Text.Json;
+
 using Azure;
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
+
 using FikaFinans.Domain.Funds;
+
 using OpenAI.Responses;
+
+using NLog;
 
 namespace FikaFinans.Infrastructure.Pipeline.Llm.Foundry;
 
-// Foundry-backed differentiator writer for step 09. Mirrors FoundryFundCatalystLlmClient
-// (step 06): create an ephemeral declarative agent with the system prompt baked in,
-// fire one CreateResponseAsync, one corrective retry on invalid JSON, then delete the agent.
-// Failures collapse to an empty list — the agent fills in empty strings and warns.
+/// <summary>
+/// Foundry-backed differentiator writer for step 09. Mirrors FoundryFundCatalystLlmClient
+/// (step 06): create an ephemeral declarative agent with the system prompt baked in,
+/// fire one CreateResponseAsync, one corrective retry on invalid JSON, then delete the agent.
+/// Failures collapse to an empty list — the agent fills in empty strings — so each one is
+/// logged here at Warn: to the caller an outage looks like an answer with nothing in it.
+/// </summary>
 public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
 {
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(2);
 
     private const string SystemPrompt = """
-        You are a fund comparison analyst. You receive a primary fund that is a buy
-        candidate and a list of alternative funds in the same category. For each
-        alternative, write one short sentence (≤25 words) explaining what makes the
-        alternative different from the primary — in terms of strategy, risk/return
-        profile, fee, or manager focus.
+                                        You are a fund comparison analyst. You receive a primary fund that is a buy
+                                        candidate and a list of alternative funds in the same category. For each
+                                        alternative, write one short sentence (≤25 words) explaining what makes the
+                                        alternative different from the primary — in terms of strategy, risk/return
+                                        profile, fee, or manager focus.
 
-        Return ONLY a JSON array (no prose, no markdown fences):
-        [
-          {"isin": "...", "differentiator": "..."},
-          ...
-        ]
+                                        Return ONLY a JSON array (no prose, no markdown fences):
+                                        [
+                                          {"isin": "...", "differentiator": "..."},
+                                          ...
+                                        ]
 
-        One entry per alternative, in the same order they appear in the input.
-        Use only the ISINs from the input — do not invent new ones.
-        """;
+                                        One entry per alternative, in the same order they appear in the input.
+                                        Use only the ISINs from the input — do not invent new ones.
+                                        """;
 
     private const string RetryPromptPrefix = """
-        Your previous response failed validation: {error}
+                                             Your previous response failed validation: {error}
 
-        Re-emit valid JSON (array only, no prose, no fences). Use only the ISINs
-        from the input alternatives. One object per alternative:
-        [{"isin": "...", "differentiator": "..."}, ...]
+                                             Re-emit valid JSON (array only, no prose, no fences). Use only the ISINs
+                                             from the input alternatives. One object per alternative:
+                                             [{"isin": "...", "differentiator": "..."}, ...]
 
-        Original request follows:
-        """;
+                                             Original request follows:
+                                             """;
 
+    private readonly ILogger _logger;
     private readonly AIProjectClient _projectClient;
     private readonly FoundryDeploymentName _deploymentName;
 
+    /// <param name="logger">Where the call, the answer and why a failure became an empty list are logged.</param>
     /// <param name="projectClient">The Foundry project the ephemeral agent is created in.</param>
     /// <param name="deploymentName">
     /// The Foundry deployment the agent runs on — the name the portal gave the deployment, not
     /// the model family: e.g. <c>gpt-5.4-1</c> or <c>DeepSeek-R1-0528-1</c>, see
     /// <see cref="Infrastructure.Foundry.FoundryModelIds"/>.
     /// </param>
-    public FoundryDifferentiatorLlmClient(AIProjectClient projectClient, FoundryDeploymentName deploymentName)
+    public FoundryDifferentiatorLlmClient(ILogger logger, AIProjectClient projectClient,
+        FoundryDeploymentName deploymentName)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(projectClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName.Value, nameof(deploymentName));
+        _logger = logger;
         _projectClient = projectClient;
         _deploymentName = deploymentName;
     }
@@ -76,39 +90,87 @@ public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
         var validIsins = request.Alternatives.Select(a => a.Isin.Value).ToHashSet(StringComparer.Ordinal);
         var userPrompt = BuildUserPrompt(request.Primary, request.Alternatives);
 
+        _logger.Debug("Differentiator LLM call — model {0}, fund {1} '{2}', {3} alternatives, timeout {4}",
+            _deploymentName, request.Primary.Isin, request.Primary.Metadata.Name,
+            request.Alternatives.Count, RunTimeout);
+
         var (agentName, agentVersion) = await CreateAgentAsync(timeoutCts.Token);
+        _logger.Trace("Differentiator LLM agent created — {0} v{1}", agentName, agentVersion);
         try
         {
             var responseClient = _projectClient.ProjectOpenAIClient
                 .GetProjectResponsesClientForAgent(agentName);
 
-            var first = await responseClient.CreateResponseAsync(userPrompt, cancellationToken: timeoutCts.Token);
-            if (first.Value.Status == ResponseStatus.Completed)
+            var first = (await responseClient.CreateResponseAsync(userPrompt, cancellationToken: timeoutCts.Token))
+                .Value;
+            if (first.Status != ResponseStatus.Completed)
             {
-                if (TryParse(first.Value.GetOutputText(), validIsins, out var parsed, out var error))
-                    return parsed;
-
-                // One corrective retry per the contract.
-                var retryPrompt = RetryPromptPrefix.Replace("{error}", error ?? "invalid JSON")
-                                  + "\n" + userPrompt;
-                var second = await responseClient.CreateResponseAsync(retryPrompt, cancellationToken: timeoutCts.Token);
-                if (second.Value.Status == ResponseStatus.Completed
-                    && TryParse(second.Value.GetOutputText(), validIsins, out var retried, out _))
-                {
-                    return retried;
-                }
+                // No retry on an incomplete first answer, unlike step 7's client — the
+                // contract's one retry is for invalid JSON.
+                _logger.Warn(
+                    "Differentiator LLM response not completed — {0}, status {1}: fund {2} gets no differentiators",
+                    agentName, first.Status, request.Primary.Isin);
+                return Array.Empty<DifferentiatorLine>();
             }
 
+            var firstText = first.GetOutputText();
+            _logger.Trace("Differentiator LLM response — {0}: {1}", agentName, firstText);
+
+            if (TryParse(firstText, validIsins, out var parsed, out var error))
+                return LogAnswer(request, parsed);
+
+            // One corrective retry per the contract.
+            _logger.Warn("Differentiator LLM answer not parsed — {0}: {1}; retrying once. Raw: {2}",
+                agentName, error, firstText);
+
+            var retryPrompt = RetryPromptPrefix.Replace("{error}", error ?? "invalid JSON")
+                              + "\n" + userPrompt;
+            var second = (await responseClient.CreateResponseAsync(retryPrompt, cancellationToken: timeoutCts.Token))
+                .Value;
+            if (second.Status != ResponseStatus.Completed)
+            {
+                _logger.Warn(
+                    "Differentiator LLM retry not completed — {0}, status {1}: fund {2} gets no differentiators",
+                    agentName, second.Status, request.Primary.Isin);
+                return Array.Empty<DifferentiatorLine>();
+            }
+
+            var secondText = second.GetOutputText();
+            _logger.Trace("Differentiator LLM retry response — {0}: {1}", agentName, secondText);
+
+            if (TryParse(secondText, validIsins, out var retried, out var retryError))
+                return LogAnswer(request, retried);
+
+            _logger.Warn("Differentiator LLM retry not parsed — {0}: {1}; fund {2} gets no differentiators. Raw: {3}",
+                agentName, retryError, request.Primary.Isin, secondText);
             return Array.Empty<DifferentiatorLine>();
         }
-        catch
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            _logger.Warn("Differentiator LLM call timed out — {0}, after {1}: fund {2} gets no differentiators",
+                agentName, RunTimeout, request.Primary.Isin);
+            return Array.Empty<DifferentiatorLine>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Warn(ex, "Differentiator LLM call failed — {0}: fund {1} gets no differentiators",
+                agentName, request.Primary.Isin);
             return Array.Empty<DifferentiatorLine>();
         }
         finally
         {
             await TryDeleteAgentAsync(agentName, agentVersion);
         }
+    }
+
+    private IReadOnlyList<DifferentiatorLine> LogAnswer(DifferentiatorRequest request,
+        IReadOnlyList<DifferentiatorLine> lines)
+    {
+        // Fewer lines than alternatives means the model invented ISINs and they were dropped —
+        // those alternatives end up with an empty differentiator.
+        _logger.Debug("Differentiator LLM answer — fund {0}: {1} of {2} alternatives described",
+            request.Primary.Isin, lines.Count, request.Alternatives.Count);
+        return lines;
     }
 
     private static string BuildUserPrompt(FundRecord primary, IReadOnlyList<FundRecord> alternatives)
@@ -126,10 +188,11 @@ public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
         foreach (var alt in alternatives)
         {
             sb.Append("- isin: ").Append(alt.Isin)
-              .Append(" | name: ").Append(alt.Metadata.Name)
-              .Append(" | sharpe_12w: ").Append(alt.Metrics?.Sharpe12w?.ToString("F4") ?? "n/a")
-              .Append(" | fee: ").AppendLine(alt.Metadata.TotalFee.ToString("F2"));
+                .Append(" | name: ").Append(alt.Metadata.Name)
+                .Append(" | sharpe_12w: ").Append(alt.Metrics?.Sharpe12w?.ToString("F4") ?? "n/a")
+                .Append(" | fee: ").AppendLine(alt.Metadata.TotalFee.ToString("F2"));
         }
+
         sb.AppendLine();
         sb.AppendLine("Write one short differentiator per alternative vs the primary. Return JSON array.");
         return sb.ToString();
@@ -164,7 +227,7 @@ public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
 
                 list.Add(new DifferentiatorLine
                 {
-                    Isin           = isin,
+                    Isin = isin,
                     Differentiator = differentiator ?? string.Empty,
                 });
             }
@@ -193,9 +256,24 @@ public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
         for (var i = start; i < raw.Length; i++)
         {
             var c = raw[i];
-            if (escaped) { escaped = false; continue; }
-            if (c == '\\' && inString) { escaped = true; continue; }
-            if (c == '"') { inString = !inString; continue; }
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\' && inString)
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
             if (inString) continue;
 
             if (c == '[') depth++;
@@ -232,12 +310,19 @@ public sealed class FoundryDifferentiatorLlmClient : IDifferentiatorLlmClient
         try
         {
             await _projectClient.AgentAdministrationClient.DeleteAgentVersionAsync(agentName, agentVersion);
+            _logger.Trace("Differentiator LLM agent deleted — {0} v{1}", agentName, agentVersion);
         }
-        catch (RequestFailedException ex) when (ex.Status == 404) { }
-        catch (ClientResultException ex) when (ex.Status == 404) { }
-        catch
+        catch (RequestFailedException ex) when (ex.Status == 404)
         {
-            // Best-effort cleanup.
+        }
+        catch (ClientResultException ex) when (ex.Status == 404)
+        {
+        }
+        catch (Exception ex)
+        {
+            // Best-effort cleanup; stragglers can be swept later.
+            _logger.Warn(ex, "Differentiator LLM agent not deleted — {0} v{1}, left for a sweep", agentName,
+                agentVersion);
         }
     }
 }

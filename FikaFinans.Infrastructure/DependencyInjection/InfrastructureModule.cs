@@ -369,6 +369,7 @@ public sealed class InfrastructureModule : Autofac.Module
 
         builder.Register(ctx =>
             new FoundryDifferentiatorLlmClient(
+                LogManager.GetLogger(typeof(FoundryDifferentiatorLlmClient).FullName!),
                 ctx.Resolve<AIProjectClient>(),
                 ResolveDefaultDeploymentName(ctx)))
             .As<IDifferentiatorLlmClient>()
