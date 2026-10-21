@@ -591,7 +591,7 @@ public sealed class UniverseEnricherAgentTests
             },
         };
         var llm = new Mock<IDifferentiatorLlmClient>().Object;
-        var sut = new UniverseEnricherAgent(new TestPathsService(), llm, badConfig);
+        var sut = new UniverseEnricherAgent(NLog.LogManager.CreateNullLogger(), new TestPathsService(), llm, badConfig);
 
         // Act + Assert — fail fast at first call.
         Assert.That(async () => await sut.RunInMemoryAsync(MakeOutput()),

@@ -227,7 +227,13 @@ differentiators and one warning per Buy — but no trace of *why*.
 In the handler, as steps 4–8: Debug per phase; one Debug line per ranked
 fund — recommendation, conviction, rank, pair id; Warn per agent warning;
 Error per failed phase; Info per pass with the universe's size and how
-many funds were left out. The agent stays logger-free.
+many funds were left out.
+
+The agent logs too, as step 3's: Debug before and after the four passes
+— week, fund count, weights; pairs, Buys with alternatives, warnings —
+one Debug line per rotation pair with its theme, exits and entries, one
+per Buy's peer search, and one per warning. Pairs and peers are decided
+inside the agent and nowhere else visible.
 
 ## Output
 

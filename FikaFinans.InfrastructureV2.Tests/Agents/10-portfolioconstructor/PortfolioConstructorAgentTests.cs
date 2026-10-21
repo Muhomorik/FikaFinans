@@ -661,7 +661,7 @@ public sealed class PortfolioConstructorAgentTests
                     Isin           = a.Isin,
                     Differentiator = $"Stub differentiator for {a.Metadata.Name}.",
                 }).ToArray());
-        new UniverseEnricherAgent(new TestPathsService(), diffLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
+        new UniverseEnricherAgent(NLog.LogManager.CreateNullLogger(), new TestPathsService(), diffLlm.Object).RunAsync("2026-W18", new PipelineRunId(runId)).GetAwaiter().GetResult();
     }
 
     private static MacroContext MakeSyntheticMacroContext(string isoWeek) => new()

@@ -394,7 +394,14 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.RegisterType<CatalystTaggerAgent>().As<ICatalystTaggerAgent>().SingleInstance();
         builder.RegisterType<ThesisValidatorAgent>().As<IThesisValidatorAgent>().SingleInstance();
         builder.RegisterType<RecommenderAgent>().As<IRecommenderAgent>().SingleInstance();
-        builder.RegisterType<UniverseEnricherAgent>().As<IUniverseEnricherAgent>().SingleInstance();
+        // The ctor without a config: RunAsync and the runner use the defaults, the signal-driven
+        // step passes its own config per call.
+        builder.Register(ctx => new UniverseEnricherAgent(
+                logger: LogManager.GetLogger(typeof(UniverseEnricherAgent).FullName!),
+                paths: ctx.Resolve<IPathsService>(),
+                llm: ctx.Resolve<IDifferentiatorLlmClient>()))
+            .As<IUniverseEnricherAgent>()
+            .SingleInstance();
 
         // PortfolioConstructorAgent has two ctors; register explicitly so Autofac
         // uses the (IPathsService) one that defaults to PortfolioConstructorConfig.Default.

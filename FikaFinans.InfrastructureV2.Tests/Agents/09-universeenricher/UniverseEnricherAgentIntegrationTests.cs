@@ -103,7 +103,8 @@ public sealed class UniverseEnricherAgentIntegrationTests
 
         var llm = new FoundryDifferentiatorLlmClient(
             LogManager.GetLogger(nameof(FoundryDifferentiatorLlmClient)), _projectClient, new FoundryDeploymentName(_modelId));
-        var sut = new UniverseEnricherAgent(new TestPathsService(), llm);
+        var sut = new UniverseEnricherAgent(
+            LogManager.GetLogger(nameof(UniverseEnricherAgent)), new TestPathsService(), llm);
 
         // Act
         var result = await sut.RunInMemoryAsync(input);

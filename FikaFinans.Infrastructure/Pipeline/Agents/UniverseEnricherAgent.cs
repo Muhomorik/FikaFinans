@@ -7,9 +7,12 @@ using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Macro;
 using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline.Json;
+using System.Diagnostics;
 using System.Text.Json;
 
 using FikaFinans.Domain.Pipeline;
+
+using NLog;
 
 namespace FikaFinans.Infrastructure.Pipeline.Agents;
 
@@ -35,20 +38,24 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         Recommendation.MomentumExit,
     ];
 
+    private readonly ILogger _logger;
     private readonly IPathsService _paths;
     private readonly IDifferentiatorLlmClient _llm;
     private readonly UniverseEnricherConfig _config;
 
-    public UniverseEnricherAgent(IPathsService paths, IDifferentiatorLlmClient llm)
-        : this(paths, llm, UniverseEnricherConfig.Default)
+    public UniverseEnricherAgent(ILogger logger, IPathsService paths, IDifferentiatorLlmClient llm)
+        : this(logger, paths, llm, UniverseEnricherConfig.Default)
     {
     }
 
-    public UniverseEnricherAgent(IPathsService paths, IDifferentiatorLlmClient llm, UniverseEnricherConfig config)
+    public UniverseEnricherAgent(
+        ILogger logger, IPathsService paths, IDifferentiatorLlmClient llm, UniverseEnricherConfig config)
     {
+        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(llm);
         ArgumentNullException.ThrowIfNull(config);
+        _logger = logger;
         _paths = paths;
         _llm = llm;
         _config = config;
@@ -79,55 +86,13 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         return output;
     }
 
+    /// <summary>Not on the interface — kept for <see cref="RunAsync"/> and the runner, on the ctor's config.</summary>
     public async Task<DataLoaderOutput> RunInMemoryAsync(
         DataLoaderOutput recommended,
         CancellationToken ct = default)
     {
-        ValidateWeights();
-
         var warnings = new List<string>(recommended.DataQuality.Warnings);
-        var funds = recommended.Funds;
-
-        // Pass 1: rotation pairing — assign rot_{iso_week}_{letter} ids by
-        // grouping ThesisExit/MomentumExit + CatalystEntry/MomentumEntry on
-        // their shared matched_theme.id. We need this before conviction so
-        // universe_context can take credit for it.
-        var rotationPairs = ComputeRotationPairs(funds, recommended.IsoWeek);
-
-        // Pass 2: peer index per category (Buys only) — used both for
-        // alternatives and to score the universe_context component.
-        var alternativesByIsin = await BuildAlternativesAsync(funds, warnings, ct);
-
-        // Pass 3: per-fund conviction breakdown.
-        var enrichedFunds = new List<FundRecord>(funds.Count);
-        foreach (var fund in funds)
-        {
-            var rotationPairId = rotationPairs.GetValueOrDefault(fund.Isin);
-            // Only Buys carry alternatives; Sells/Maintain/Skip stay null per
-            // the contract ("the alternative for a Sell is exit to cash").
-            // We still need the list locally so universe_context can credit
-            // peers existing in the universe.
-            var alternatives = alternativesByIsin.GetValueOrDefault(fund.Isin)
-                ?? Array.Empty<Alternative>();
-            var breakdown = ScoreFund(fund, rotationPairId, alternatives);
-            var score = WeightedSum(breakdown);
-
-            var emittedAlternatives = BuyRecommendations.Contains(fund.Recommendation ?? Recommendation.Skip)
-                ? alternatives
-                : null;
-
-            enrichedFunds.Add(WithEnrichment(
-                fund,
-                convictionScore:     Round(score),
-                breakdown:           breakdown,
-                universeRank:        null,
-                alternatives:        emittedAlternatives,
-                rotationPairId:      rotationPairId));
-        }
-
-        // Pass 4: universe_rank per recommendation type (after conviction is
-        // settled across the whole universe).
-        enrichedFunds = AssignRanks(enrichedFunds);
+        var enrichedFunds = await EnrichAsync(recommended.Funds, recommended.IsoWeek, _config, warnings, ct);
 
         return new DataLoaderOutput
         {
@@ -152,15 +117,136 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         };
     }
 
-    private void ValidateWeights()
+    /// <inheritdoc />
+    public async Task<DataLoaderOutput> RunInMemoryAsync(
+        Company family, IsoWeek isoWeek, PipelineRunId runId,
+        IReadOnlyList<FundRecord> funds,
+        UniverseEnricherConfig config,
+        CancellationToken ct = default)
     {
-        var sum = _config.Weights.Sum();
-        var diff = Math.Abs(sum - _config.WeightValidation.MustSumTo);
-        if (diff > _config.WeightValidation.Tolerance)
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(config);
+
+        var warnings = new List<string>();
+        var enrichedFunds = await EnrichAsync(funds, isoWeek.Value, config, warnings, ct);
+
+        return new DataLoaderOutput
+        {
+            GeneratedAt     = DateTimeOffset.UtcNow.ToString("o"),
+            IsoWeek         = isoWeek.Value,
+            Family          = family.Value,
+            RunId           = runId,
+            ConfigVersion   = "1.0.0",
+            Funds           = enrichedFunds,
+            FrozenPositions = Array.Empty<FrozenPosition>(),
+            CashAvailableKr = 0m,
+            DataQuality     = new DataQuality { Warnings = warnings },
+        };
+    }
+
+    /// <summary>The four passes, whichever entry point is asking.</summary>
+    private async Task<List<FundRecord>> EnrichAsync(
+        IReadOnlyList<FundRecord> funds,
+        string isoWeek,
+        UniverseEnricherConfig config,
+        List<string> warnings,
+        CancellationToken ct)
+    {
+        ValidateWeights(config);
+
+        var stopwatch = Stopwatch.StartNew();
+        var warningsBefore = warnings.Count;
+        var w = config.Weights;
+        _logger.Debug(
+            "UniverseEnricher compute — week {0}, {1} fund(s), weights signal {2}, metrics {3}, macro {4}, thesis {5}, universe {6}, up to {7} alternative(s) per Buy",
+            isoWeek, funds.Count, w.SignalStrength, w.MetricsQuality, w.MacroAlignment, w.ThesisValidity,
+            w.UniverseContext, config.Alternatives.MaxPerFund);
+
+        // Pass 1: rotation pairing — assign rot_{iso_week}_{letter} ids by
+        // grouping ThesisExit/MomentumExit + CatalystEntry/MomentumEntry on
+        // their shared matched_theme.id. We need this before conviction so
+        // universe_context can take credit for it.
+        var rotationPairs = ComputeRotationPairs(funds, isoWeek);
+        LogRotationPairs(funds, rotationPairs);
+
+        // Pass 2: peer index per category (Buys only) — used both for
+        // alternatives and to score the universe_context component.
+        var alternativesByIsin = await BuildAlternativesAsync(funds, config, warnings, ct);
+
+        // Pass 3: per-fund conviction breakdown.
+        var enrichedFunds = new List<FundRecord>(funds.Count);
+        foreach (var fund in funds)
+        {
+            var rotationPairId = rotationPairs.GetValueOrDefault(fund.Isin);
+            // Only Buys carry alternatives; Sells/Maintain/Skip stay null per
+            // the contract ("the alternative for a Sell is exit to cash").
+            // We still need the list locally so universe_context can credit
+            // peers existing in the universe.
+            var alternatives = alternativesByIsin.GetValueOrDefault(fund.Isin)
+                ?? Array.Empty<Alternative>();
+            var breakdown = ScoreFund(fund, rotationPairId, alternatives, config);
+            var score = WeightedSum(breakdown, config);
+
+            var emittedAlternatives = BuyRecommendations.Contains(fund.Recommendation ?? Recommendation.Skip)
+                ? alternatives
+                : null;
+
+            enrichedFunds.Add(WithEnrichment(
+                fund,
+                convictionScore:     Round(score),
+                breakdown:           breakdown,
+                universeRank:        null,
+                alternatives:        emittedAlternatives,
+                rotationPairId:      rotationPairId));
+        }
+
+        // Pass 4: universe_rank per recommendation type (after conviction is
+        // settled across the whole universe).
+        var ranked = AssignRanks(enrichedFunds);
+
+        stopwatch.Stop();
+        var newWarnings = warnings.Skip(warningsBefore).ToList();
+        _logger.Debug(
+            "UniverseEnricher computed — week {0}, {1} fund(s), {2} rotation pair(s), {3} Buy(s) with alternatives, {4} warning(s), {5} ms",
+            isoWeek, ranked.Count, rotationPairs.Values.Distinct().Count(),
+            alternativesByIsin.Count(kv => kv.Value.Count > 0), newWarnings.Count, stopwatch.ElapsedMilliseconds);
+
+        foreach (var warning in newWarnings)
+            _logger.Debug("UniverseEnricher warning — {0}", warning);
+
+        return ranked;
+    }
+
+    /// <summary>
+    /// One line per pair: which theme it is and which funds leave and enter on it — the
+    /// grouping step 10 trades on, otherwise only visible as an opaque id per record.
+    /// </summary>
+    private void LogRotationPairs(IReadOnlyList<FundRecord> funds, Dictionary<Isin, string> rotationPairs)
+    {
+        if (rotationPairs.Count == 0)
+        {
+            _logger.Debug("UniverseEnricher pairs — none: no theme holds both an Exit and an Entry");
+            return;
+        }
+
+        foreach (var pair in funds.Where(f => rotationPairs.ContainsKey(f.Isin)).GroupBy(f => rotationPairs[f.Isin]))
+        {
+            var exits = pair.Where(f => SellRecommendations.Contains(f.Recommendation!.Value)).Select(f => f.Isin.Value);
+            var entries = pair.Where(f => BuyRecommendations.Contains(f.Recommendation!.Value)).Select(f => f.Isin.Value);
+            _logger.Debug("UniverseEnricher pair {0} — theme {1}: exits [{2}], entries [{3}]",
+                pair.Key, pair.First().MatchedTheme!.Id, string.Join(", ", exits), string.Join(", ", entries));
+        }
+    }
+
+    private static void ValidateWeights(UniverseEnricherConfig config)
+    {
+        var sum = config.Weights.Sum();
+        var diff = Math.Abs(sum - config.WeightValidation.MustSumTo);
+        if (diff > config.WeightValidation.Tolerance)
         {
             throw new InvalidDataException(
-                $"Conviction weights sum to {sum} but must equal {_config.WeightValidation.MustSumTo} " +
-                $"within ±{_config.WeightValidation.Tolerance}.");
+                $"Conviction weights sum to {sum} but must equal {config.WeightValidation.MustSumTo} " +
+                $"within ±{config.WeightValidation.Tolerance}.");
         }
     }
 
@@ -203,6 +289,7 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
     // differentiator strings keep the structural alternatives intact.
     private async Task<Dictionary<Isin, IReadOnlyList<Alternative>>> BuildAlternativesAsync(
         IReadOnlyList<FundRecord> funds,
+        UniverseEnricherConfig config,
         List<string> warnings,
         CancellationToken ct)
     {
@@ -217,6 +304,7 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
             var category = buy.Metadata.Category;
             if (string.IsNullOrWhiteSpace(category))
             {
+                _logger.Debug("UniverseEnricher alternatives — fund {0}: no category, no peers looked for", buy.Isin);
                 result[buy.Isin] = Array.Empty<Alternative>();
                 continue;
             }
@@ -227,8 +315,11 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
                 .OrderByDescending(f => f.Metrics?.Sharpe12w ?? decimal.MinValue)
                 .ThenBy(f => f.Metadata.TotalFee)
                 .ThenBy(f => f.Isin.Value, StringComparer.Ordinal)
-                .Take(_config.Alternatives.MaxPerFund)
+                .Take(config.Alternatives.MaxPerFund)
                 .ToList();
+
+            _logger.Debug("UniverseEnricher alternatives — fund {0} in '{1}': {2} peer(s) [{3}]",
+                buy.Isin, category, peers.Count, string.Join(", ", peers.Select(p => p.Isin.Value)));
 
             if (peers.Count == 0)
             {
@@ -277,12 +368,13 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
     internal ConvictionBreakdown ScoreFund(
         FundRecord fund,
         string? rotationPairId,
-        IReadOnlyList<Alternative> alternatives)
+        IReadOnlyList<Alternative> alternatives,
+        UniverseEnricherConfig config)
     {
         return new ConvictionBreakdown
         {
             SignalStrength  = ScoreSignalStrength(fund),
-            MetricsQuality  = ScoreMetricsQuality(fund),
+            MetricsQuality  = ScoreMetricsQuality(fund, config),
             MacroAlignment  = ScoreMacroAlignment(fund),
             ThesisValidity  = ScoreThesisValidity(fund),
             UniverseContext = ScoreUniverseContext(rotationPairId, alternatives),
@@ -322,19 +414,19 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         return triggers >= 2 ? 1.0m : 0.6m;
     }
 
-    internal decimal ScoreMetricsQuality(FundRecord fund)
+    internal static decimal ScoreMetricsQuality(FundRecord fund, UniverseEnricherConfig config)
     {
         var metrics = fund.Metrics;
         if (metrics is null) return 0.0m;
 
-        var max = _config.MetricsQualityComponents.Sharpe12wNormalizationMax;
+        var max = config.MetricsQualityComponents.Sharpe12wNormalizationMax;
         var sharpe = Math.Clamp(metrics.Sharpe12w ?? 0m, 0m, max);
         var score = max > 0m ? sharpe / max : 0m;
 
-        if ((metrics.CurrentDrawdownPct ?? 0m) < _config.MetricsQualityComponents.DrawdownPenaltyThresholdPct)
+        if ((metrics.CurrentDrawdownPct ?? 0m) < config.MetricsQualityComponents.DrawdownPenaltyThresholdPct)
             score -= 0.20m;
 
-        if ((metrics.AnnVolatility12wPct ?? 0m) > _config.MetricsQualityComponents.VolPenaltyMinPct)
+        if ((metrics.AnnVolatility12wPct ?? 0m) > config.MetricsQualityComponents.VolPenaltyMinPct)
             score -= 0.15m;
 
         if (metrics.DataQuality.Sharpe2wIsNan) score -= 0.10m;
@@ -394,9 +486,9 @@ public sealed class UniverseEnricherAgent : IUniverseEnricherAgent
         return 0.0m;
     }
 
-    private decimal WeightedSum(ConvictionBreakdown b)
+    private static decimal WeightedSum(ConvictionBreakdown b, UniverseEnricherConfig config)
     {
-        var w = _config.Weights;
+        var w = config.Weights;
         return
             w.SignalStrength  * b.SignalStrength +
             w.MetricsQuality  * b.MetricsQuality +
