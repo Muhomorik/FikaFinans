@@ -7,6 +7,7 @@ using Autofac;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Application.Schedules;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.ViewModels.Steps;
@@ -30,6 +31,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// 1:1. Bank=0, Steps 1–10 = 1–10, NAV Sync = 11.
     /// </summary>
     private const int NavSyncTabIndex = 11;
+
+    /// <summary>
+    /// When step 9's daily timer fires, local time — shortly before the cloud step 10's
+    /// 23:00 CET timer. A constant until step 10 gets a local timer to sit before.
+    /// </summary>
+    private static readonly TimeOnly Step09TimerAt = new(22, 45);
 
     private string _title = string.Empty;
     private string _selectedWeek = string.Empty;
@@ -301,8 +308,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var step09Entry = _scope.Resolve<IStep09UniverseEnricherEntry>();
         var step09Sub = pipelineSignals.Signals
             .OfType<Step08DoneSignal>()
-            .Subscribe(done => RunStep09Async(step09Entry, done));
+            .Subscribe(done => RunStep09Async(
+                step09Entry, Step09Trigger.Step08Done, $"after {done.Isin.Value} completed step 8"));
         _disposables.Add(step09Sub);
+
+        // Step 9's daily timer: the safety net for a barrier that closed without a step 8
+        // completion — the last fund failed earlier in its chain. Re-armed after every firing,
+        // so each day's time is worked out fresh in local time. Only fires while the app is
+        // open; a day it is closed at that time gets no timer pass.
+        var step09Timer = Observable
+            .Defer(() =>
+            {
+                var next = DailyTime.NextAfter(DateTimeOffset.Now, Step09TimerAt, TimeZoneInfo.Local);
+                _logger?.Info("Step 9 timer armed — next barrier check at {Next:yyyy-MM-dd HH:mm zzz}", next);
+                return Observable.Timer(next);
+            })
+            .Repeat()
+            .Subscribe(_ => RunStep09Async(step09Entry, Step09Trigger.Timer, "from the daily timer"));
+        _disposables.Add(step09Timer);
     }
 
     /// <summary>
@@ -508,28 +531,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         });
 
     /// <summary>
-    /// Hands one step-8 done-signal to step 9's entry point, off the Rx callback — the bus
-    /// publishes inside step 8's emit, and a pass makes LLM calls.
+    /// Hands one trigger to step 9's entry point, off the Rx callback — the bus publishes
+    /// inside step 8's emit, the timer fires on a pool thread, and a pass makes LLM calls.
     /// </summary>
+    /// <param name="step09Entry">Step 9's entry point.</param>
+    /// <param name="trigger">Which trigger fired; the entry logs it.</param>
+    /// <param name="cause">
+    /// What set it off, for this method's own log lines — the fund whose step 8 completion
+    /// it was, or the timer. Not passed on: the pass is over every fund, whichever was last.
+    /// </param>
     /// <remarks>
-    /// The signal's fund is not passed on: the pass is over every fund, whichever finished
-    /// last. It is only logged, to say which completion set a failed check off. Nothing is
-    /// allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
     /// </remarks>
-    private void RunStep09Async(IStep09UniverseEnricherEntry step09Entry, Step08DoneSignal signal)
+    private void RunStep09Async(IStep09UniverseEnricherEntry step09Entry, Step09Trigger trigger, string cause)
         => _ = Task.Run(async () =>
         {
             try
             {
-                await step09Entry.HandleAsync(Step09Trigger.Step08Done, _runCts.Token).ConfigureAwait(false);
+                await step09Entry.HandleAsync(trigger, _runCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                _logger?.Debug("Step 9 cancelled, after {Isin} completed step 8", signal.Isin.Value);
+                _logger?.Debug("Step 9 cancelled, {Cause}", cause);
             }
             catch (Exception ex)
             {
-                _logger?.Error(ex, "Step 9 failed, after {Isin} completed step 8", signal.Isin.Value);
+                _logger?.Error(ex, "Step 9 failed, {Cause}", cause);
             }
         });
 

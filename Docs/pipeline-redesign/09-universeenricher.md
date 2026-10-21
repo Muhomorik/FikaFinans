@@ -329,8 +329,11 @@ no row.
 
 Row 10 touches the runner every earlier step has left alone; how much of
 `PipelineRunner` stays once Run All is a timer call is not decided here.
-Row 9's time of day locally is not decided either — there is no local
-step 10 timer to sit before yet.
+**Decided 2026-10-21, row 9: a fixed 22:45 local, in-process** — an Rx
+timer in the app, shortly before the cloud step 10's 23:00 CET, re-armed
+after each firing in local time. A constant until step 10 gets a local
+timer to sit before. It fires only while the app is open; a day the app
+is closed at 22:45 gets no timer pass.
 
 ## Open questions
 
