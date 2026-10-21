@@ -327,6 +327,19 @@ public interface IIsinProgressStore
         IReadOnlyList<Isin> universe, CancellationToken ct = default);
 
     /// <summary>
+    /// Reads step 9's records back for display — the same gather as
+    /// <see cref="ReadStep08RecordsAsync"/>, over <c>Step09Json</c>. Not by run id: each row
+    /// keeps its own fund's run, so only the universe gathers a pass.
+    /// </summary>
+    /// <param name="universe">The funds to read, in display order.</param>
+    /// <returns>
+    /// The records in <paramref name="universe"/>'s order, funds without one left out — or
+    /// <c>null</c> when none has one: no pass has run.
+    /// </returns>
+    Task<StepOutput?> ReadStep09OutputAsync(
+        IReadOnlyList<Isin> universe, CancellationToken ct = default);
+
+    /// <summary>
     /// Stores step 9's record for each fund on its own row, overwriting any earlier pass.
     /// Unlike <see cref="SaveStepOutputAsync"/>, only <c>Step09Json</c> changes: step 9 runs
     /// outside any fund's run, so state, run id and step marker stay as the fund's own run

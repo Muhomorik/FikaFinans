@@ -300,8 +300,29 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         => ListOrphanedAsync(StepId.Recommender, startedBefore, ct);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<FundRecord>> ReadStep08RecordsAsync(
+    public Task<IReadOnlyList<FundRecord>> ReadStep08RecordsAsync(
         IReadOnlyList<Isin> universe, CancellationToken ct = default)
+        => ReadUniverseRecordsAsync(StepId.Recommender, universe, ct);
+
+    /// <inheritdoc />
+    public async Task<StepOutput?> ReadStep09OutputAsync(
+        IReadOnlyList<Isin> universe, CancellationToken ct = default)
+    {
+        var records = await ReadUniverseRecordsAsync(StepId.UniverseEnricher, universe, ct).ConfigureAwait(false);
+
+        // No record on any row is a normal state — no pass has run since the funds' runs.
+        if (records.Count == 0)
+            return null;
+
+        return new StepOutput(JsonSerializer.Serialize(records, JsonOptions.Default), records);
+    }
+
+    /// <summary>
+    /// The records <paramref name="step"/>'s column holds for each fund in
+    /// <paramref name="universe"/>, in its order — gathered across rows, not by run id.
+    /// </summary>
+    private async Task<IReadOnlyList<FundRecord>> ReadUniverseRecordsAsync(
+        StepId step, IReadOnlyList<Isin> universe, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(universe);
 
@@ -317,7 +338,7 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         var skipped = new List<string>();
         foreach (var isin in universe)
         {
-            var json = byIsin.TryGetValue(isin.Value, out var row) ? row.Step08Json : null;
+            var json = byIsin.TryGetValue(isin.Value, out var row) ? StepJson(row, step) : null;
             if (string.IsNullOrEmpty(json))
             {
                 skipped.Add(isin.Value);
@@ -325,13 +346,13 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
             }
 
             records.Add(JsonSerializer.Deserialize<FundRecord>(json, JsonOptions.Default)
-                ?? throw new InvalidDataException($"Step 8 record for ISIN {isin.Value} is empty."));
+                ?? throw new InvalidDataException($"{step} record for ISIN {isin.Value} is empty."));
         }
 
         stopwatch.Stop();
         _logger.Trace(
-            "Progress step 8 records read — {0} of {1} fund(s), skipped: [{2}], {3} ms",
-            records.Count, universe.Count, string.Join(", ", skipped), stopwatch.ElapsedMilliseconds);
+            "Progress universe read — {0}, {1} of {2} fund(s), skipped: [{3}], {4} ms",
+            step, records.Count, universe.Count, string.Join(", ", skipped), stopwatch.ElapsedMilliseconds);
 
         return records;
     }

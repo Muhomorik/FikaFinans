@@ -273,6 +273,18 @@ page.
 | Chart | signals chart from the funds | unchanged |
 | Config editor | edits a file nothing reads | edits the file the provider reads |
 
+**Decided 2026-10-21: the tab's read and its "Run step" button take the
+barrier's universe** — the same company-filtered funds the pass runs
+over. The rows keep their funds' run ids, so no run id gathers a pass
+back. The button runs whether or not the barrier has closed, and stores
+nothing.
+
+**Decided 2026-10-21: each pass mints its own run id** through
+`IPipelineRunIdFactory` — the per-fund shape with `universe` in place of
+the ISIN, dated by the run. It stamps the pass's output and its log
+lines; the rows keep their funds' run ids, as the per-row save leaves
+them.
+
 ## To settle before building
 
 Settled by the docs and code, not choices: the universe is the funds

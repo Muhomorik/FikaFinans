@@ -1657,6 +1657,61 @@ public sealed class RepositoryBackedIsinProgressStoreTests
         Assert.That(output!.Funds.Single().RotationPairId, Is.EqualTo("rot_2026-W43_a"));
     }
 
+    // ── ReadStep09OutputAsync ─────────────────────────────────────────
+
+    [Test]
+    public async Task ReadStep09OutputAsync_SavedPass_ReturnsItsRecordsInUniverseOrder()
+    {
+        // Arrange — each row keeps its own run id, so no single run id gathers the pass.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", MakeRecord("LU0000000092"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep09Async([
+            MakeRecord("LU0000000091", rotationPairId: "rot_2026-W43_a"),
+            MakeRecord("LU0000000092", rotationPairId: "rot_2026-W43_a"),
+        ]);
+
+        // Act
+        var output = await sut.ReadStep09OutputAsync([new Isin("LU0000000092"), new Isin("LU0000000091")]);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(output!.Funds.Select(f => f.Isin.Value), Is.EqualTo(new[] { "LU0000000092", "LU0000000091" }));
+            Assert.That(output.Json, Does.Contain("rot_2026-W43_a"));
+        });
+    }
+
+    [Test]
+    public async Task ReadStep09OutputAsync_FundWithoutStep9Record_SkipsIt()
+    {
+        // Arrange — a fund step 1 claimed since the pass: its columns were cleared.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", MakeRecord("LU0000000092"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep09Async([MakeRecord("LU0000000091")]);
+
+        // Act
+        var output = await sut.ReadStep09OutputAsync([new Isin("LU0000000091"), new Isin("LU0000000092")]);
+
+        // Assert
+        Assert.That(output!.Funds.Select(f => f.Isin.Value), Is.EqualTo(new[] { "LU0000000091" }));
+    }
+
+    [Test]
+    public async Task ReadStep09OutputAsync_NoPassYet_ReturnsNull()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var output = await sut.ReadStep09OutputAsync([new Isin("LU0000000091")]);
+
+        // Assert
+        Assert.That(output, Is.Null);
+    }
+
     private Task SeedFinishedRowAsync(string isin, FundRecord? record)
         => _repo.UpsertAsync(new IsinProgressEntity
         {

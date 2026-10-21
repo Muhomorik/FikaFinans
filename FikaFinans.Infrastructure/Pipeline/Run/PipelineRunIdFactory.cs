@@ -34,4 +34,18 @@ public sealed class PipelineRunIdFactory : IPipelineRunIdFactory
             CultureInfo.InvariantCulture,
             $"{navDate:yyyyMMdd}-{isin.Value}-{suffix}"));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>{runDate:yyyyMMdd}-universe-{8 hex}</c> — the per-fund shape with <c>universe</c>
+    /// where the ISIN goes, so a pass sorts with the runs of its day and greps apart from them.
+    /// </remarks>
+    public PipelineRunId NewUniverseRunId(DateTimeOffset runDate)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..SuffixLength];
+
+        return new PipelineRunId(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{runDate:yyyyMMdd}-universe-{suffix}"));
+    }
 }

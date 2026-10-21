@@ -15,4 +15,11 @@ public interface IPipelineRunIdFactory
     /// loses the contention race, since that starts no run.
     /// </summary>
     PipelineRunId NewRunId(Isin isin, DateTimeOffset navDate);
+
+    /// <summary>
+    /// Mints an id for one universe pass — step 9's run over every fund, which belongs to no
+    /// fund's run. Called once per pass, so two passes in one week stay apart.
+    /// </summary>
+    /// <param name="runDate">When the pass runs; there is no trading date behind it.</param>
+    PipelineRunId NewUniverseRunId(DateTimeOffset runDate);
 }
