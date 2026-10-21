@@ -1,10 +1,14 @@
+using System.Text.Json;
 using AutoFixture;
 using AutoFixture.AutoMoq;
+using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
+using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Bank.Persistence;
+using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Infrastructure.Pipeline.Progress;
 using FikaFinans.Infrastructure.Storage.Sqlite;
 using Microsoft.Data.Sqlite;
@@ -1495,6 +1499,196 @@ public sealed class RepositoryBackedIsinProgressStoreTests
         // Assert
         Assert.That(orphaned.Select(r => r.Isin), Is.EquivalentTo(new[] { "LU0000000081", "LU0000000085" }));
     }
+
+    // ── ReadStep08RecordsAsync ────────────────────────────────────────
+
+    [Test]
+    public async Task ReadStep08RecordsAsync_RowsWithRecords_ReturnsThemInUniverseOrder()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", MakeRecord("LU0000000092"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var records = await sut.ReadStep08RecordsAsync(
+            [new Isin("LU0000000092"), new Isin("LU0000000091")]);
+
+        // Assert
+        Assert.That(records.Select(r => r.Isin.Value), Is.EqualTo(new[] { "LU0000000092", "LU0000000091" }));
+    }
+
+    [Test]
+    public async Task ReadStep08RecordsAsync_FundWithoutRecord_SkipsIt()
+    {
+        // Arrange — a fund that failed before step 8: step 1's claim cleared the column.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", record: null);
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var records = await sut.ReadStep08RecordsAsync(
+            [new Isin("LU0000000091"), new Isin("LU0000000092")]);
+
+        // Assert
+        Assert.That(records.Select(r => r.Isin.Value), Is.EqualTo(new[] { "LU0000000091" }));
+    }
+
+    [Test]
+    public async Task ReadStep08RecordsAsync_FundWithoutRow_SkipsIt()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var records = await sut.ReadStep08RecordsAsync(
+            [new Isin("LU0000000091"), new Isin("LU0000000093")]);
+
+        // Assert
+        Assert.That(records.Select(r => r.Isin.Value), Is.EqualTo(new[] { "LU0000000091" }));
+    }
+
+    [Test]
+    public async Task ReadStep08RecordsAsync_RowOutsideUniverse_LeavesItOut()
+    {
+        // Arrange — a row from a fund the company filter no longer matches.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000094", MakeRecord("LU0000000094"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var records = await sut.ReadStep08RecordsAsync([new Isin("LU0000000091")]);
+
+        // Assert
+        Assert.That(records.Select(r => r.Isin.Value), Is.EqualTo(new[] { "LU0000000091" }));
+    }
+
+    [Test]
+    public async Task ReadStep08RecordsAsync_EmptyUniverse_ReturnsEmpty()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var records = await sut.ReadStep08RecordsAsync([]);
+
+        // Assert
+        Assert.That(records, Is.Empty);
+    }
+
+    // ── SaveStep09Async ───────────────────────────────────────────────
+
+    [Test]
+    public async Task SaveStep09Async_FinishedRow_WritesStep09JsonOnly()
+    {
+        // Arrange — a signal-driven pass must not lock the row or take it over: state, run
+        // id, step marker and every other column stay as step 8 left them.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var before = await _repo.GetAsync(Partition, "LU0000000091");
+        var enriched = MakeRecord("LU0000000091", rotationPairId: "rot_2026-W43_a");
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.SaveStep09Async([enriched]);
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, "LU0000000091");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.Step09Json, Does.Contain("rot_2026-W43_a"));
+            Assert.That(row.State, Is.EqualTo(IsinProgressState.Free));
+            Assert.That(row.RunId, Is.EqualTo(before!.RunId));
+            Assert.That(row.CurrentStep, Is.EqualTo(8));
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date2));
+            Assert.That(row.Step08Json, Is.EqualTo(before.Step08Json));
+        });
+    }
+
+    [Test]
+    public async Task SaveStep09Async_SecondPass_OverwritesTheFirst()
+    {
+        // Arrange — two triggers can both run the pass; the later one wins.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep09Async([MakeRecord("LU0000000091", rotationPairId: "rot_2026-W43_a")]);
+
+        // Act
+        await sut.SaveStep09Async([MakeRecord("LU0000000091", rotationPairId: "rot_2026-W43_b")]);
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, "LU0000000091");
+        Assert.That(row!.Step09Json, Does.Contain("rot_2026-W43_b").And.Not.Contain("rot_2026-W43_a"));
+    }
+
+    [Test]
+    public async Task SaveStep09Async_FundWithoutRow_SkipsItAndReturnsTheRowsWritten()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var written = await sut.SaveStep09Async(
+            [MakeRecord("LU0000000091"), MakeRecord("LU0000000095")]);
+
+        // Assert
+        var missing = await _repo.GetAsync(Partition, "LU0000000095");
+        Assert.Multiple(() =>
+        {
+            Assert.That(written.Select(r => r.Isin), Is.EqualTo(new[] { "LU0000000091" }));
+            Assert.That(missing, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task SaveStep09Async_Written_ReadsBackThroughReadStepOutput()
+    {
+        // Arrange — the run id is left alone, so the row's own run id finds the record.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep09Async([MakeRecord("LU0000000091", rotationPairId: "rot_2026-W43_a")]);
+
+        // Act
+        var output = await sut.ReadStepOutputAsync(StepId.UniverseEnricher, new PipelineRunId("run-LU0000000091"));
+
+        // Assert
+        Assert.That(output!.Funds.Single().RotationPairId, Is.EqualTo("rot_2026-W43_a"));
+    }
+
+    private Task SeedFinishedRowAsync(string isin, FundRecord? record)
+        => _repo.UpsertAsync(new IsinProgressEntity
+        {
+            PartitionKey = Partition,
+            RowKey = isin,
+            Isin = isin,
+            State = IsinProgressState.Free,
+            RunId = new PipelineRunId($"run-{isin}"),
+            NavDate = Date2,
+            CurrentStep = 8,
+            LatestProcessedNavDate = Date2,
+            Step08Json = record is null ? null : JsonSerializer.Serialize(record, JsonOptions.Default),
+        });
+
+    private static FundRecord MakeRecord(string isin, string? rotationPairId = null) => new()
+    {
+        Isin = isin,
+        Metadata = new FundMetadata
+        {
+            Isin = isin,
+            Name = $"Test Fund {isin}",
+            CompanyName = "TestCo",
+            CurrencyCode = "SEK",
+            Category = "Branschfond, Energi",
+            FundType = "EQUITY_FUND",
+            ManagedType = "ACTIVE",
+            TotalFee = 1.0m,
+            RecommendedHoldingPeriod = "FIVE_YEAR",
+        },
+        NavBuckets = Array.Empty<NavBucket>(),
+        RotationPairId = rotationPairId,
+    };
 
     private Task SeedRowAsync(string isin, IsinProgressState state, int step, DateTimeOffset? startedAt)
         => _repo.UpsertAsync(new IsinProgressEntity

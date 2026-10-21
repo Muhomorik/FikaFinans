@@ -28,6 +28,7 @@ namespace FikaFinans.Infrastructure.Pipeline.Progress;
 public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
 {
     private const string IsinProgressPartition = "isin-progress";
+    private const int UpsertBatchSize = 100;
 
     private readonly ILogger _logger;
     private readonly IIsinProgressRepository _isinProgress;
@@ -297,6 +298,110 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
     public Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep08Async(
         DateTimeOffset startedBefore, CancellationToken ct = default)
         => ListOrphanedAsync(StepId.Recommender, startedBefore, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FundRecord>> ReadStep08RecordsAsync(
+        IReadOnlyList<Isin> universe, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(universe);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // One scan rather than a read per fund: the universe is most of the partition.
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+        var byIsin = rows.ToDictionary(r => r.Isin, StringComparer.Ordinal);
+
+        var records = new List<FundRecord>(universe.Count);
+        var skipped = new List<string>();
+        foreach (var isin in universe)
+        {
+            var json = byIsin.TryGetValue(isin.Value, out var row) ? row.Step08Json : null;
+            if (string.IsNullOrEmpty(json))
+            {
+                skipped.Add(isin.Value);
+                continue;
+            }
+
+            records.Add(JsonSerializer.Deserialize<FundRecord>(json, JsonOptions.Default)
+                ?? throw new InvalidDataException($"Step 8 record for ISIN {isin.Value} is empty."));
+        }
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress step 8 records read — {0} of {1} fund(s), skipped: [{2}], {3} ms",
+            records.Count, universe.Count, string.Join(", ", skipped), stopwatch.ElapsedMilliseconds);
+
+        return records;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IsinProgressEntity>> SaveStep09Async(
+        IReadOnlyList<FundRecord> records, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+        var byIsin = rows.ToDictionary(r => r.Isin, StringComparer.Ordinal);
+
+        var written = new List<IsinProgressEntity>(records.Count);
+        foreach (var record in records)
+        {
+            // A row deleted between the read and now. Logged rather than created: a row
+            // made here would have no run behind it.
+            if (!byIsin.TryGetValue(record.Isin.Value, out var row))
+            {
+                _logger.Info("Progress step 9 save skipped — isin={0} has no row", record.Isin.Value);
+                continue;
+            }
+
+            written.Add(WithStep09Output(row, JsonSerializer.Serialize(record, JsonOptions.Default)));
+        }
+
+        // Tables takes at most 100 entities per batch.
+        foreach (var chunk in written.Chunk(UpsertBatchSize))
+            await _isinProgress.UpsertBatchAsync(IsinProgressPartition, chunk, ct).ConfigureAwait(false);
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress step 9 save done — {0} of {1} row(s), {2} ms",
+            written.Count, records.Count, stopwatch.ElapsedMilliseconds);
+
+        return written;
+    }
+
+    /// <summary>
+    /// Copies a row, replacing only <c>Step09Json</c>. Unlike <see cref="WithStepOutput"/>
+    /// the run marker stays put — step 9 is not part of the fund's run.
+    /// </summary>
+    private static IsinProgressEntity WithStep09Output(IsinProgressEntity row, string json) => new()
+    {
+        PartitionKey = row.PartitionKey,
+        RowKey = row.RowKey,
+        Isin = row.Isin,
+        State = row.State,
+        RunId = row.RunId,
+        NavDate = row.NavDate,
+        CurrentStep = row.CurrentStep,
+        LatestProcessedNavDate = row.LatestProcessedNavDate,
+        ProcessingStartedAt = row.ProcessingStartedAt,
+        LastError = row.LastError,
+        AttemptCount = row.AttemptCount,
+        Step01Json = row.Step01Json,
+        Step02Json = row.Step02Json,
+        Step03Json = row.Step03Json,
+        Step04Json = row.Step04Json,
+        Step05Json = row.Step05Json,
+        Step06Json = row.Step06Json,
+        Step07Json = row.Step07Json,
+        Step08Json = row.Step08Json,
+        Step09Json = json,
+    };
 
     /// <summary>
     /// The one way a run moves on to a later step, whichever step is starting: a check that

@@ -309,4 +309,31 @@ public interface IIsinProgressStore
     /// <returns>The orphaned rows; empty when there are none.</returns>
     Task<IReadOnlyList<IsinProgressEntity>> ListOrphanedStep08Async(
         DateTimeOffset startedBefore, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads step 8's record for every fund in <paramref name="universe"/> — step 9's input,
+    /// gathered across rows rather than from one run, since each fund got there on its own.
+    /// </summary>
+    /// <param name="universe">
+    /// The funds step 9 runs over. The row knows only its ISIN, so which funds belong — the
+    /// company filter — is the caller's to decide.
+    /// </param>
+    /// <returns>
+    /// The records in <paramref name="universe"/>'s order. A fund with no row, or no step 8
+    /// record — one that failed earlier in the chain — is left out: the smaller-but-clean
+    /// universe.
+    /// </returns>
+    Task<IReadOnlyList<FundRecord>> ReadStep08RecordsAsync(
+        IReadOnlyList<Isin> universe, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores step 9's record for each fund on its own row, overwriting any earlier pass.
+    /// Unlike <see cref="SaveStepOutputAsync"/>, only <c>Step09Json</c> changes: step 9 runs
+    /// outside any fund's run, so state, run id and step marker stay as the fund's own run
+    /// left them, and no row is locked.
+    /// </summary>
+    /// <param name="records">Step 9's output, one record per fund.</param>
+    /// <returns>The rows written; a record whose fund has no row is skipped.</returns>
+    Task<IReadOnlyList<IsinProgressEntity>> SaveStep09Async(
+        IReadOnlyList<FundRecord> records, CancellationToken ct = default);
 }
