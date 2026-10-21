@@ -456,6 +456,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep06Services(builder);
         RegisterStep07Services(builder);
         RegisterStep08Services(builder);
+        RegisterStep09Services(builder);
     }
 
     /// <summary>
@@ -699,6 +700,16 @@ public sealed class InfrastructureModule : Autofac.Module
                 LogManager.GetLogger(nameof(Step08RecommenderEntry)),
                 ctx.Resolve<Func<IStep08Recommender>>()))
             .As<IStep08RecommenderEntry>()
+            .SingleInstance();
+    }
+
+    private static void RegisterStep09Services(ContainerBuilder builder)
+    {
+        // The JSON file the tab's config editor writes locally; another source in Azure.
+        builder.Register(ctx => new JsonBackedStep09ConvictionConfigProvider(
+                LogManager.GetLogger(nameof(JsonBackedStep09ConvictionConfigProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IStep09ConvictionConfigProvider>()
             .SingleInstance();
     }
 
