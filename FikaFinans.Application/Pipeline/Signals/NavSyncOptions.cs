@@ -1,3 +1,5 @@
+using FikaFinans.Domain.Funds;
+
 namespace FikaFinans.Application.Pipeline.Signals;
 
 /// <summary>
@@ -14,6 +16,14 @@ public sealed record NavSyncOptions
     /// company filter (all funds considered).
     /// </summary>
     public string CompanyFilter { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether a fund run by <paramref name="company"/> is in the universe — the one place the
+    /// <see cref="CompanyFilter"/> rule lives, so the NAV sync and step 9's barrier agree.
+    /// </summary>
+    public bool MatchesCompany(Company company)
+        => string.IsNullOrWhiteSpace(CompanyFilter)
+           || string.Equals(company.Value, CompanyFilter, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Filesystem path to YieldRacoon's local database, opened <b>read-only</b>

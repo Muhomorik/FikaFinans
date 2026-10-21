@@ -1,5 +1,6 @@
 using FikaFinans.Application.Storage.Bank;
 using FikaFinans.Application.Storage.Bank.Entities;
+using FikaFinans.Domain.Funds;
 using NLog;
 
 namespace FikaFinans.Application.Pipeline.Signals;
@@ -110,11 +111,7 @@ public sealed class NavChangeDetector : INavChangeDetector
     {
         var navInfos = await _provider.GetLatestNavDatesAsync(ct).ConfigureAwait(false);
 
-        var hasFilter = !string.IsNullOrWhiteSpace(_options.CompanyFilter);
-        var candidates = (hasFilter
-                ? navInfos.Where(n => string.Equals(n.CompanyName, _options.CompanyFilter, StringComparison.OrdinalIgnoreCase))
-                : navInfos)
-            .ToList();
+        var candidates = navInfos.Where(n => _options.MatchesCompany(new Company(n.CompanyName))).ToList();
 
         var rows = await _isinProgress.QueryPartitionAsync(IsinProgressPartition, ct).ConfigureAwait(false);
         var rowByIsin = rows.ToDictionary(r => r.Isin);

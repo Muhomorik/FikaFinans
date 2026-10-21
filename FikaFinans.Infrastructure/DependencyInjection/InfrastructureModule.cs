@@ -712,6 +712,15 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPathsService>()))
             .As<IStep09ConvictionConfigProvider>()
             .SingleInstance();
+
+        // Stateless and read-only — every trigger asks the same instance.
+        builder.Register(ctx => new Step09Barrier(
+                LogManager.GetLogger(nameof(Step09Barrier)),
+                ctx.Resolve<NavSyncOptions>(),
+                ctx.Resolve<ILatestNavProvider>(),
+                ctx.Resolve<IIsinProgressRepository>()))
+            .As<IStep09Barrier>()
+            .SingleInstance();
     }
 
     /// <summary>
