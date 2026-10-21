@@ -294,12 +294,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .OfType<Step07DoneSignal>()
             .Subscribe(done => RunStep08Async(step08Entry, done));
         _disposables.Add(step08Sub);
+
+        // Step 8's done-signal: one of step 9's two triggers, the other its daily timer. Every
+        // completion asks the barrier; only the one that finds every fund finished runs the
+        // pass. Step 8 completes before it emits, so the last fund already reads finished.
+        var step09Entry = _scope.Resolve<IStep09UniverseEnricherEntry>();
+        var step09Sub = pipelineSignals.Signals
+            .OfType<Step08DoneSignal>()
+            .Subscribe(done => RunStep09Async(step09Entry, done));
+        _disposables.Add(step09Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 8
-    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep08Async"/>; steps 9-10
-    /// still run through <see cref="IPipelineRunner"/> from the Run All button.
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 9
+    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep09Async"/>; step 10,
+    /// and step 9 from the Run All button, still run through <see cref="IPipelineRunner"/>.
     /// </summary>
     /// <remarks>
     /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
@@ -495,6 +504,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 8 failed for {Isin}", signal.Isin.Value);
+            }
+        });
+
+    /// <summary>
+    /// Hands one step-8 done-signal to step 9's entry point, off the Rx callback — the bus
+    /// publishes inside step 8's emit, and a pass makes LLM calls.
+    /// </summary>
+    /// <remarks>
+    /// The signal's fund is not passed on: the pass is over every fund, whichever finished
+    /// last. It is only logged, to say which completion set a failed check off. Nothing is
+    /// allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
+    /// </remarks>
+    private void RunStep09Async(IStep09UniverseEnricherEntry step09Entry, Step08DoneSignal signal)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step09Entry.HandleAsync(Step09Trigger.Step08Done, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 9 cancelled, after {Isin} completed step 8", signal.Isin.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 9 failed, after {Isin} completed step 8", signal.Isin.Value);
             }
         });
 
