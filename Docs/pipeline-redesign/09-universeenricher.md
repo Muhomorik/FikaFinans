@@ -133,7 +133,7 @@ has closed and, if so, runs the pass.
 | Trigger | Locally | In cloud | Catches |
 | --- | --- | --- | --- |
 | Step 8 done | `Step08DoneSignal` | the step 8 Function, after its complete | the normal case — the pass runs as soon as the last fund completes |
-| Timer | a local timer *(new)*, once a day before step 10; **the Run All button** is the same call — it runs all funds | a timer-triggered Function *(new)*, once a day before step 10's 23:00 timer | barriers that closed **without** a step 8 completion |
+| Timer | a local timer *(new)*, daily at 22:45 — see "Proposed implementation order" | a timer-triggered Function *(new)*, once a day before step 10's 23:00 timer | barriers that closed **without** a step 8 completion |
 
 **Decided 2026-10-19: the timer fires once a day, shortly before step
 10.** It is a safety net for the day's trades: if the last fund fails in
@@ -242,7 +242,7 @@ pair id among them — lands wherever the record lands:
 
 | | Current | WPF | Cloud |
 | --- | --- | --- | --- |
-| **Run All button** (`PipelineRunner`) | `Step09Json` on every fund's row in SQLite, through `WriteIsinProgressStep9Async`, **plus** the file `09-enrichment-{iso_week}-{run_id}.json` | **the same as a timer run** — it runs all funds, so step 9 runs over every row; see the timer row | — no button |
+| **Run All button** (`PipelineRunner`) | `Step09Json` on every fund's row in SQLite, through `WriteIsinProgressStep9Async`, **plus** the file `09-enrichment-{iso_week}-{run_id}.json` | **unchanged** — `PipelineRunner`'s own step 9, as Run All is for steps 2–8 | — no button |
 | **Step 9 tab's "Run step" button** | the file only — `RunAsync` reads the step 8 file and writes the step 9 file | through the step 9 handler, as steps 2–8's buttons | — no tabs |
 | **Done-signal or timer run** | — does not exist | `Step09Json` on every fund's row in SQLite, through a step 9 save *(new)* that leaves `State` and `RunId` alone. **No file**, as steps 2–8's signal-driven runs | `Step09Json` on every fund's row in Azure Tables, the same save |
 | **Read by** | step 10 (Run All), from `Step09Json`; the step 9 tab and the fund detail, from `Step09Json` or the file | step 10, from `Step09Json` on every row; the step 9 tab | step 10's daily Function, from `Step09Json` on every row — [pipeline-data.md](./pipeline-data.md) |
@@ -321,14 +321,19 @@ runs, not a row of its own — except the LLM client, as on steps 6 and 7.
 | 7 | `IStep09UniverseEnricherEntry` + entry point — one call per trigger: check the barrier, run the handler if closed, log either way; registration | Application, `InfrastructureModule` | rows 4, 6 |
 | 8 | Subscription `Step08DoneSignal` → step 9's entry point, caught and logged as `RunStep08Async` | `MainWindowViewModel` | row 7 |
 | 9 | A local daily timer → step 9's entry point, before step 10 | `MainWindowViewModel` or a host service | row 7 |
-| 10 | Run All runs step 9 through the entry point — the same call as the timer — instead of `PipelineRunner`'s own step 9 section | `PipelineRunner` or `MainWindowViewModel` | row 7 |
+| ~~10~~ | ~~Run All runs step 9 through the entry point~~ — **dropped**, see below | — | — |
 | 11 | Step 9's tab goes passive, as steps 2–8's: follows step events, reads `Step09Json` from every row; "Run step" goes through the handler | `Step9UniverseEnricherViewModel`, no XAML | rows 6, 7 |
 
 No tail move: step 8 stays the per-fund chain's tail, and step 9 frees
 no row.
 
-Row 10 touches the runner every earlier step has left alone; how much of
-`PipelineRunner` stays once Run All is a timer call is not decided here.
+**Decided 2026-10-21, row 10 dropped: Run All stays `PipelineRunner`'s
+own path**, as steps 2–8 left it — step 9 is not changed there. Run All
+could not go through the entry point anyway: it holds every row
+`Processing` until after step 10 and moves no anchors, so the barrier
+would stay open. Step 9 goes from the view model to the handler, as the
+other steps do — row 11.
+
 **Decided 2026-10-21, row 9: a fixed 22:45 local, in-process** — an Rx
 timer in the app, shortly before the cloud step 10's 23:00 CET, re-armed
 after each firing in local time. A constant until step 10 gets a local

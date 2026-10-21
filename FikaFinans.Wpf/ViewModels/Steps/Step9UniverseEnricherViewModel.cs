@@ -1,15 +1,16 @@
-using System.IO;
 using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using System.Windows.Input;
 using System.Windows.Media;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Paths;
-using FikaFinans.Application.Pipeline.Agents;
-using FikaFinans.Application.Storage.Bank;
+using FikaFinans.Application.Pipeline;
+using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Wpf.Services;
 using FikaFinans.Wpf.Views.Charts;
+using JetBrains.Annotations;
 using LiveChartsCore;
 using LiveChartsCore.Defaults;
 using LiveChartsCore.SkiaSharpView;
@@ -20,12 +21,15 @@ using System.Text.Json;
 
 namespace FikaFinans.Wpf.ViewModels.Steps;
 
+/// <summary>
+/// The step 9 tab: shows the last universe pass, following the step's events rather than
+/// driving them, with a debug button that runs a pass again without storing it.
+/// </summary>
 public sealed class Step9UniverseEnricherViewModel : StepViewModel
 {
     private readonly IPathsService? _paths;
-    private readonly IUniverseEnricherAgent? _agent;
+    private readonly IStep09UniverseEnricher? _step09;
     private readonly IFundDetailDialogService? _fundDetailDialog;
-    private readonly IIsinProgressRepository? _isinProgress;
 
     private IEnumerable<ISeries>? _signalsSeries;
     private IEnumerable<SignalsLegendItem>? _signalsLegend;
@@ -48,24 +52,49 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
 
     public ICommand FundClickedCommand { get; }
 
-    public Step9UniverseEnricherViewModel()
+    [UsedImplicitly]
+    public Step9UniverseEnricherViewModel()   // designer only
     {
         FundClickedCommand = new DelegateCommand<string>(OnFundClicked);
     }
 
+    [UsedImplicitly]
     public Step9UniverseEnricherViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IUniverseEnricherAgent agent,
+        IPathsService paths, IStep09UniverseEnricher step09,
         IConfigEditorDialogService configEditor,
         IFundDetailDialogService fundDetailDialog,
-        IIsinProgressRepository isinProgress)
+        IStepEventSource stepEvents)
         : base(logger, uiScheduler)
     {
         _paths = paths;
-        _agent = agent;
+        _step09 = step09;
         _configEditorService = configEditor;
         _fundDetailDialog = fundDetailDialog;
-        _isinProgress = isinProgress;
         FundClickedCommand = new DelegateCommand<string>(OnFundClicked);
+
+        // The tab follows the step rather than running it: whoever drove the pass — step 8's
+        // done-signal or the daily timer locally, a Function in Azure — reports through this
+        // stream.
+        var ticks = stepEvents.Events
+            .Where(tick => tick.Step == StepId.UniverseEnricher)
+            .ObserveOn(uiScheduler);
+
+        Disposables.Add(ticks.Subscribe(ApplyStepEvent));
+
+        // No done-signal follows step 9, so the pass's own Succeeded is the cue to reload.
+        Disposables.Add(ticks
+            .Where(tick => tick.Kind == StepEventKind.Succeeded)
+            .Select(_ => Observable
+                .FromAsync(LoadOutputAsync)
+                // Caught per load: an error reaching Subscribe would end the stream for the
+                // session, and the next pass's output would never show.
+                .Catch((Exception ex) =>
+                {
+                    Logger?.Error(ex, "Step 9 output load failed");
+                    return Observable.Empty<System.Reactive.Unit>();
+                }))
+            .Concat()
+            .Subscribe());
     }
 
     private void OnFundClicked(string isin)
@@ -76,58 +105,41 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
 
     protected override string? GetConfigPath() => _paths?.Config09ConvictionJson;
 
+    /// <summary>
+    /// The debug button: a pass over the universe as it stands, through the step, shown but
+    /// never stored — a replaced output would change what step 10 reads. Runs whether or not
+    /// the barrier has closed. Not free: one LLM call per Buy with peers.
+    /// </summary>
     protected override async Task RunStepCoreAsync()
     {
-        if (_agent is null || _paths is null)
-        {
-            OutputSummaryText = "Configure Foundry credentials in Settings → Models";
-            return;
-        }
-        if (string.IsNullOrEmpty(IsoWeek))
-        {
-            OutputSummaryText = "Select a week in the run bar first";
-            return;
-        }
+        // Null only under the designer's parameterless constructor.
+        if (_step09 is null) return;
 
-        await _agent.RunAsync(IsoWeek, RunId);
-        await LoadOutputAsync();
+        var output = await _step09.ComputeOutputAsync();
+
+        // The funds only, the same shape a stored output reads back as.
+        OutputJson = JsonSerializer.Serialize(output.Funds, JsonOptions.Default);
+        BuildSignalsChart(output.Funds);
+        OutputSummaryText = $"Debug run, not stored — {output.Funds.Count} funds — week {output.IsoWeek}";
     }
 
+    /// <summary>
+    /// Reads the last pass back off the rows — the universe's <c>Step09Json</c>, not the run
+    /// bar's run: each row keeps its own fund's run id, so no single run id gathers a pass.
+    /// </summary>
     public override async Task LoadOutputAsync()
     {
-        // 8c: prefer SQLite Step09Json columns; disk fallback for per-step button flow.
-        if (_isinProgress is not null)
-        {
-            var sqliteResult = await IsinProgressOutputLoader.LoadStepFundsAsync(
-                _isinProgress, RunId, row => row.Step09Json);
-            if (sqliteResult is not null)
-            {
-                OutputJson = sqliteResult.Json;
-                BuildSignalsChart(sqliteResult.Funds);
-                OutputSummaryText = $"{sqliteResult.Funds.Count} funds — universe enriched";
-                return;
-            }
-        }
+        if (_step09 is null) return;
 
-        if (_paths is null || string.IsNullOrEmpty(IsoWeek)) return;
+        var output = await _step09.ReadOutputAsync();
 
-        var outPath = _paths.UniverseEnricherOutput(IsoWeek, RunId);
-        if (!File.Exists(outPath))
-        {
-            OutputSummaryText = "Output file not found";
-            return;
-        }
-
-        var json = await File.ReadAllTextAsync(outPath);
-        OutputJson = json;
-
-        var output = JsonSerializer.Deserialize<DataLoaderOutput>(json, JsonOptions.Default);
         if (output is null)
         {
-            OutputSummaryText = "Output file present but unreadable";
+            OutputSummaryText = "No universe pass stored yet";
             return;
         }
 
+        OutputJson = output.Json;
         BuildSignalsChart(output.Funds);
         OutputSummaryText = $"{output.Funds.Count} funds — universe enriched";
     }
