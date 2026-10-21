@@ -728,6 +728,30 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IIsinProgressRepository>()))
             .As<IStep09Barrier>()
             .SingleInstance();
+
+        // Deliberately not SingleInstance, same as steps 1–8: it carries one pass's state in
+        // fields — run id, week, records, config, agent output.
+        builder.Register(ctx => new Step09UniverseEnricherHandler(
+                logger: LogManager.GetLogger(nameof(Step09UniverseEnricherHandler)),
+                options: ctx.Resolve<NavSyncOptions>(),
+                barrier: ctx.Resolve<IStep09Barrier>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                configProvider: ctx.Resolve<IStep09ConvictionConfigProvider>(),
+                agent: ctx.Resolve<IUniverseEnricherAgent>(),
+                runIds: ctx.Resolve<IPipelineRunIdFactory>(),
+                clock: ctx.Resolve<TimeProvider>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep09UniverseEnricher>()
+            .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per pass without knowing a container exists.
+        builder.Register(ctx => new Step09UniverseEnricherEntry(
+                LogManager.GetLogger(nameof(Step09UniverseEnricherEntry)),
+                ctx.Resolve<IStep09Barrier>(),
+                ctx.Resolve<Func<IStep09UniverseEnricher>>()))
+            .As<IStep09UniverseEnricherEntry>()
+            .SingleInstance();
     }
 
     /// <summary>
