@@ -59,6 +59,10 @@ public sealed class Step08RecommenderHandlerTests
                 It.IsAny<Company>(), It.IsAny<IsoWeek>(), It.IsAny<PipelineRunId>(),
                 It.IsAny<IReadOnlyList<FundRecord>>()))
             .Returns(_agentOutput);
+        _progress
+            .Setup(x => x.SaveStepOutputAsync(
+                Signal.Isin, StepId.Recommender, Signal.RunId, It.IsAny<DataLoaderOutput>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new IsinProgressEntity { Isin = Signal.Isin.Value });
     }
 
     private Step08RecommenderHandler CreateSut() => _fixture.Create<Step08RecommenderHandler>();
@@ -341,12 +345,14 @@ public sealed class Step08RecommenderHandlerTests
     // ── EmitDoneAsync ─────────────────────────────────────────────────
 
     [Test]
-    public async Task EmitDoneAsync_AfterPersist_PublishesStep08DoneAndReportsSucceeded()
+    public async Task EmitDoneAsync_AfterComplete_PublishesStep08DoneAndReportsNothing()
     {
-        // Arrange
+        // Arrange — the complete already reported the fund done.
         var sut = CreateSut();
         await RunThroughAgentAsync(sut);
         await sut.PersistAsync(Signal);
+        await sut.CompleteAsync(Signal);
+        _stepEvents.Invocations.Clear();
 
         // Act
         await sut.EmitDoneAsync(Signal);
@@ -357,34 +363,34 @@ public sealed class Step08RecommenderHandlerTests
             _signals.Verify(x => x.PublishAsync(
                 new Step08DoneSignal(Signal.Isin, Signal.NavDate, Signal.RunId),
                 It.IsAny<CancellationToken>()), Times.Once);
-            _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e =>
-                e.Step == StepId.Recommender && e.Kind == StepEventKind.Succeeded)), Times.Once);
+            _stepEvents.Verify(x => x.Publish(It.IsAny<StepEvent>()), Times.Never);
         });
     }
 
     [Test]
-    public async Task EmitDoneAsync_PublishThrows_ThrowsAndReportsFailed()
+    public async Task EmitDoneAsync_PublishThrows_ThrowsWithoutReportingFailed()
     {
-        // Arrange
+        // Arrange — the fund is complete and stored; only step 9's early check is lost.
         _signals
             .Setup(x => x.PublishAsync(It.IsAny<Step08DoneSignal>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
         var sut = CreateSut();
         await RunThroughAgentAsync(sut);
         await sut.PersistAsync(Signal);
+        await sut.CompleteAsync(Signal);
 
         // Act
         Assert.ThrowsAsync<InvalidOperationException>(() => sut.EmitDoneAsync(Signal));
 
         // Assert
         _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e =>
-            e.Step == StepId.Recommender && e.Kind == StepEventKind.Failed)), Times.Once);
+            e.Step == StepId.Recommender && e.Kind == StepEventKind.Failed)), Times.Never);
     }
 
     // ── CompleteAsync ─────────────────────────────────────────────────
 
     [Test]
-    public async Task CompleteAsync_AfterStart_CompletesStep08()
+    public async Task CompleteAsync_AfterStart_CompletesStep08AndReportsSucceeded()
     {
         // Arrange
         var sut = CreateSut();
@@ -394,7 +400,12 @@ public sealed class Step08RecommenderHandlerTests
         await sut.CompleteAsync(Signal);
 
         // Assert
-        _progress.Verify(x => x.CompleteStep08Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Multiple(() =>
+        {
+            _progress.Verify(x => x.CompleteStep08Async(Signal.Isin, It.IsAny<CancellationToken>()), Times.Once);
+            _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e =>
+                e.Step == StepId.Recommender && e.Kind == StepEventKind.Succeeded)), Times.Once);
+        });
     }
 
     [Test]
@@ -408,7 +419,7 @@ public sealed class Step08RecommenderHandlerTests
     }
 
     [Test]
-    public async Task CompleteAsync_StoreThrows_Rethrows()
+    public async Task CompleteAsync_StoreThrows_ReportsFailedAndRethrows()
     {
         // Arrange — rethrown so the caller fails the run instead of leaving it in flight.
         _progress
@@ -419,6 +430,8 @@ public sealed class Step08RecommenderHandlerTests
 
         // Act & Assert
         Assert.ThrowsAsync<InvalidOperationException>(() => sut.CompleteAsync(Signal));
+        _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e =>
+            e.Step == StepId.Recommender && e.Kind == StepEventKind.Failed)), Times.Once);
     }
 
     // ── FailAsync ─────────────────────────────────────────────────────

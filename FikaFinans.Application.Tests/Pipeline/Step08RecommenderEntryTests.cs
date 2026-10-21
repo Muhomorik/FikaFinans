@@ -39,7 +39,7 @@ public sealed class Step08RecommenderEntryTests
     private Step08RecommenderEntry CreateSut() => _fixture.Create<Step08RecommenderEntry>();
 
     [Test]
-    public async Task HandleAsync_AllPhasesSucceed_RunsPhasesInOrderAndCompletesLast()
+    public async Task HandleAsync_AllPhasesSucceed_CompletesBeforeEmittingLast()
     {
         // Arrange
         var calls = new List<string>();
@@ -61,9 +61,9 @@ public sealed class Step08RecommenderEntryTests
         // Act
         await CreateSut().HandleAsync(Signal);
 
-        // Assert
+        // Assert — step 9's barrier must already read the fund finished when the signal arrives.
         Assert.That(calls, Is.EqualTo(new[]
-            { "begin", "load", "assemble", "agent", "persist", "emit", "complete" }));
+            { "begin", "load", "assemble", "agent", "persist", "complete", "emit" }));
         _step08.Verify(x => x.FailAsync(
             It.IsAny<Step07DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -126,7 +126,7 @@ public sealed class Step08RecommenderEntryTests
     }
 
     [Test]
-    public void HandleAsync_PersistThrows_FailsAndNeverEmits()
+    public void HandleAsync_PersistThrows_FailsAndNeitherCompletesNorEmits()
     {
         // Arrange
         var boom = new InvalidOperationException("persist exploded");
@@ -139,8 +139,48 @@ public sealed class Step08RecommenderEntryTests
 
         // Assert
         _step08.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
+        _step08.Verify(x => x.CompleteAsync(
+            It.IsAny<Step07DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
         _step08.Verify(x => x.EmitDoneAsync(
             It.IsAny<Step07DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public void HandleAsync_CompleteThrows_FailsAndNeverEmits()
+    {
+        // Arrange
+        var boom = new InvalidOperationException("complete exploded");
+        _step08
+            .Setup(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(boom);
+
+        // Act
+        Assert.ThrowsAsync<InvalidOperationException>(() => CreateSut().HandleAsync(Signal));
+
+        // Assert
+        _step08.Verify(x => x.FailAsync(Signal, boom, It.IsAny<CancellationToken>()), Times.Once);
+        _step08.Verify(x => x.EmitDoneAsync(
+            It.IsAny<Step07DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public void HandleAsync_EmitThrows_RethrowsWithoutFailingTheCompletedRun()
+    {
+        // Arrange — the row is complete and no longer this run's; failing it could stamp an
+        // error on a finished fund, or on a newer run's row.
+        var boom = new InvalidOperationException("bus down");
+        _step08
+            .Setup(x => x.EmitDoneAsync(Signal, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(boom);
+
+        // Act
+        var thrown = Assert.ThrowsAsync<InvalidOperationException>(() => CreateSut().HandleAsync(Signal));
+
+        // Assert
+        Assert.That(thrown, Is.SameAs(boom));
+        _step08.Verify(x => x.CompleteAsync(Signal, It.IsAny<CancellationToken>()), Times.Once);
+        _step08.Verify(x => x.FailAsync(
+            It.IsAny<Step07DoneSignal>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]

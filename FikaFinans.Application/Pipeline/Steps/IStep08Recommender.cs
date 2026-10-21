@@ -41,12 +41,15 @@ public interface IStep08Recommender
     /// <summary>Writes the recommended record to <c>Step08Json</c> on the fund's progress row.</summary>
     Task PersistAsync(Step07DoneSignal signal, CancellationToken ct = default);
 
-    /// <summary>Emits step 8's done-signal — after the write, never before.</summary>
+    /// <summary>
+    /// Emits step 8's done-signal — after the complete, never before, so the fund already
+    /// reads finished to step 9's barrier when the signal arrives.
+    /// </summary>
     Task EmitDoneAsync(Step07DoneSignal signal, CancellationToken ct = default);
 
     /// <summary>
     /// Ends the run successfully: frees the fund's row and advances its dedup anchor. Only
-    /// while step 8 is the chain tail — called after the emit, never before.
+    /// while step 8 is the chain tail — called after the write and before the emit.
     /// </summary>
     Task CompleteAsync(Step07DoneSignal signal, CancellationToken ct = default);
 

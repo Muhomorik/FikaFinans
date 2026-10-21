@@ -136,7 +136,7 @@ Step 7's, with the model call gone:
 flowchart TB
   subgraph app["Application — shared by both hosts"]
     door["Step08RecommenderEntry<br/>one Step07DoneSignal in"]
-    h["Step08RecommenderHandler<br/>start → read Step07Json → recommend → save → emit → complete"]
+    h["Step08RecommenderHandler<br/>start → read Step07Json → recommend → save → complete → emit"]
     agent["IRecommenderAgent.RunInMemory<br/>mapping table, no LLM"]
     door --> h
     h --> agent
@@ -317,11 +317,19 @@ The same move as every step before — **and it changes step 7's code**:
 | Before | After |
 | --- | --- |
 | `CompleteStep07Async` frees the row and advances the anchor | removed, with step 7's `CompleteAsync`; step 7's entry point stops calling it |
-| — | `CompleteStep08Async`, called by step 8's entry point after its emit |
+| — | `CompleteStep08Async`, called by step 8's entry point before its emit — see below |
 | — | `FailStep08Async` |
 
 Step 7 keeps its done-signal and its `Succeeded` step event; only the row
 release moves. **Proposed, as before: that change is its own commit.**
+
+**Changed 2026-10-21, for step 9: complete, then emit.** Step 9's barrier
+reads the rows when `Step08DoneSignal` arrives; emitted before the
+complete, the last fund still read `Processing` and the barrier stayed
+open. Now the complete reports `Succeeded`, and an emit that fails after
+it is logged and rethrown but never fails the run — the row is no longer
+this run's, and step 9's daily timer covers the lost signal. See
+[09-universeenricher.md](./09-universeenricher.md).
 
 ### Orphaned runs
 

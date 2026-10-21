@@ -274,9 +274,6 @@ public sealed class Step08RecommenderHandler : IStep08Recommender
                 .ConfigureAwait(false);
 
             _logger.Debug("Step 8 emitted — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
-
-            // The last phase of the step's own work, so the step is done for this fund.
-            Report(StepEventKind.Succeeded, signal.Isin);
         }
         catch (OperationCanceledException)
         {
@@ -285,11 +282,12 @@ public sealed class Step08RecommenderHandler : IStep08Recommender
         }
         catch (Exception ex)
         {
-            // The output is stored, but nobody was told. Rethrown so the caller can fail
-            // the run — the anchor stays put, so the next signal redoes the fund.
-            _logger.Error(ex, "Step 8 emit failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
-
-            Report(StepEventKind.Failed, signal.Isin, ex.Message);
+            // The fund is complete and its output stored; only step 9's early check is lost,
+            // and its daily timer runs anyway. Not reported — the step succeeded for this
+            // fund. Rethrown so the caller sees it, but the caller must not fail the run.
+            _logger.Error(
+                ex, "Step 8 emit failed, fund already complete — isin={0}, runId={1}; step 9 waits for its timer",
+                signal.Isin.Value, signal.RunId.Value);
 
             throw;
         }
@@ -313,6 +311,10 @@ public sealed class Step08RecommenderHandler : IStep08Recommender
                 .ConfigureAwait(false);
 
             _logger.Debug("Step 8 completed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            // The fund's run is over and its anchor advanced, so the step is done for it —
+            // here, not at the emit that follows.
+            Report(StepEventKind.Succeeded, signal.Isin);
         }
         catch (OperationCanceledException)
         {
@@ -321,10 +323,12 @@ public sealed class Step08RecommenderHandler : IStep08Recommender
         }
         catch (Exception ex)
         {
-            // Not reported: the step's work succeeded and EmitDoneAsync already said so.
-            // Rethrown so the caller can fail the run instead of leaving the row in flight.
+            // Rethrown so the caller can fail the run instead of leaving the row in flight;
+            // no emit follows.
             _logger.Error(
                 ex, "Step 8 complete failed — isin={0}, runId={1}", signal.Isin.Value, signal.RunId.Value);
+
+            Report(StepEventKind.Failed, signal.Isin, ex.Message);
 
             throw;
         }

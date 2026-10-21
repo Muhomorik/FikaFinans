@@ -52,24 +52,27 @@ public sealed class Step08RecommenderEntry : IStep08RecommenderEntry
                 await step08.AssembleAgentInputAsync(signal, ct).ConfigureAwait(false);
                 await step08.RunAgentAsync(signal, ct).ConfigureAwait(false);
 
-                // Write, then emit. The reverse order can announce output that was never
-                // stored.
                 await step08.PersistAsync(signal, ct).ConfigureAwait(false);
-                await step08.EmitDoneAsync(signal, ct).ConfigureAwait(false);
 
-                // Step 8 is the chain tail, so its success ends the run and frees the fund.
-                // Step 9 needs every fund rather than this one, so the tail likely stays here.
+                // Step 8 is the chain tail, so its success ends the run and frees the fund —
+                // before the emit, unlike steps 2–7: step 9's barrier reads the rows, and the
+                // last fund must already read finished when its signal arrives.
                 await step08.CompleteAsync(signal, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // The row is ours from the start onward, so any failure past it frees the
-                // fund for a retry. Cancellation is left out: the row stays in flight
-                // until it is restarted.
+                // The row is ours from the start until the complete, so any failure in
+                // between frees the fund for a retry. Cancellation is left out: the row
+                // stays in flight until it is restarted.
                 await step08.FailAsync(signal, ex, ct).ConfigureAwait(false);
 
                 throw;
             }
+
+            // Outside the fail: the row is complete and no longer this run's, so failing it
+            // could stamp an error on a finished fund — or on a newer run's. A lost signal
+            // costs only the early step 9 check; the daily timer runs it anyway.
+            await step08.EmitDoneAsync(signal, ct).ConfigureAwait(false);
 
             stopwatch.Stop();
 
