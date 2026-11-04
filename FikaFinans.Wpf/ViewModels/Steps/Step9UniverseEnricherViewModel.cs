@@ -124,8 +124,18 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
     }
 
     /// <summary>
-    /// Reads the last pass back off the rows — the universe's <c>Step09Json</c>, not the run
-    /// bar's run: each row keeps its own fund's run id, so no single run id gathers a pass.
+    /// Shows the last stored output, so the tab is filled whether it is opened before or after
+    /// a run. Later runs reload through the Succeeded tick. No orphaned runs to fail, unlike
+    /// steps 1–8: step 9 holds no row.
+    /// </summary>
+    protected override async Task OnFirstOpenedAsync()
+    {
+        await LoadOutputAsync();
+    }
+
+    /// <summary>
+    /// Reads the last output back off the rows — the universe's <c>Step09Json</c>, not the run
+    /// bar's run: each row keeps its own fund's run id, so no single run id gathers it.
     /// </summary>
     public override async Task LoadOutputAsync()
     {
