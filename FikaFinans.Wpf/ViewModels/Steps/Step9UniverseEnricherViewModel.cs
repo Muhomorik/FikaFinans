@@ -3,7 +3,6 @@ using System.Reactive.Linq;
 using System.Windows.Input;
 using System.Windows.Media;
 using DevExpress.Mvvm;
-using FikaFinans.Application.Paths;
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Funds;
@@ -27,7 +26,6 @@ namespace FikaFinans.Wpf.ViewModels.Steps;
 /// </summary>
 public sealed class Step9UniverseEnricherViewModel : StepViewModel
 {
-    private readonly IPathsService? _paths;
     private readonly IStep09UniverseEnricher? _step09;
     private readonly IFundDetailDialogService? _fundDetailDialog;
 
@@ -36,7 +34,7 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
 
     public override int StepNumber => 9;
     public override string AgentName => "Universe enricher";
-    public override bool HasConfig => true;
+    public override bool HasConfig => false;
 
     public IEnumerable<ISeries>? SignalsSeries
     {
@@ -60,15 +58,12 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
 
     [UsedImplicitly]
     public Step9UniverseEnricherViewModel(ILogger logger, IScheduler uiScheduler,
-        IPathsService paths, IStep09UniverseEnricher step09,
-        IConfigEditorDialogService configEditor,
+        IStep09UniverseEnricher step09,
         IFundDetailDialogService fundDetailDialog,
         IStepEventSource stepEvents)
         : base(logger, uiScheduler)
     {
-        _paths = paths;
         _step09 = step09;
-        _configEditorService = configEditor;
         _fundDetailDialog = fundDetailDialog;
         FundClickedCommand = new DelegateCommand<string>(OnFundClicked);
 
@@ -102,8 +97,6 @@ public sealed class Step9UniverseEnricherViewModel : StepViewModel
         _fundDetailDialog?.Show(isin, IsoWeek, RunId,
             System.Windows.Application.Current.MainWindow);
     }
-
-    protected override string? GetConfigPath() => _paths?.Config09ConvictionJson;
 
     /// <summary>
     /// The debug button: a pass over the universe as it stands, through the step, shown but
