@@ -775,6 +775,21 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPortfolioStructureProvider>()))
             .As<IStep10PortfolioReader>()
             .SingleInstance();
+
+        // Deliberately not SingleInstance, same as steps 1–9: it carries one run's state in
+        // fields — run id, week, records, config, portfolio, agent output.
+        builder.Register(ctx => new Step10PortfolioConstructorHandler(
+                logger: LogManager.GetLogger(nameof(Step10PortfolioConstructorHandler)),
+                barrier: ctx.Resolve<IStep09Barrier>(),
+                progress: ctx.Resolve<IIsinProgressStore>(),
+                configProvider: ctx.Resolve<IStep10PortfolioConfigProvider>(),
+                portfolioReader: ctx.Resolve<IStep10PortfolioReader>(),
+                agent: ctx.Resolve<IPortfolioConstructorAgent>(),
+                runIds: ctx.Resolve<IPipelineRunIdFactory>(),
+                clock: ctx.Resolve<TimeProvider>(),
+                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+            .As<IStep10PortfolioConstructor>()
+            .InstancePerDependency();
     }
 
     /// <summary>
