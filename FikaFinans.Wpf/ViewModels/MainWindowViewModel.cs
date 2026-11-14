@@ -33,10 +33,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const int NavSyncTabIndex = 11;
 
     /// <summary>
-    /// When step 9's daily timer fires, local time — shortly before the cloud step 10's
-    /// 23:00 CET timer. A constant until step 10 gets a local timer to sit before.
+    /// When step 9's daily timer fires, local time — shortly before step 10's, so a pass the
+    /// timer runs lands before the day's trades are made.
     /// </summary>
     private static readonly TimeOnly Step09TimerAt = new(22, 45);
+
+    /// <summary>
+    /// When step 10's daily timer fires, local time — the cloud timer's 23:00, decided on step
+    /// 10's page. Fifteen minutes after step 9's, which a pass's LLM calls normally fit in; a
+    /// pass still running is no harm, as its done-signal runs step 10 again once it lands.
+    /// </summary>
+    private static readonly TimeOnly Step10TimerAt = new(23, 0);
 
     private string _title = string.Empty;
     private string _selectedWeek = string.Empty;
@@ -335,6 +342,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Subscribe(done => RunStep10Async(
                 step10Entry, Step10Trigger.Step09Done, $"after step 9 pass {done.RunId.Value}"));
         _disposables.Add(step10Sub);
+
+        // Step 10's daily timer: the safety net for a day with no step 9 pass — the trades are
+        // made on the records stored. Re-armed after every firing, as step 9's, and likewise
+        // fires only while the app is open.
+        var step10Timer = Observable
+            .Defer(() =>
+            {
+                var next = DailyTime.NextAfter(DateTimeOffset.Now, Step10TimerAt, TimeZoneInfo.Local);
+                _logger?.Info("Step 10 timer armed — next run at {Next:yyyy-MM-dd HH:mm zzz}", next);
+                return Observable.Timer(next);
+            })
+            .Repeat()
+            .Subscribe(_ => RunStep10Async(step10Entry, Step10Trigger.Timer, "from the daily timer"));
+        _disposables.Add(step10Timer);
     }
 
     /// <summary>
