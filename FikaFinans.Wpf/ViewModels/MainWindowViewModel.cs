@@ -326,12 +326,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Repeat()
             .Subscribe(_ => RunStep09Async(step09Entry, Step09Trigger.Timer, "from the daily timer"));
         _disposables.Add(step09Timer);
+
+        // Step 9's done-signal: one of step 10's two triggers, the other its daily timer. One
+        // signal per stored pass, so the trades follow new conviction as soon as it lands.
+        var step10Entry = _scope.Resolve<IStep10PortfolioConstructorEntry>();
+        var step10Sub = pipelineSignals.Signals
+            .OfType<Step09DoneSignal>()
+            .Subscribe(done => RunStep10Async(
+                step10Entry, Step10Trigger.Step09Done, $"after step 9 pass {done.RunId.Value}"));
+        _disposables.Add(step10Sub);
     }
 
     /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 9
-    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep09Async"/>; step 10,
-    /// and step 9 from the Run All button, still run through <see cref="IPipelineRunner"/>.
+    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 10
+    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep10Async"/>; the Run
+    /// All button still runs steps 9 and 10 through <see cref="IPipelineRunner"/>.
     /// </summary>
     /// <remarks>
     /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
@@ -557,6 +566,37 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _logger?.Error(ex, "Step 9 failed, {Cause}", cause);
+            }
+        });
+
+    /// <summary>
+    /// Hands one trigger to step 10's entry point, off the Rx callback — the done-signal
+    /// arrives inside step 9's emit, on whichever thread ran the pass.
+    /// </summary>
+    /// <param name="step10Entry">Step 10's entry point.</param>
+    /// <param name="trigger">Which trigger fired; the entry logs it.</param>
+    /// <param name="cause">
+    /// What set it off, for this method's own log lines — the step 9 pass, or the timer.
+    /// </param>
+    /// <remarks>
+    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
+    /// Two triggers close together run twice; the later run's slices win, as decided on
+    /// step 10's page.
+    /// </remarks>
+    private void RunStep10Async(IStep10PortfolioConstructorEntry step10Entry, Step10Trigger trigger, string cause)
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await step10Entry.HandleAsync(trigger, _runCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.Debug("Step 10 cancelled, {Cause}", cause);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Step 10 failed, {Cause}", cause);
             }
         });
 
