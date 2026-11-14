@@ -767,6 +767,14 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IPathsService>()))
             .As<IStep10PortfolioConfigProvider>()
             .SingleInstance();
+
+        // Stateless and read-only — the same holdings and structure seams step 1 reads.
+        builder.Register(ctx => new Step10PortfolioReader(
+                LogManager.GetLogger(nameof(Step10PortfolioReader)),
+                ctx.Resolve<IHoldingsProvider>(),
+                ctx.Resolve<IPortfolioStructureProvider>()))
+            .As<IStep10PortfolioReader>()
+            .SingleInstance();
     }
 
     /// <summary>

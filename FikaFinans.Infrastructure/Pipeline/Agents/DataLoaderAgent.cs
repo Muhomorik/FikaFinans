@@ -263,22 +263,9 @@ public sealed class DataLoaderAgent : IDataLoaderAgent
         };
     }
 
+    // ISIN pins first, then name-only pins — the rule step 10 shares, so it lives on the structure.
     private static PinnedLayer? ResolvePinning(FundMetadata m, PortfolioStructure structure)
-    {
-        // ISIN takes precedence: scan ISIN-keyed pinned funds first.
-        foreach (var p in structure.PinnedFunds)
-        {
-            if (p.Isin != null && p.Isin == m.Isin)
-                return p.Layer;
-        }
-        // Fall back to name-only pinned funds.
-        foreach (var p in structure.PinnedFunds)
-        {
-            if (p.Isin == null && p.Name != null && p.Name == m.Name)
-                return p.Layer;
-        }
-        return null;
-    }
+        => structure.LayerOf(m.Isin, m.Name);
 
     private static void WriteJson(string path, DataLoaderOutput output)
     {
