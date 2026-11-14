@@ -3,7 +3,10 @@ using System.Text;
 using System.Text.Json;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Paths;
+using FikaFinans.Application.Pipeline.Steps;
+using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
+using FikaFinans.Domain.Portfolio;
 using NLog;
 
 namespace FikaFinans.Wpf.ViewModels;
@@ -14,6 +17,7 @@ public sealed class FundDetailViewModel : ViewModelBase
 
     private readonly ILogger? _logger;
     private readonly IPathsService? _paths;
+    private readonly IStep10PortfolioConstructor? _step10;
 
     private string _fundIsin = string.Empty;
     private string _isoWeek = string.Empty;
@@ -55,10 +59,11 @@ public sealed class FundDetailViewModel : ViewModelBase
         private set => SetProperty(ref _sections, value, nameof(Sections));
     }
 
-    public FundDetailViewModel(ILogger logger, IPathsService paths) : this()
+    public FundDetailViewModel(ILogger logger, IPathsService paths, IStep10PortfolioConstructor step10) : this()
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _paths  = paths  ?? throw new ArgumentNullException(nameof(paths));
+        _step10 = step10 ?? throw new ArgumentNullException(nameof(step10));
     }
 
     public FundDetailViewModel() { }
@@ -117,6 +122,71 @@ public sealed class FundDetailViewModel : ViewModelBase
         Sections = sections;
         if (string.IsNullOrEmpty(FundName)) FundName = fundIsin;
         RaisePropertyChanged(nameof(WindowTitle));
+    }
+
+    /// <summary>
+    /// Replaces step 10's section with this fund's share of the last stored run, when one is
+    /// stored. Signal-driven runs write <c>Step10Json</c> and no file, so without this the
+    /// section reads "not run" whenever the trades came from step 9's done-signal or the timer.
+    /// </summary>
+    /// <remarks>
+    /// Called after <see cref="Load"/>, once the window is up; never throws — the caller does
+    /// not await it. Steps 1–9 still read their files: moving the whole view to the store is
+    /// its own change.
+    /// </remarks>
+    public async Task LoadStoredStep10Async()
+    {
+        if (_step10 is null || string.IsNullOrEmpty(FundIsin)) return;
+
+        try
+        {
+            var output = await _step10.ReadOutputAsync();
+            if (output is null) return;
+
+            var sections = (FundStepSection[])Sections.Clone();
+            sections[9] = new FundStepSection(10, StepName(10), BuildStoredStep10Content(FundIsin, output));
+            Sections = sections;
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn(ex, "Failed to load stored step 10 run for {Isin}", FundIsin);
+        }
+    }
+
+    private static string BuildStoredStep10Content(string isin, TradesOutput output)
+    {
+        bool Mine(Isin? other) => other is { } i && string.Equals(i.Value, isin, StringComparison.OrdinalIgnoreCase);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"stored run: week {output.IsoWeek}, {output.GeneratedAt}");
+        sb.AppendLine();
+
+        foreach (var trade in output.Trades.Where(t => Mine(t.Isin)))
+        {
+            sb.AppendLine($"trade: {trade.TradeType}");
+            sb.AppendLine($"amount: {trade.AmountKr} kr");
+            sb.AppendLine($"reason: {trade.TradeReason}");
+            if (trade.RotationPairId is not null) sb.AppendLine($"pair: {trade.RotationPairId}");
+            sb.AppendLine();
+        }
+
+        foreach (var rejected in output.RejectedRecommendations.Where(r => Mine(r.Isin)))
+        {
+            sb.AppendLine($"rejected: {rejected.SourceRecommendation} — {rejected.RejectedBecause}");
+            sb.AppendLine($"would have been: {rejected.WouldHaveBeen}");
+            sb.AppendLine();
+        }
+
+        foreach (var violation in output.ConstraintViolations.Where(v => Mine(v.Isin)))
+        {
+            sb.AppendLine($"violation: {violation.ViolationType} — {violation.Message}");
+            sb.AppendLine();
+        }
+
+        var text = sb.ToString().TrimEnd();
+        return text.Contains("trade:") || text.Contains("rejected:") || text.Contains("violation:")
+            ? text
+            : $"{text}\n(nothing for this fund in the stored run)";
     }
 
     private static string BuildSectionContent(int step, string isin, string jsonPath)

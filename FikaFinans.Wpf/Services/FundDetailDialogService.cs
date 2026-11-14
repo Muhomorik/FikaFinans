@@ -24,5 +24,9 @@ public sealed class FundDetailDialogService : IFundDetailDialogService
         if (owner is not null) window.Owner = owner;
 
         window.Show();
+
+        // After the window is up: step 10's signal-driven runs write no file, so its section
+        // is filled from the store. Never throws; nothing awaits it.
+        _ = vm.LoadStoredStep10Async();
     }
 }
