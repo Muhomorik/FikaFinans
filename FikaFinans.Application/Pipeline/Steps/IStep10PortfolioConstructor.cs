@@ -25,7 +25,10 @@ public interface IStep10PortfolioConstructor
     /// Reads step 9's record for every fund in step 9's universe. A fund without one is left
     /// out — never completed, or mid-run after step 1's start cleared it.
     /// </summary>
-    /// <returns>How many funds have a record — zero means a run over nothing.</returns>
+    /// <returns>
+    /// How many funds have a record. Zero means nothing to trade on: the run is reported
+    /// done here, and the caller runs no further phase.
+    /// </returns>
     Task<int> LoadUniverseAsync(CancellationToken ct = default);
 
     /// <summary>

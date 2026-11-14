@@ -22,6 +22,9 @@ namespace FikaFinans.Application.Pipeline.Steps;
 /// </remarks>
 public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstructor
 {
+    /// <summary>The step event's message when a run finds nothing to trade on.</summary>
+    internal const string NoRecordsMessage = "No fund has a step 9 record — nothing to trade";
+
     private readonly ILogger _logger;
     private readonly IStep09Barrier _barrier;
     private readonly IIsinProgressStore _progress;
@@ -112,6 +115,14 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
         try
         {
             _records = await ReadStep09RecordsAsync(ct).ConfigureAwait(false);
+
+            // Nothing to trade on — no step 9 pass stored yet. The caller stops here, so this
+            // closes the run that BeginRunAsync reported started, rather than leaving it open.
+            if (_records.Count == 0)
+            {
+                _stepDuration.Stop();
+                Report(StepEventKind.Succeeded, NoRecordsMessage);
+            }
 
             return _records.Count;
         }

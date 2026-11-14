@@ -168,8 +168,28 @@ public sealed class Step10PortfolioConstructorHandlerTests
         // Act
         var loaded = await sut.LoadUniverseAsync();
 
+        // Assert — the caller stops here, so the run Begin reported started is closed now.
+        Assert.Multiple(() =>
+        {
+            Assert.That(loaded, Is.Zero);
+            _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e =>
+                e.Step == StepId.PortfolioConstructor && e.Kind == StepEventKind.Succeeded
+                && e.Message != null && e.Message.Contains("step 9 record"))), Times.Once);
+        });
+    }
+
+    [Test]
+    public async Task LoadUniverseAsync_Records_ReportsNothingYet()
+    {
+        // Arrange — with records to trade on, the run is done only once persisted.
+        var sut = CreateSut();
+        await sut.BeginRunAsync();
+
+        // Act
+        await sut.LoadUniverseAsync();
+
         // Assert
-        Assert.That(loaded, Is.Zero);
+        _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e => e.Kind != StepEventKind.Started)), Times.Never);
     }
 
     [Test]

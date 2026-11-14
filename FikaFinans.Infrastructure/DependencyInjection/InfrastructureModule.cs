@@ -791,6 +791,14 @@ public sealed class InfrastructureModule : Autofac.Module
                 stepEvents: ctx.Resolve<IStepEventPublisher>()))
             .As<IStep10PortfolioConstructor>()
             .InstancePerDependency();
+
+        // Autofac supplies the Func from the registration above, so the entry point mints
+        // a fresh handler per run without knowing a container exists.
+        builder.Register(ctx => new Step10PortfolioConstructorEntry(
+                LogManager.GetLogger(nameof(Step10PortfolioConstructorEntry)),
+                ctx.Resolve<Func<IStep10PortfolioConstructor>>()))
+            .As<IStep10PortfolioConstructorEntry>()
+            .SingleInstance();
     }
 
     /// <summary>
