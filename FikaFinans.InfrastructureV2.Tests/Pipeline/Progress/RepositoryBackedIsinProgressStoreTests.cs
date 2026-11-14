@@ -7,6 +7,7 @@ using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
+using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Bank.Persistence;
 using FikaFinans.Infrastructure.Pipeline.Json;
 using FikaFinans.Infrastructure.Pipeline.Progress;
@@ -1711,6 +1712,250 @@ public sealed class RepositoryBackedIsinProgressStoreTests
         // Assert
         Assert.That(output, Is.Null);
     }
+
+    // ── SaveStep10Async ───────────────────────────────────────────────
+
+    [Test]
+    public async Task SaveStep10Async_FinishedRow_WritesStep10JsonOnly()
+    {
+        // Arrange — step 10 runs outside the fund's run, as step 9 does: nothing else moves.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var before = await _repo.GetAsync(Partition, "LU0000000091");
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.SaveStep10Async(Step10RunA, MakeTrades(GeneratedA, Buy("LU0000000091", 10_000m)));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, "LU0000000091");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.Step10Json, Does.Contain(Step10RunA.Value));
+            Assert.That(row.State, Is.EqualTo(IsinProgressState.Free));
+            Assert.That(row.RunId, Is.EqualTo(before!.RunId));
+            Assert.That(row.CurrentStep, Is.EqualTo(8));
+            Assert.That(row.LatestProcessedNavDate, Is.EqualTo(Date2));
+            Assert.That(row.Step08Json, Is.EqualTo(before.Step08Json));
+            Assert.That(row.Step09Json, Is.EqualTo(before.Step09Json));
+        });
+    }
+
+    [Test]
+    public async Task SaveStep10Async_FundWithoutRow_SkipsItAndReturnsTheRowsWritten()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var written = await sut.SaveStep10Async(Step10RunA,
+            MakeTrades(GeneratedA, Buy("LU0000000091", 10_000m), Buy("LU0000000095", 5_000m)));
+
+        // Assert
+        var missing = await _repo.GetAsync(Partition, "LU0000000095");
+        Assert.Multiple(() =>
+        {
+            Assert.That(written.Select(r => r.Isin), Is.EqualTo(new[] { "LU0000000091" }));
+            Assert.That(missing, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task SaveStep10Async_Written_ReadsBackAsTheWholeOutput()
+    {
+        // Arrange — a trade, a fund with both a Hold and a rejection (core-locked), a fund-level
+        // violation and one naming no fund: every part must come back, the portfolio half once.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", MakeRecord("LU0000000092"));
+        var output = new TradesOutput
+        {
+            GeneratedAt = GeneratedA,
+            IsoWeek = "2026-W46",
+            ConfigVersion = "1.0.0",
+            Trades = [Buy("LU0000000091", 10_000m), Trade("LU0000000092", TradeType.Hold, 0m)],
+            RejectedRecommendations =
+            [
+                new RejectedRecommendation
+                {
+                    Isin = "LU0000000092", SourceRecommendation = Recommendation.ThesisExit,
+                    RejectedBecause = "core_locked", WouldHaveBeen = "Sell 30000 kr",
+                },
+            ],
+            CapitalSummary = MakeSummary(cashRemaining: 40_000m),
+            ConstraintViolations =
+            [
+                new ConstraintViolation { ViolationType = "cash_floor_unmet", Message = "portfolio-wide" },
+                new ConstraintViolation
+                {
+                    ViolationType = "core_locked_recommendation_suppressed", Isin = "LU0000000092", Message = "fund",
+                },
+            ],
+        };
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep10Async(Step10RunA, output);
+
+        // Act
+        var read = await sut.ReadStep10OutputAsync();
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(read!.GeneratedAt, Is.EqualTo(output.GeneratedAt));
+            Assert.That(read.IsoWeek, Is.EqualTo(output.IsoWeek));
+            Assert.That(read.ConfigVersion, Is.EqualTo(output.ConfigVersion));
+            Assert.That(Json(read.Trades), Is.EqualTo(Json(output.Trades)));
+            Assert.That(Json(read.RejectedRecommendations), Is.EqualTo(Json(output.RejectedRecommendations)));
+            Assert.That(Json(read.CapitalSummary), Is.EqualTo(Json(output.CapitalSummary)));
+            Assert.That(Json(read.ConstraintViolations), Is.EqualTo(Json(output.ConstraintViolations)));
+        });
+    }
+
+    // ── ReadStep10OutputAsync ─────────────────────────────────────────
+
+    [Test]
+    public async Task ReadStep10OutputAsync_LaterRunReachingFewerFunds_ReturnsTheLaterRunOnly()
+    {
+        // Arrange — the later run names one fund; the other keeps the earlier run's slice.
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        await SeedFinishedRowAsync("LU0000000092", MakeRecord("LU0000000092"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep10Async(Step10RunA,
+            MakeTrades(GeneratedA, Buy("LU0000000091", 10_000m), Buy("LU0000000092", 10_000m)));
+        await sut.SaveStep10Async(Step10RunB,
+            MakeTrades(GeneratedB, Buy("LU0000000091", 7_000m)));
+
+        // Act
+        var read = await sut.ReadStep10OutputAsync();
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(read!.GeneratedAt, Is.EqualTo(GeneratedB));
+            Assert.That(read.Trades.Select(t => (t.Isin.Value, t.AmountKr)),
+                Is.EqualTo(new[] { ("LU0000000091", 7_000m) }));
+        });
+    }
+
+    [Test]
+    public async Task ReadStep10OutputAsync_NothingStored_ReturnsNull()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        var read = await sut.ReadStep10OutputAsync();
+
+        // Assert
+        Assert.That(read, Is.Null);
+    }
+
+    // ── Step10Json survives the other writers ─────────────────────────
+
+    [Test]
+    public async Task StartStep01Async_RowWithStep10Slice_KeepsIt()
+    {
+        // Arrange — the claim clears the fund run's columns, not the day's portfolio run.
+        await SeedFinishedRowAsync(FundIsin, MakeRecord(FundIsin));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep10Async(Step10RunA, MakeTrades(GeneratedA, Buy(FundIsin, 10_000m)));
+        var before = await _repo.GetAsync(Partition, FundIsin);
+
+        // Act
+        await sut.StartStep01Async(new Isin(FundIsin), Date2.AddDays(1));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.Step08Json, Is.Null);
+            Assert.That(row.Step10Json, Is.EqualTo(before!.Step10Json).And.Not.Null);
+        });
+    }
+
+    [Test]
+    public async Task CompleteStep08Async_RowWithStep10Slice_KeepsIt()
+    {
+        // Arrange
+        await _repo.UpsertAsync(new IsinProgressEntity
+        {
+            PartitionKey = Partition,
+            RowKey = FundIsin,
+            Isin = FundIsin,
+            State = IsinProgressState.Processing,
+            RunId = RunId,
+            NavDate = Date2,
+            CurrentStep = 8,
+            ProcessingStartedAt = StartedAt,
+            Step10Json = "slice",
+        });
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+
+        // Act
+        await sut.CompleteStep08Async(new Isin(FundIsin));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, FundIsin);
+        Assert.That(row!.Step10Json, Is.EqualTo("slice"));
+    }
+
+    [Test]
+    public async Task SaveStep09Async_RowWithStep10Slice_KeepsIt()
+    {
+        // Arrange
+        await SeedFinishedRowAsync("LU0000000091", MakeRecord("LU0000000091"));
+        var sut = _fixture.Create<RepositoryBackedIsinProgressStore>();
+        await sut.SaveStep10Async(Step10RunA, MakeTrades(GeneratedA, Buy("LU0000000091", 10_000m)));
+        var before = await _repo.GetAsync(Partition, "LU0000000091");
+
+        // Act
+        await sut.SaveStep09Async([MakeRecord("LU0000000091", rotationPairId: "rot_2026-W46_a")]);
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, "LU0000000091");
+        Assert.That(row!.Step10Json, Is.EqualTo(before!.Step10Json).And.Not.Null);
+    }
+
+    private static readonly PipelineRunId Step10RunA = new("universe-20261114-2300");
+    private static readonly PipelineRunId Step10RunB = new("universe-20261114-2310");
+    private const string GeneratedA = "2026-11-14T22:00:00.0000000+00:00";
+    private const string GeneratedB = "2026-11-14T22:10:00.0000000+00:00";
+
+    private static string Json<T>(T value) => JsonSerializer.Serialize(value, JsonOptions.Default);
+
+    private static Trade Buy(string isin, decimal amount) => Trade(isin, TradeType.Buy, amount);
+
+    private static Trade Trade(string isin, TradeType type, decimal amount) => new()
+    {
+        Isin = isin,
+        FundName = $"Test Fund {isin}",
+        TradeType = type,
+        TradeReason = "synthetic",
+        AmountKr = amount,
+        SourceRecommendation = Recommendation.CatalystEntry,
+        SourceConviction = 0.7m,
+        AuditNotes = [],
+    };
+
+    private static CapitalSummary MakeSummary(decimal cashRemaining) => new()
+    {
+        PortfolioValueKr = 100_000m,
+        CashAvailableKr = 50_000m,
+        CashRemainingKr = cashRemaining,
+        CashFloorKr = 5_000m,
+        CashPolicy = new CashPolicySummary { FloorPct = 0.05m },
+    };
+
+    private static TradesOutput MakeTrades(string generatedAt, params Trade[] trades) => new()
+    {
+        GeneratedAt = generatedAt,
+        IsoWeek = "2026-W46",
+        ConfigVersion = "1.0.0",
+        Trades = trades,
+        RejectedRecommendations = [],
+        CapitalSummary = MakeSummary(cashRemaining: 40_000m),
+        ConstraintViolations = [],
+    };
 
     private Task SeedFinishedRowAsync(string isin, FundRecord? record)
         => _repo.UpsertAsync(new IsinProgressEntity

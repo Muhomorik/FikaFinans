@@ -100,6 +100,7 @@ public sealed class SqliteIsinProgressRepository : IIsinProgressRepository
         row.Step07Json = e.Step07Json;
         row.Step08Json = e.Step08Json;
         row.Step09Json = e.Step09Json;
+        row.Step10Json = e.Step10Json;
     }
 
     private static IsinProgressEntity ToEntity(IsinProgressRow r) => new()
@@ -124,6 +125,7 @@ public sealed class SqliteIsinProgressRepository : IIsinProgressRepository
         Step07Json = r.Step07Json,
         Step08Json = r.Step08Json,
         Step09Json = r.Step09Json,
+        Step10Json = r.Step10Json,
     };
 
     private static IsinProgressRow ToRow(IsinProgressEntity e)

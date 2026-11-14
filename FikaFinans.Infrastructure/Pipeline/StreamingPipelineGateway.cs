@@ -201,6 +201,8 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 Step07Json = null,
                 Step08Json = null,
                 Step09Json = null,
+                // Not a per-run column — step 10's slice of the day's portfolio run.
+                Step10Json = existing?.Step10Json,
             });
         }
 
@@ -257,6 +259,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 Step07Json = SerializeFund(step7By[isin]),
                 Step08Json = SerializeFund(step8By[isin]),
                 Step09Json = existing.Step09Json,
+                Step10Json = existing.Step10Json,
             });
         }
 
@@ -304,6 +307,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 Step07Json = existing.Step07Json,
                 Step08Json = existing.Step08Json,
                 Step09Json = SerializeFund(fund),
+                Step10Json = existing.Step10Json,
             });
         }
 
@@ -357,6 +361,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
                 Step07Json = existing.Step07Json,
                 Step08Json = existing.Step08Json,
                 Step09Json = existing.Step09Json,
+                Step10Json = existing.Step10Json,
             });
         }
 
@@ -394,6 +399,7 @@ public sealed class StreamingPipelineGateway : IStreamingPipelineGateway
             Step07Json = existing.Step07Json,
             Step08Json = existing.Step08Json,
             Step09Json = existing.Step09Json,
+            Step10Json = existing.Step10Json,
         };
 
         await _isinProgress.UpsertAsync(updated, ct).ConfigureAwait(false);

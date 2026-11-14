@@ -132,6 +132,36 @@ public sealed class StreamingPipelineGatewayIsinProgressTests
     }
 
     [Test]
+    public async Task ClaimIsinProgressAsync_KeepsStep10Json()
+    {
+        // Arrange — the run boundary clears the fund run's columns; step 10's slice belongs to
+        // the day's portfolio run and survives it, like the dedup anchor.
+        var sut = _fixture.Create<StreamingPipelineGateway>();
+        await _repo.UpsertAsync(new Application.Storage.Bank.Entities.IsinProgressEntity
+        {
+            PartitionKey = Partition,
+            RowKey = "LU0000000001",
+            Isin = "LU0000000001",
+            State = IsinProgressState.Free,
+            RunId = new PipelineRunId("old-run"),
+            CurrentStep = 9,
+            Step09Json = "old9",
+            Step10Json = "old10",
+        });
+
+        // Act
+        await sut.ClaimIsinProgressAsync(MakeStep1Output("LU0000000001"), new PipelineRunId(_runId));
+
+        // Assert
+        var row = await _repo.GetAsync(Partition, "LU0000000001");
+        Assert.Multiple(() =>
+        {
+            Assert.That(row!.Step09Json, Is.Null);
+            Assert.That(row.Step10Json, Is.EqualTo("old10"));
+        });
+    }
+
+    [Test]
     public async Task WriteIsinProgressBlockAsync_PopulatesStep02ThroughStep08LeavingStep03Null()
     {
         var sut = _fixture.Create<StreamingPipelineGateway>();

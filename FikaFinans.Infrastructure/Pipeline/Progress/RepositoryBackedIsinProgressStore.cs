@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 
 using FikaFinans.Application.Pipeline;
@@ -8,6 +9,7 @@ using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
+using FikaFinans.Domain.Portfolio;
 using FikaFinans.Infrastructure.Pipeline.Json;
 
 using NLog;
@@ -73,6 +75,9 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
             // every trading date the fund has already been through.
             LatestProcessedNavDate = existing?.LatestProcessedNavDate,
             ProcessingStartedAt = DateTimeOffset.UtcNow,
+            // Carried too: step 10's slice is the day's portfolio run, not this fund's, and
+            // clearing it would drop the fund from the day's stored trades.
+            Step10Json = existing?.Step10Json,
         };
 
         await _isinProgress.UpsertAsync(claimed, ct).ConfigureAwait(false);
@@ -396,6 +401,161 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         return written;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IsinProgressEntity>> SaveStep10Async(
+        PipelineRunId runId, TradesOutput output, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(runId.Value);
+        ArgumentNullException.ThrowIfNull(output);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // Every fund the output names, in the order it first names them.
+        var isins = output.Trades.Select(t => t.Isin)
+            .Concat(output.RejectedRecommendations.Select(r => r.Isin))
+            .Concat(output.ConstraintViolations.Where(v => v.Isin is not null).Select(v => v.Isin!.Value))
+            .Distinct()
+            .ToList();
+        var portfolioViolations = output.ConstraintViolations.Where(v => v.Isin is null).ToList();
+
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+        var byIsin = rows.ToDictionary(r => r.Isin, StringComparer.Ordinal);
+
+        var written = new List<IsinProgressEntity>(isins.Count);
+        foreach (var isin in isins)
+        {
+            // A fund with no row — held but never run, say. Logged rather than created: a row
+            // made here would have no run behind it, as on step 9's save.
+            if (!byIsin.TryGetValue(isin.Value, out var row))
+            {
+                _logger.Info("Progress step 10 save skipped — isin={0} has no row", isin.Value);
+                continue;
+            }
+
+            var slice = new Step10Slice
+            {
+                RunId = runId,
+                GeneratedAt = output.GeneratedAt,
+                IsoWeek = output.IsoWeek,
+                ConfigVersion = output.ConfigVersion,
+                CapitalSummary = output.CapitalSummary,
+                PortfolioViolations = portfolioViolations,
+                Trades = output.Trades.Where(t => t.Isin == isin).ToList(),
+                RejectedRecommendations = output.RejectedRecommendations.Where(r => r.Isin == isin).ToList(),
+                ConstraintViolations = output.ConstraintViolations.Where(v => v.Isin == isin).ToList(),
+            };
+
+            written.Add(WithStep10Output(row, JsonSerializer.Serialize(slice, JsonOptions.Default)));
+        }
+
+        // Tables takes at most 100 entities per batch.
+        foreach (var chunk in written.Chunk(UpsertBatchSize))
+            await _isinProgress.UpsertBatchAsync(IsinProgressPartition, chunk, ct).ConfigureAwait(false);
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress step 10 save done — runId={0}, {1} of {2} row(s), {3} ms",
+            runId.Value, written.Count, isins.Count, stopwatch.ElapsedMilliseconds);
+
+        return written;
+    }
+
+    /// <inheritdoc />
+    public async Task<TradesOutput?> ReadStep10OutputAsync(CancellationToken ct = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        var rows = await _isinProgress
+            .QueryPartitionAsync(IsinProgressPartition, ct)
+            .ConfigureAwait(false);
+
+        var slices = rows
+            .Where(r => !string.IsNullOrEmpty(r.Step10Json))
+            .Select(r => JsonSerializer.Deserialize<Step10Slice>(r.Step10Json!, JsonOptions.Default)
+                ?? throw new InvalidDataException($"Step 10 slice for ISIN {r.Isin} is empty."))
+            .ToList();
+
+        // No slice on any row is a normal state — step 10 has not run yet.
+        if (slices.Count == 0)
+            return null;
+
+        // Newest by the run's own timestamp; rows a later run did not reach keep older slices.
+        var run = slices
+            .GroupBy(s => s.RunId)
+            .MaxBy(g => DateTimeOffset.Parse(g.First().GeneratedAt, CultureInfo.InvariantCulture))!
+            .ToList();
+        var head = run[0];
+
+        stopwatch.Stop();
+        _logger.Trace(
+            "Progress step 10 read done — runId={0}, {1} slice(s) of {2}, {3} ms",
+            head.RunId.Value, run.Count, slices.Count, stopwatch.ElapsedMilliseconds);
+
+        return new TradesOutput
+        {
+            GeneratedAt = head.GeneratedAt,
+            IsoWeek = head.IsoWeek,
+            ConfigVersion = head.ConfigVersion,
+            Trades = run.SelectMany(s => s.Trades).ToList(),
+            RejectedRecommendations = run.SelectMany(s => s.RejectedRecommendations).ToList(),
+            CapitalSummary = head.CapitalSummary,
+            ConstraintViolations = head.PortfolioViolations.Concat(run.SelectMany(s => s.ConstraintViolations)).ToList(),
+        };
+    }
+
+    /// <summary>
+    /// One fund's share of a step 10 run, as stored in <c>Step10Json</c>. The run's header and
+    /// portfolio-wide half ride on every slice, so any one row tells the whole story and the
+    /// newest run's slices rebuild its output. A storage shape — callers see
+    /// <see cref="TradesOutput"/> only.
+    /// </summary>
+    private sealed class Step10Slice
+    {
+        public required PipelineRunId RunId { get; init; }
+        public required string GeneratedAt { get; init; }
+        public required string IsoWeek { get; init; }
+        public required string ConfigVersion { get; init; }
+        public required CapitalSummary CapitalSummary { get; init; }
+
+        /// <summary>The run's violations that name no fund — the same on every slice.</summary>
+        public required IReadOnlyList<ConstraintViolation> PortfolioViolations { get; init; }
+
+        public required IReadOnlyList<Trade> Trades { get; init; }
+        public required IReadOnlyList<RejectedRecommendation> RejectedRecommendations { get; init; }
+        public required IReadOnlyList<ConstraintViolation> ConstraintViolations { get; init; }
+    }
+
+    /// <summary>
+    /// Copies a row, replacing only <c>Step10Json</c> — the run marker stays put, as for
+    /// step 9: step 10 is not part of the fund's run.
+    /// </summary>
+    private static IsinProgressEntity WithStep10Output(IsinProgressEntity row, string json) => new()
+    {
+        PartitionKey = row.PartitionKey,
+        RowKey = row.RowKey,
+        Isin = row.Isin,
+        State = row.State,
+        RunId = row.RunId,
+        NavDate = row.NavDate,
+        CurrentStep = row.CurrentStep,
+        LatestProcessedNavDate = row.LatestProcessedNavDate,
+        ProcessingStartedAt = row.ProcessingStartedAt,
+        LastError = row.LastError,
+        AttemptCount = row.AttemptCount,
+        Step01Json = row.Step01Json,
+        Step02Json = row.Step02Json,
+        Step03Json = row.Step03Json,
+        Step04Json = row.Step04Json,
+        Step05Json = row.Step05Json,
+        Step06Json = row.Step06Json,
+        Step07Json = row.Step07Json,
+        Step08Json = row.Step08Json,
+        Step09Json = row.Step09Json,
+        Step10Json = json,
+    };
+
     /// <summary>
     /// Copies a row, replacing only <c>Step09Json</c>. Unlike <see cref="WithStepOutput"/>
     /// the run marker stays put — step 9 is not part of the fund's run.
@@ -422,6 +582,7 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         Step07Json = row.Step07Json,
         Step08Json = row.Step08Json,
         Step09Json = json,
+        Step10Json = row.Step10Json,
     };
 
     /// <summary>
@@ -521,6 +682,7 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         Step07Json = row.Step07Json,
         Step08Json = row.Step08Json,
         Step09Json = row.Step09Json,
+        Step10Json = row.Step10Json,
     };
 
     /// <summary>
@@ -575,6 +737,7 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
             Step07Json = existing.Step07Json,
             Step08Json = existing.Step08Json,
             Step09Json = existing.Step09Json,
+            Step10Json = existing.Step10Json,
         };
 
         await _isinProgress.UpsertAsync(freed, ct).ConfigureAwait(false);
@@ -635,5 +798,6 @@ public sealed class RepositoryBackedIsinProgressStore : IIsinProgressStore
         Step07Json = step.Value == 7 ? json : row.Step07Json,
         Step08Json = step.Value == 8 ? json : row.Step08Json,
         Step09Json = step.Value == 9 ? json : row.Step09Json,
+        Step10Json = row.Step10Json,
     };
 }

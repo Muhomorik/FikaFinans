@@ -114,6 +114,7 @@ public sealed class SqliteIsinProgressRepositoryTests
             RunId = new PipelineRunId("run-2"),
             Step02Json = null,
             Step09Json = "new",
+            Step10Json = "new10",
             LatestProcessedNavDate = new DateTimeOffset(2026, 5, 25, 0, 0, 0, TimeSpan.Zero),
         };
         await _sut.UpsertAsync(second);
@@ -126,6 +127,7 @@ public sealed class SqliteIsinProgressRepositoryTests
             Assert.That(roundTripped.RunId, Is.EqualTo(new PipelineRunId("run-2")));
             Assert.That(roundTripped.Step02Json, Is.Null);
             Assert.That(roundTripped.Step09Json, Is.EqualTo("new"));
+            Assert.That(roundTripped.Step10Json, Is.EqualTo("new10"));
             Assert.That(roundTripped.LatestProcessedNavDate,
                 Is.EqualTo(new DateTimeOffset(2026, 5, 25, 0, 0, 0, TimeSpan.Zero)));
         });

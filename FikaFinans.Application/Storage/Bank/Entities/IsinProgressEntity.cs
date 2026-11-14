@@ -82,4 +82,13 @@ public sealed class IsinProgressEntity : TableEntity
     public string? Step07Json { get; init; }
     public string? Step08Json { get; init; }
     public string? Step09Json { get; init; }
+
+    /// <summary>
+    /// This fund's slice of the last step 10 run — its trades, rejections and violations,
+    /// beside the run's header and portfolio-wide summary. Step 10's, not the fund run's:
+    /// written outside any run, and carried across the run boundary like
+    /// <see cref="LatestProcessedNavDate"/>, so a fund starting its next run does not drop out
+    /// of the day's stored trades.
+    /// </summary>
+    public string? Step10Json { get; init; }
 }

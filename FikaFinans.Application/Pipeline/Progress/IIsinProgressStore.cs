@@ -2,6 +2,7 @@ using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
+using FikaFinans.Domain.Portfolio;
 
 namespace FikaFinans.Application.Pipeline.Progress;
 
@@ -349,4 +350,29 @@ public interface IIsinProgressStore
     /// <returns>The rows written; a record whose fund has no row is skipped.</returns>
     Task<IReadOnlyList<IsinProgressEntity>> SaveStep09Async(
         IReadOnlyList<FundRecord> records, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores step 10's output on its funds' rows, each row getting its own slice — the fund's
+    /// trades, rejections and violations — beside the run's header, capital summary and the
+    /// violations that name no fund. Only <c>Step10Json</c> changes, as in
+    /// <see cref="SaveStep09Async"/>: step 10 runs outside any fund's run.
+    /// </summary>
+    /// <param name="runId">The step 10 run; <see cref="ReadStep10OutputAsync"/> gathers by it.</param>
+    /// <param name="output">The run's output.</param>
+    /// <returns>
+    /// The rows written — one per fund the output names. A fund with no row is skipped; an
+    /// output naming no fund at all stores nothing.
+    /// </returns>
+    Task<IReadOnlyList<IsinProgressEntity>> SaveStep10Async(
+        PipelineRunId runId, TradesOutput output, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the last step 10 run back as a whole output — the slices of the newest run
+    /// across every row. A fund left out of that run keeps an older slice, which is ignored.
+    /// </summary>
+    /// <returns>
+    /// The newest run's output, its trades in row order rather than the agent's — or
+    /// <c>null</c> when no run is stored.
+    /// </returns>
+    Task<TradesOutput?> ReadStep10OutputAsync(CancellationToken ct = default);
 }

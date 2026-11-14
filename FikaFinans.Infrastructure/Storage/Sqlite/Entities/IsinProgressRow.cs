@@ -31,4 +31,5 @@ public sealed class IsinProgressRow
     public string? Step07Json { get; set; }
     public string? Step08Json { get; set; }
     public string? Step09Json { get; set; }
+    public string? Step10Json { get; set; }
 }
