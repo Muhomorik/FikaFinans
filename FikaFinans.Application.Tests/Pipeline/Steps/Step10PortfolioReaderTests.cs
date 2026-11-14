@@ -4,6 +4,7 @@ using AutoFixture.AutoMoq;
 using FikaFinans.Application.Pipeline.Fetch;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Domain.Funds;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 
 namespace FikaFinans.Application.Tests.Pipeline.Steps;
@@ -235,8 +236,10 @@ public sealed class Step10PortfolioReaderTests
     {
         // Arrange — every field filled, the holdings and pins matching what the record says,
         // so the copy must serialize identically. Catches a FundRecord field the copy misses.
-        // AutoFixture has no DateOnly of its own; the NAV buckets need one.
-        _fixture.Register(() => DateOnly.FromDateTime(_fixture.Create<DateTime>()));
+        // AutoFixture has no DateOnly of its own; the NAV buckets need one, taken from a fixed
+        // clock so the record is the same on every run.
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 14, 0, 0, 0, TimeSpan.Zero));
+        _fixture.Register(() => DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime));
         var record = _fixture.Build<FundRecord>()
             .With(f => f.Isin, "LU0001")
             .With(f => f.CurrentlyHeld, true)
