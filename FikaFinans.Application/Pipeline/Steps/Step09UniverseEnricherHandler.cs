@@ -27,6 +27,7 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
     private readonly IPipelineRunIdFactory _runIds;
     private readonly TimeProvider _clock;
     private readonly IStepEventPublisher _stepEvents;
+    private readonly IPipelineSignals _signals;
 
     /// <summary>The pass's own id — no fund's run; empty until the pass begins.</summary>
     private PipelineRunId _runId = new(string.Empty);
@@ -46,6 +47,9 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
     /// <summary>What the agent produced, kept for the phase that persists it.</summary>
     private DataLoaderOutput? _agentOutput;
 
+    /// <summary>Set once the records are stored — the done-signal may not go out before.</summary>
+    private bool _persisted;
+
     /// <summary>Runs from the start, so a reported duration covers every phase.</summary>
     private readonly Stopwatch _stepDuration = new();
 
@@ -58,7 +62,8 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
         IUniverseEnricherAgent agent,
         IPipelineRunIdFactory runIds,
         TimeProvider clock,
-        IStepEventPublisher stepEvents)
+        IStepEventPublisher stepEvents,
+        IPipelineSignals signals)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(options);
@@ -69,6 +74,7 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
         ArgumentNullException.ThrowIfNull(runIds);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(stepEvents);
+        ArgumentNullException.ThrowIfNull(signals);
 
         _logger = logger;
         _options = options;
@@ -79,6 +85,7 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
         _runIds = runIds;
         _clock = clock;
         _stepEvents = stepEvents;
+        _signals = signals;
     }
 
     /// <inheritdoc />
@@ -224,7 +231,9 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
                 _runId.Value, _isoWeek, _universe.Count, _agentOutput.Funds.Count,
                 _universe.Count - _agentOutput.Funds.Count, written.Count, _stepDuration.ElapsedMilliseconds);
 
-            // No emit phase follows, so the step is done here.
+            // The emit that follows is a hand-off, not part of the step: the records are
+            // stored, so the step is done here.
+            _persisted = true;
             Report(StepEventKind.Succeeded);
         }
         catch (OperationCanceledException)
@@ -240,6 +249,38 @@ public sealed class Step09UniverseEnricherHandler : IStep09UniverseEnricher
             _logger.Error(ex, "Step 9 persist failed — runId={0}", _runId.Value);
 
             Report(StepEventKind.Failed, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task EmitDoneAsync(CancellationToken ct = default)
+    {
+        if (!_persisted)
+            throw new InvalidOperationException("PersistAsync must succeed before EmitDoneAsync.");
+
+        _logger.Debug("Step 9 emit — runId={0}", _runId.Value);
+
+        try
+        {
+            // Run id only, no payload, as steps 1–8's: step 10 reads the records back off
+            // the rows, so nothing travelling here can disagree with what was stored.
+            await _signals.PublishAsync(new Step09DoneSignal(_runId), ct).ConfigureAwait(false);
+
+            _logger.Debug("Step 9 emitted — runId={0}", _runId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The pass is stored; only step 10's early run is lost, and its daily timer runs
+            // anyway. Not reported — the step succeeded. Rethrown so the caller sees it.
+            _logger.Error(ex, "Step 9 emit failed, pass already stored — runId={0}; step 10 waits for its timer",
+                _runId.Value);
 
             throw;
         }

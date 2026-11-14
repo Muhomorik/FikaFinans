@@ -10,7 +10,8 @@ namespace FikaFinans.Application.Pipeline.Steps;
 /// </summary>
 /// <remarks>
 /// Whether the pass should run at all — the barrier — is the caller's question, asked
-/// first. No done-signal: step 10 runs on its own timer and reads the rows.
+/// first. One done-signal per pass, after the save: step 10's early trigger, beside its
+/// daily timer.
 /// </remarks>
 public interface IStep09UniverseEnricher
 {
@@ -39,9 +40,16 @@ public interface IStep09UniverseEnricher
 
     /// <summary>
     /// Writes each enriched record to <c>Step09Json</c> on its fund's row, overwriting any
-    /// earlier pass. The last phase: the step is done once it returns.
+    /// earlier pass. The step is done once it returns.
     /// </summary>
     Task PersistAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Emits the pass's done-signal — after the save, never before, so step 10 reads this
+    /// pass's records when the signal arrives. A failure here loses only step 10's early run;
+    /// its daily timer runs anyway.
+    /// </summary>
+    Task EmitDoneAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Reads the last pass's records back for display, over the barrier's universe. A read,

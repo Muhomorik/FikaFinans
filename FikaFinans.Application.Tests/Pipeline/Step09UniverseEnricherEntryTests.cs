@@ -57,6 +57,8 @@ public sealed class Step09UniverseEnricherEntryTests
             .Callback(() => calls.Add("agent")).ReturnsAsync((DataLoaderOutput)null!);
         _step09.Setup(x => x.PersistAsync(It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
+        _step09.Setup(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
 
         // Act
         var ran = await CreateSut().HandleAsync(Step09Trigger.Step08Done);
@@ -65,14 +67,14 @@ public sealed class Step09UniverseEnricherEntryTests
         Assert.Multiple(() =>
         {
             Assert.That(ran, Is.True);
-            Assert.That(calls, Is.EqualTo(new[] { "begin", "load", "assemble", "agent", "persist" }));
+            Assert.That(calls, Is.EqualTo(new[] { "begin", "load", "assemble", "agent", "persist", "emit" }));
         });
     }
 
     [Test]
     public async Task HandleAsync_FailedFundsOnly_StillRunsThePass()
     {
-        // Arrange — a failed fund counts as finished: the smaller-but-clean universe.
+        // Arrange â a failed fund counts as finished: the smaller-but-clean universe.
         SetupBarrier(new Step09BarrierState(Universe, [Universe[1]], []));
 
         // Act
@@ -110,7 +112,7 @@ public sealed class Step09UniverseEnricherEntryTests
     [Test]
     public async Task HandleAsync_EmptyUniverse_StartsNoPass()
     {
-        // Arrange — closed over nothing: no YieldRaccoon funds configured yet.
+        // Arrange â closed over nothing: no YieldRaccoon funds configured yet.
         SetupBarrier(new Step09BarrierState([], [], []));
 
         // Act
@@ -124,7 +126,7 @@ public sealed class Step09UniverseEnricherEntryTests
     [Test]
     public void HandleAsync_AgentThrows_RethrowsAndNeverPersists()
     {
-        // Arrange — a bad weights edit, say.
+        // Arrange â a bad weights edit, say.
         var boom = new InvalidDataException("weights sum to 0.9");
         _step09.Setup(x => x.RunAgentAsync(It.IsAny<CancellationToken>())).ThrowsAsync(boom);
 
@@ -134,6 +136,21 @@ public sealed class Step09UniverseEnricherEntryTests
         // Assert
         Assert.That(thrown, Is.SameAs(boom));
         _step09.Verify(x => x.PersistAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _step09.Verify(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public void HandleAsync_PersistThrows_RethrowsAndEmitsNothing()
+    {
+        // Arrange — no done-signal for records that never landed.
+        _step09.Setup(x => x.PersistAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store unreachable"));
+
+        // Act
+        Assert.ThrowsAsync<InvalidOperationException>(() => CreateSut().HandleAsync(Step09Trigger.Timer));
+
+        // Assert
+        _step09.Verify(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
@@ -154,7 +171,7 @@ public sealed class Step09UniverseEnricherEntryTests
     [Test]
     public void HandleAsync_Cancelled_Rethrows()
     {
-        // Arrange — a shutdown mid LLM calls.
+        // Arrange â a shutdown mid LLM calls.
         _step09
             .Setup(x => x.RunAgentAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
@@ -167,7 +184,7 @@ public sealed class Step09UniverseEnricherEntryTests
     [Test]
     public async Task HandleAsync_TwoTriggers_UsesAFreshHandlerForEach()
     {
-        // Arrange — the handler keeps one pass's state in fields.
+        // Arrange â the handler keeps one pass's state in fields.
         var created = 0;
         _fixture.Inject<Func<IStep09UniverseEnricher>>(() =>
         {

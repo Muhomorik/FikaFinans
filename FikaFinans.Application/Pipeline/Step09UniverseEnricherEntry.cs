@@ -66,6 +66,10 @@ public sealed class Step09UniverseEnricherEntry : IStep09UniverseEnricherEntry
             await step09.RunAgentAsync(ct).ConfigureAwait(false);
             await step09.PersistAsync(ct).ConfigureAwait(false);
 
+            // After the save, so step 10 reads this pass's records. A lost signal costs only
+            // step 10's early run; its daily timer runs anyway.
+            await step09.EmitDoneAsync(ct).ConfigureAwait(false);
+
             stopwatch.Stop();
 
             _logger.Info("Step 9 entry done — trigger {0}, runId={1}, {2} ms",

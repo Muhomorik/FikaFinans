@@ -26,7 +26,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step01DoneSignal(FundIsin, Date, RunId);
 
@@ -34,7 +34,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -42,7 +42,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step02DoneSignal(FundIsin, Date, RunId);
 
@@ -50,7 +50,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -58,7 +58,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step03DoneSignal(FundIsin, Date, RunId);
 
@@ -66,7 +66,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -74,7 +74,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step04DoneSignal(FundIsin, Date, RunId);
 
@@ -82,7 +82,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -90,7 +90,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step05DoneSignal(FundIsin, Date, RunId);
 
@@ -98,7 +98,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -106,7 +106,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step06DoneSignal(FundIsin, Date, RunId);
 
@@ -114,7 +114,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -122,7 +122,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step07DoneSignal(FundIsin, Date, RunId);
 
@@ -130,7 +130,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
@@ -138,7 +138,7 @@ public sealed class LocalRxPipelineSignalBusTests
     {
         // Arrange
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
-        var received = new List<IStepDoneSignal>();
+        var received = new List<IPipelineSignal>();
         using var sub = sut.Signals.Subscribe(received.Add);
         var signal = new Step08DoneSignal(FundIsin, Date, RunId);
 
@@ -146,13 +146,29 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(signal);
 
         // Assert
-        Assert.That(received, Is.EqualTo(new IStepDoneSignal[] { signal }));
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
+    }
+
+    [Test]
+    public async Task PublishAsync_Step09Done_PushesThePassSignalToSubscribers()
+    {
+        // Arrange — one per pass, naming no fund, on the same stream as the per-fund hand-offs.
+        using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
+        var received = new List<IPipelineSignal>();
+        using var sub = sut.Signals.Subscribe(received.Add);
+        var signal = new Step09DoneSignal(RunId);
+
+        // Act
+        await sut.PublishAsync(signal);
+
+        // Assert
+        Assert.That(received, Is.EqualTo(new IPipelineSignal[] { signal }));
     }
 
     [Test]
     public async Task Signals_FilteredByType_KeepsStepsApart()
     {
-        // Arrange — each step listens for its predecessor's signal on the same stream it
+        // Arrange â each step listens for its predecessor's signal on the same stream it
         // publishes its own to, so its own must never look like a trigger.
         using var sut = _fixture.Create<LocalRxPipelineSignalBus>();
         var step01 = new List<Step01DoneSignal>();
@@ -163,6 +179,7 @@ public sealed class LocalRxPipelineSignalBusTests
         var step06 = new List<Step06DoneSignal>();
         var step07 = new List<Step07DoneSignal>();
         var step08 = new List<Step08DoneSignal>();
+        var step09 = new List<Step09DoneSignal>();
         using var sub01 = sut.Signals.OfType<Step01DoneSignal>().Subscribe(step01.Add);
         using var sub02 = sut.Signals.OfType<Step02DoneSignal>().Subscribe(step02.Add);
         using var sub03 = sut.Signals.OfType<Step03DoneSignal>().Subscribe(step03.Add);
@@ -171,6 +188,7 @@ public sealed class LocalRxPipelineSignalBusTests
         using var sub06 = sut.Signals.OfType<Step06DoneSignal>().Subscribe(step06.Add);
         using var sub07 = sut.Signals.OfType<Step07DoneSignal>().Subscribe(step07.Add);
         using var sub08 = sut.Signals.OfType<Step08DoneSignal>().Subscribe(step08.Add);
+        using var sub09 = sut.Signals.OfType<Step09DoneSignal>().Subscribe(step09.Add);
 
         // Act
         await sut.PublishAsync(new Step01DoneSignal(FundIsin, Date, RunId));
@@ -181,6 +199,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(new Step06DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step07DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step08DoneSignal(FundIsin, Date, RunId));
+        await sut.PublishAsync(new Step09DoneSignal(RunId));
 
         // Assert
         Assert.Multiple(() =>
@@ -193,6 +212,7 @@ public sealed class LocalRxPipelineSignalBusTests
             Assert.That(step06, Has.Count.EqualTo(1));
             Assert.That(step07, Has.Count.EqualTo(1));
             Assert.That(step08, Has.Count.EqualTo(1));
+            Assert.That(step09, Has.Count.EqualTo(1));
         });
     }
 

@@ -18,7 +18,7 @@ namespace FikaFinans.Infrastructure.Pipeline.Signals;
 /// </remarks>
 public sealed class LocalRxPipelineSignalBus : IPipelineSignals, IPipelineSignalStreams, IDisposable
 {
-    private readonly Subject<IStepDoneSignal> _signals = new();
+    private readonly Subject<IPipelineSignal> _signals = new();
     private readonly Lock _gate = new();
     private readonly ILogger _logger;
 
@@ -28,7 +28,7 @@ public sealed class LocalRxPipelineSignalBus : IPipelineSignals, IPipelineSignal
     }
 
     /// <inheritdoc />
-    public IObservable<IStepDoneSignal> Signals => _signals.AsObservable();
+    public IObservable<IPipelineSignal> Signals => _signals.AsObservable();
 
     /// <inheritdoc />
     public Task PublishAsync(Step01DoneSignal signal, CancellationToken ct = default)
@@ -62,18 +62,26 @@ public sealed class LocalRxPipelineSignalBus : IPipelineSignals, IPipelineSignal
     public Task PublishAsync(Step08DoneSignal signal, CancellationToken ct = default)
         => PublishCoreAsync(signal, ct);
 
+    /// <inheritdoc />
+    public Task PublishAsync(Step09DoneSignal signal, CancellationToken ct = default)
+        => PublishCoreAsync(signal, ct);
+
     /// <summary>
     /// The one publish path. Every overload lands here, so ordering and logging stay
     /// identical across steps.
     /// </summary>
-    private Task PublishCoreAsync(IStepDoneSignal signal, CancellationToken ct)
+    private Task PublishCoreAsync(IPipelineSignal signal, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(signal);
         ct.ThrowIfCancellationRequested();
 
-        _logger.Trace(
-            "{0} published: {1} @ {2:yyyy-MM-dd} run {3}",
-            signal.GetType().Name, signal.Isin.Value, signal.NavDate, signal.RunId.Value);
+        // A per-fund hand-off names its fund and trading date; a pass names only its run.
+        if (signal is IStepDoneSignal done)
+            _logger.Trace(
+                "{0} published: {1} @ {2:yyyy-MM-dd} run {3}",
+                signal.GetType().Name, done.Isin.Value, done.NavDate, done.RunId.Value);
+        else
+            _logger.Trace("{0} published: {1}", signal.GetType().Name, signal);
 
         // Serialize emissions so concurrent publishers can't interleave OnNext calls.
         lock (_gate)

@@ -307,6 +307,58 @@ public sealed class Step09UniverseEnricherHandlerTests
         Assert.ThrowsAsync<InvalidOperationException>(() => sut.PersistAsync());
     }
 
+    // ── EmitDoneAsync ─────────────────────────────────────────────────
+
+    [Test]
+    public async Task EmitDoneAsync_AfterPersist_PublishesThePassSignal()
+    {
+        // Arrange
+        var signals = _fixture.Freeze<Mock<IPipelineSignals>>();
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        await sut.PersistAsync();
+
+        // Act
+        await sut.EmitDoneAsync();
+
+        // Assert
+        signals.Verify(x => x.PublishAsync(new Step09DoneSignal(PassRunId), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task EmitDoneAsync_PersistFailed_ThrowsAndPublishesNothing()
+    {
+        // Arrange — a signal for records that never landed would send step 10 to old ones.
+        var signals = _fixture.Freeze<Mock<IPipelineSignals>>();
+        _progress
+            .Setup(x => x.SaveStep09Async(It.IsAny<IReadOnlyList<FundRecord>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store unreachable"));
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.PersistAsync());
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.EmitDoneAsync());
+        signals.Verify(x => x.PublishAsync(It.IsAny<Step09DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task EmitDoneAsync_PublishThrows_RethrowsWithoutReportingFailed()
+    {
+        // Arrange — the pass is stored and reported succeeded; a lost signal costs only
+        // step 10's early run.
+        _fixture.Freeze<Mock<IPipelineSignals>>()
+            .Setup(x => x.PublishAsync(It.IsAny<Step09DoneSignal>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("bus disposed"));
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        await sut.PersistAsync();
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.EmitDoneAsync());
+        _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e => e.Kind == StepEventKind.Failed)), Times.Never);
+    }
+
     // ── ReadOutputAsync ───────────────────────────────────────────────
 
     [Test]
