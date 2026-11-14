@@ -180,6 +180,7 @@ public sealed class LocalRxPipelineSignalBusTests
         var step07 = new List<Step07DoneSignal>();
         var step08 = new List<Step08DoneSignal>();
         var step09 = new List<Step09DoneSignal>();
+        var step10 = new List<Step10DoneSignal>();
         using var sub01 = sut.Signals.OfType<Step01DoneSignal>().Subscribe(step01.Add);
         using var sub02 = sut.Signals.OfType<Step02DoneSignal>().Subscribe(step02.Add);
         using var sub03 = sut.Signals.OfType<Step03DoneSignal>().Subscribe(step03.Add);
@@ -189,6 +190,7 @@ public sealed class LocalRxPipelineSignalBusTests
         using var sub07 = sut.Signals.OfType<Step07DoneSignal>().Subscribe(step07.Add);
         using var sub08 = sut.Signals.OfType<Step08DoneSignal>().Subscribe(step08.Add);
         using var sub09 = sut.Signals.OfType<Step09DoneSignal>().Subscribe(step09.Add);
+        using var sub10 = sut.Signals.OfType<Step10DoneSignal>().Subscribe(step10.Add);
 
         // Act
         await sut.PublishAsync(new Step01DoneSignal(FundIsin, Date, RunId));
@@ -200,6 +202,7 @@ public sealed class LocalRxPipelineSignalBusTests
         await sut.PublishAsync(new Step07DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step08DoneSignal(FundIsin, Date, RunId));
         await sut.PublishAsync(new Step09DoneSignal(RunId));
+        await sut.PublishAsync(new Step10DoneSignal(RunId));
 
         // Assert
         Assert.Multiple(() =>
@@ -213,6 +216,7 @@ public sealed class LocalRxPipelineSignalBusTests
             Assert.That(step07, Has.Count.EqualTo(1));
             Assert.That(step08, Has.Count.EqualTo(1));
             Assert.That(step09, Has.Count.EqualTo(1));
+            Assert.That(step10, Has.Count.EqualTo(1));
         });
     }
 

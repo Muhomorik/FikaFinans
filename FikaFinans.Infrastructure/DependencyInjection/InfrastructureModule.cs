@@ -788,7 +788,8 @@ public sealed class InfrastructureModule : Autofac.Module
                 agent: ctx.Resolve<IPortfolioConstructorAgent>(),
                 runIds: ctx.Resolve<IPipelineRunIdFactory>(),
                 clock: ctx.Resolve<TimeProvider>(),
-                stepEvents: ctx.Resolve<IStepEventPublisher>()))
+                stepEvents: ctx.Resolve<IStepEventPublisher>(),
+                signals: ctx.Resolve<IPipelineSignals>()))
             .As<IStep10PortfolioConstructor>()
             .InstancePerDependency();
 

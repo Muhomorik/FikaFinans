@@ -4,6 +4,7 @@ using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
+using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Domain.Portfolio;
@@ -34,6 +35,7 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
     private readonly IPipelineRunIdFactory _runIds;
     private readonly TimeProvider _clock;
     private readonly IStepEventPublisher _stepEvents;
+    private readonly IPipelineSignals _signals;
 
     /// <summary>The run's own id — no fund's run; empty until the run begins.</summary>
     private PipelineRunId _runId = new(string.Empty);
@@ -53,6 +55,9 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
     /// <summary>What the agent produced, kept for the phase that persists it.</summary>
     private TradesOutput? _agentOutput;
 
+    /// <summary>Set once the trades are stored — the done-signal may not go out before.</summary>
+    private bool _persisted;
+
     /// <summary>Runs from the start, so a reported duration covers every phase.</summary>
     private readonly Stopwatch _stepDuration = new();
 
@@ -65,7 +70,8 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
         IPortfolioConstructorAgent agent,
         IPipelineRunIdFactory runIds,
         TimeProvider clock,
-        IStepEventPublisher stepEvents)
+        IStepEventPublisher stepEvents,
+        IPipelineSignals signals)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(barrier);
@@ -76,6 +82,7 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
         ArgumentNullException.ThrowIfNull(runIds);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(stepEvents);
+        ArgumentNullException.ThrowIfNull(signals);
 
         _logger = logger;
         _barrier = barrier;
@@ -86,6 +93,7 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
         _runIds = runIds;
         _clock = clock;
         _stepEvents = stepEvents;
+        _signals = signals;
     }
 
     /// <inheritdoc />
@@ -225,6 +233,9 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
                 summary.TotalDeployableKr, summary.TotalBuyAmountKr, summary.CashRemainingKr,
                 _portfolio.HeldWithoutRecord.Count, written.Count, _stepDuration.ElapsedMilliseconds);
 
+            // The emit that follows is a hand-off, not part of the step: the trades are
+            // stored, so the step is done here.
+            _persisted = true;
             Report(StepEventKind.Succeeded);
         }
         catch (OperationCanceledException)
@@ -240,6 +251,37 @@ public sealed class Step10PortfolioConstructorHandler : IStep10PortfolioConstruc
             _logger.Error(ex, "Step 10 persist failed — runId={0}", _runId.Value);
 
             Report(StepEventKind.Failed, ex.Message);
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task EmitDoneAsync(CancellationToken ct = default)
+    {
+        if (!_persisted)
+            throw new InvalidOperationException("PersistAsync must succeed before EmitDoneAsync.");
+
+        _logger.Debug("Step 10 emit — runId={0}", _runId.Value);
+
+        try
+        {
+            // Run id only, no payload, as every done-signal: the bank side reads the trades
+            // back through the store, so nothing travelling here can disagree with them.
+            await _signals.PublishAsync(new Step10DoneSignal(_runId), ct).ConfigureAwait(false);
+
+            _logger.Debug("Step 10 emitted — runId={0}", _runId.Value);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown, not a failure — nothing to report and nothing to undo.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The trades are stored and the step reported succeeded; only the hand-off is
+            // lost, and the next run emits again. Rethrown so the caller sees it.
+            _logger.Error(ex, "Step 10 emit failed, trades already stored — runId={0}", _runId.Value);
 
             throw;
         }

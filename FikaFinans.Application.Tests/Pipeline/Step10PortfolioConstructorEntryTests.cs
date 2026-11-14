@@ -47,6 +47,8 @@ public sealed class Step10PortfolioConstructorEntryTests
             .Callback(() => calls.Add("agent")).ReturnsAsync((TradesOutput)null!);
         _step10.Setup(x => x.PersistAsync(It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("persist")).Returns(Task.CompletedTask);
+        _step10.Setup(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("emit")).Returns(Task.CompletedTask);
 
         // Act
         var ran = await CreateSut().HandleAsync(Step10Trigger.Step09Done);
@@ -55,7 +57,7 @@ public sealed class Step10PortfolioConstructorEntryTests
         Assert.Multiple(() =>
         {
             Assert.That(ran, Is.True);
-            Assert.That(calls, Is.EqualTo(new[] { "begin", "load", "assemble", "agent", "persist" }));
+            Assert.That(calls, Is.EqualTo(new[] { "begin", "load", "assemble", "agent", "persist", "emit" }));
         });
     }
 
@@ -75,7 +77,22 @@ public sealed class Step10PortfolioConstructorEntryTests
             _step10.Verify(x => x.AssembleAgentInputAsync(It.IsAny<CancellationToken>()), Times.Never);
             _step10.Verify(x => x.RunAgentAsync(It.IsAny<CancellationToken>()), Times.Never);
             _step10.Verify(x => x.PersistAsync(It.IsAny<CancellationToken>()), Times.Never);
+            _step10.Verify(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()), Times.Never);
         });
+    }
+
+    [Test]
+    public void HandleAsync_PersistThrows_RethrowsAndEmitsNothing()
+    {
+        // Arrange — no done-signal for trades that never landed.
+        _step10.Setup(x => x.PersistAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("disk full"));
+
+        // Act
+        Assert.ThrowsAsync<IOException>(() => CreateSut().HandleAsync(Step10Trigger.Timer));
+
+        // Assert
+        _step10.Verify(x => x.EmitDoneAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]

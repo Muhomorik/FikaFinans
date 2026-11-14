@@ -42,9 +42,16 @@ public interface IStep10PortfolioConstructor
 
     /// <summary>
     /// Stores the run's output on its funds' rows, overwriting any earlier run's slice. The
-    /// last phase: the step is done once it returns.
+    /// step is done once it returns.
     /// </summary>
     Task PersistAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Emits the run's done-signal — after the save, never before, so the bank side reads
+    /// this run's trades when the signal arrives. Run id only: the trades are read back
+    /// through the store.
+    /// </summary>
+    Task EmitDoneAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Reads the last stored run back for display. A read, never a trigger — opening a view

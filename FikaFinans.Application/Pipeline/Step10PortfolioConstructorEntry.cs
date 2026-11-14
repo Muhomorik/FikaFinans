@@ -52,6 +52,10 @@ public sealed class Step10PortfolioConstructorEntry : IStep10PortfolioConstructo
             await step10.RunAgentAsync(ct).ConfigureAwait(false);
             await step10.PersistAsync(ct).ConfigureAwait(false);
 
+            // After the save, so the bank side reads this run's trades. Nothing consumes it
+            // yet; the bank side is not built.
+            await step10.EmitDoneAsync(ct).ConfigureAwait(false);
+
             stopwatch.Stop();
 
             _logger.Info("Step 10 entry done — trigger {0}, runId={1}, {2} ms",

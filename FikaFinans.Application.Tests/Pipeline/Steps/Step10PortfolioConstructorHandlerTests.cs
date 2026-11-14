@@ -5,6 +5,7 @@ using FikaFinans.Application.Pipeline.Agents;
 using FikaFinans.Application.Pipeline.Configs;
 using FikaFinans.Application.Pipeline.Progress;
 using FikaFinans.Application.Pipeline.Run;
+using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Application.Pipeline.Steps;
 using FikaFinans.Application.Storage.Bank.Entities;
 using FikaFinans.Domain.Funds;
@@ -411,6 +412,57 @@ public sealed class Step10PortfolioConstructorHandlerTests
 
         // Act & Assert
         Assert.ThrowsAsync<InvalidOperationException>(() => sut.PersistAsync());
+    }
+
+    // ── EmitDoneAsync ─────────────────────────────────────────────────
+
+    [Test]
+    public async Task EmitDoneAsync_AfterPersist_PublishesTheRunsSignal()
+    {
+        // Arrange
+        var signals = _fixture.Freeze<Mock<IPipelineSignals>>();
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        await sut.PersistAsync();
+
+        // Act
+        await sut.EmitDoneAsync();
+
+        // Assert
+        signals.Verify(x => x.PublishAsync(new Step10DoneSignal(RunId), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task EmitDoneAsync_PersistFailed_ThrowsAndPublishesNothing()
+    {
+        // Arrange — a signal for trades that never landed would send the bank to old ones.
+        var signals = _fixture.Freeze<Mock<IPipelineSignals>>();
+        _progress
+            .Setup(x => x.SaveStep10Async(It.IsAny<PipelineRunId>(), It.IsAny<TradesOutput>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("disk full"));
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        Assert.ThrowsAsync<IOException>(() => sut.PersistAsync());
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.EmitDoneAsync());
+        signals.Verify(x => x.PublishAsync(It.IsAny<Step10DoneSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task EmitDoneAsync_PublishThrows_RethrowsWithoutReportingFailed()
+    {
+        // Arrange — the trades are stored and the step reported succeeded.
+        _fixture.Freeze<Mock<IPipelineSignals>>()
+            .Setup(x => x.PublishAsync(It.IsAny<Step10DoneSignal>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("bus disposed"));
+        var sut = CreateSut();
+        await RunThroughAgentAsync(sut);
+        await sut.PersistAsync();
+
+        // Act & Assert
+        Assert.ThrowsAsync<InvalidOperationException>(() => sut.EmitDoneAsync());
+        _stepEvents.Verify(x => x.Publish(It.Is<StepEvent>(e => e.Kind == StepEventKind.Failed)), Times.Never);
     }
 
     // ── ReadOutputAsync ───────────────────────────────────────────────

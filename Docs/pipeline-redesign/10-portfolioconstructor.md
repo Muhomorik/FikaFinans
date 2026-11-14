@@ -241,39 +241,46 @@ remaining cash. The agent stays logger-free, as step 8's.
 ## Output, and what follows
 
 **Decided 2026-11-10: store, then emit.** The run saves the day's
-`TradesOutput`, then emits a trades event *(new)* carrying it — the same
-order steps 1–9 keep: write, then signal.
+`TradesOutput`, then emits a done-signal — the same order steps 1–9 keep:
+write, then signal.
 
 | | Current | WPF | Cloud |
 | --- | --- | --- | --- |
 | **Run All button** (`PipelineRunner`) | the file `10-trades-{iso_week}-{run_id}.json` | **unchanged** — `PipelineRunner`'s own step 10, as step 9 left Run All | — no button |
 | **Step 10 tab's "Run step" button** | the file — `Run` reads the step 9 file | through the handler, shown but **not stored**, as step 9's | — no tabs |
-| **Done-signal or timer run** | — does not exist | stored, then the trades event. **No file** | the same store in Azure Tables, then the event |
-| **Read by** | the tab and the fund detail, from the file | the tab, the fund detail, the bank side — from the store or the event | the bank side |
+| **Done-signal or timer run** | — does not exist | `Step10Json` on every fund's row, then `Step10DoneSignal`. **No file** | the same store in Azure Tables, then the signal |
+| **Read by** | the tab and the fund detail, from the file | the tab, the fund detail, the bank side — from the store | the bank side |
 
-### Where it is stored — open
+### Where it is stored
 
-The two candidates [backend-nav-sync-plan.md](../backend-nav-sync-plan.md#step-10--daily-portfolio-trades)
-and [pipeline-data.md](./pipeline-data.md) already lay out:
+**Decided 2026-11-14: a `Step10Json` column per fund** — one of the two
+candidates [backend-nav-sync-plan.md](../backend-nav-sync-plan.md#step-10--daily-portfolio-trades)
+and [pipeline-data.md](./pipeline-data.md) laid out, keeping "one row
+tells you everything".
 
-| | One portfolio entry per day | A `Step10Json` column per fund |
-| --- | --- | --- |
-| Key | partition `portfolio-trades`, row key the date | the progress row |
-| Holds | the whole `TradesOutput` — trades, rejections, capital summary, violations | each fund's trade |
-| For | the output is portfolio-wide: the capital summary and most violations belong to no fund | "one row tells you everything" |
-| Against | a new table or partition, and a store for it | duplicated storage, a write per fund — and the portfolio-wide half still needs a home |
-| Re-run the same day | overwrites the day's entry | overwrites every fund's column |
+| | `Step10Json` |
+| --- | --- |
+| Holds | the fund's slice — its trades, rejections and violations — beside the run's header, capital summary and the violations that name no fund, on **every** slice |
+| Why the portfolio half on every slice | the only readers so far — `ISendToBankService`, the tab — take a whole `TradesOutput`; any one row can rebuild the header, and the newest run's slices rebuild the rest |
+| Written by | `IIsinProgressStore.SaveStep10Async` — `Step10Json` only, state and run id left alone, as step 9's save |
+| Read back by | `IIsinProgressStore.ReadStep10OutputAsync` — the newest run's slices; a fund the run did not reach keeps an older slice, ignored |
+| Survives | step 1's claim, like `LatestProcessedNavDate` — it is the day's portfolio run, not the fund's |
+| Re-run the same day | overwrites every slice it reaches |
 
-This page leans to **one entry per day**: half the output is about no
-fund at all. Not decided.
+The read-back lists trades in row order, not the agent's.
 
 ### Emit — the bank consumes it
 
 **Decided 2026-11-10: step 10 emits; the bank side handles it.** Step 10
-does not call `ISendToBankService`. The trades event *(new)* carries the
-day's `TradesOutput`; a bank-side consumer — not built — turns it into
-orders. `ISendToBankService` was lifted out of the tab for exactly this
-reuse.
+does not call `ISendToBankService`. A bank-side consumer — not built —
+turns the trades into orders. `ISendToBankService` was lifted out of the
+tab for exactly this reuse.
+
+**Decided 2026-11-14: the event is `Step10DoneSignal(RunId)`, payload-free**,
+as every done-signal: the consumer reads the trades back through the
+store, so the message cannot disagree with what was stored, and stays far
+under a queue's 64 KB message cap. One per run, naming no fund, like
+`Step09DoneSignal`.
 
 Running twice a day emits twice. The consumer must be idempotent — the
 `TradingOrders` key in [storage-schema.md](../storage-schema.md),
@@ -300,7 +307,6 @@ instead of the file.
 
 | # | Still open | Options |
 | --- | --- | --- |
-| 1 | Where the trades are stored | one portfolio entry per day — leaned to; or a `Step10Json` column per fund |
 | 2 | The macro regime | the newest macro context's regime, through `IMacroContextStore`; or null until the override is wanted. Either way, the table's keys against the enum |
 | 3 | The tab's Send to bank button | stays until the bank consumes the event; or goes once it does; or stays as a manual resend |
 | 4 | Config | a provider, step 9's pattern |
@@ -310,7 +316,8 @@ timer** — 23:00 local, in-process; **a second run the same day** — runs
 again and overwrites; **portfolio state** — read by step 10 through
 `IHoldingsProvider` and `IPortfolioStructureProvider`; **the output** —
 stored, then emitted; **the bank** — consumes the event, step 10 does not
-send.
+send; **the store** — a `Step10Json` column per fund; **the event** —
+`Step10DoneSignal`, payload-free.
 
 ## Proposed implementation order
 
@@ -323,13 +330,13 @@ runs. No LLM client, so no client logging row.
 | 1 | `IStep10PortfolioConfigProvider` in Application, `JsonBackedStep10PortfolioConfigProvider` in Infrastructure — step 9's pattern, read fresh on every call | Application `Pipeline/Configs`, Infrastructure, `InfrastructureModule` | — |
 | 2 | Domain-input `RunInMemory` on `IPortfolioConstructorAgent` — records, portfolio state, config, regime; synchronous, no file. No rule change. Tests in a new file beside `PortfolioConstructorAgentTests` | `IPortfolioConstructorAgent`, `PortfolioConstructorAgent`, a new test file | row 1 |
 | 3 | Portfolio state from the seams — cash, frozen positions, the held and value override, layers — from `IHoldingsProvider` and `IPortfolioStructureProvider`, classified as step 1 does | Application `Pipeline/Steps` | — |
-| 4 | The trades store — save the day's output, read the last one back | `IIsinProgressStore` or a store of its own, per "To settle" #1 | settle #1 |
+| 4 | The trades store — save the day's output, read the last one back | `IIsinProgressStore`, a `Step10Json` column per fund — see "Where it is stored" | — |
 | 5 | `IStep10PortfolioConstructor` + handler — load the records, load the portfolio and config, run, save, report step events; `ReadOutputAsync`, and `ComputeOutputAsync` for the "Run step" button. Not wired | Application, `Pipeline/Steps` | rows 2, 3, 4 |
 | 6 | A step 9 done-signal *(new)* — one per pass, emitted after step 9's save | `Step09UniverseEnricherHandler` or its entry, `Pipeline/Signals` | — |
 | 7 | `IStep10PortfolioConstructorEntry` + entry point — one call per trigger, `Step10Trigger` *(new)*: step 9 done, timer; registration | Application, `InfrastructureModule` | row 5 |
 | 8 | Subscription step 9 done-signal → step 10's entry point, caught and logged as `RunStep09Async` | `MainWindowViewModel` | rows 6, 7 |
 | 9 | A local daily timer at 23:00 → step 10's entry point | `MainWindowViewModel` | row 7 |
-| 10 | The trades event *(new)*, emitted after the save — no consumer yet | Application `Pipeline/Signals`, the handler | row 5 |
+| 10 | `Step10DoneSignal`, payload-free, emitted after the save — no consumer yet | Application `Pipeline/Signals`, the handler and its entry | row 5 |
 | 11 | Step 10's tab goes passive, as step 9's: follows step events, reads the stored trades; "Run step" through the handler; the fund detail reads the store | `Step10PortfolioConstructorViewModel`, `FundDetailViewModel` | rows 5, 7 |
 
 Run All is not changed — `PipelineRunner`'s own step 10, as step 9 left
@@ -345,7 +352,7 @@ not settled here.
   has step 10 on a timer only. Under this page it also follows step 9's
   done-signal — a `step09-done` hop beside the timer. That plan is where
   the layout changes.
-- **The bank consumer.** Who subscribes to the trades event, locally and
+- **The bank consumer.** Who subscribes to `Step10DoneSignal`, locally and
   in cloud, and how it reconciles positions after orders settle —
   [storage-migration-plan.md](../storage-migration-plan.md) §"Step 10 +
   SendToBank rewiring".
