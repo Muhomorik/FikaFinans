@@ -35,6 +35,17 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(config);
+        ValidateConfigVersion(config);
+        _paths = paths;
+        _config = config;
+    }
+
+    /// <summary>
+    /// Config drift halts the run — the contract's failure mode. Checked here, not in the
+    /// config provider, so a bad edit fails the run rather than the read.
+    /// </summary>
+    private static void ValidateConfigVersion(PortfolioConstructorConfig config)
+    {
         var version = config.Meta?.ConfigVersion ?? PortfolioConstructorConfig.ExpectedConfigVersion;
         if (!string.Equals(version, PortfolioConstructorConfig.ExpectedConfigVersion, StringComparison.Ordinal))
         {
@@ -42,8 +53,6 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
                 $"config-10-portfolio.json config_version '{version}' does not match expected " +
                 $"'{PortfolioConstructorConfig.ExpectedConfigVersion}'.");
         }
-        _paths = paths;
-        _config = config;
     }
 
     public TradesOutput Run(string isoWeek, PipelineRunId runId, string? macroRegime = null)
@@ -71,17 +80,52 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         return output;
     }
 
+    /// <summary>Not on the interface — kept for <see cref="Run"/> and the runner, on the ctor's config.</summary>
     public TradesOutput RunInMemory(DataLoaderOutput enriched, string? macroRegime = null)
     {
         ArgumentNullException.ThrowIfNull(enriched);
 
+        return Construct(
+            enriched.IsoWeek, enriched.Funds, enriched.FrozenPositions, enriched.CashAvailableKr,
+            _config, macroRegime);
+    }
+
+    /// <inheritdoc />
+    public TradesOutput RunInMemory(
+        IsoWeek isoWeek,
+        IReadOnlyList<FundRecord> funds,
+        IReadOnlyList<FrozenPosition> frozenPositions,
+        decimal cashAvailableKr,
+        PortfolioConstructorConfig config,
+        string? macroRegime = null)
+    {
+        ArgumentNullException.ThrowIfNull(funds);
+        ArgumentNullException.ThrowIfNull(frozenPositions);
+        ArgumentNullException.ThrowIfNull(config);
+
+        // The config now arrives per call, so the drift check the ctor makes for its own
+        // config runs here for this one.
+        ValidateConfigVersion(config);
+
+        return Construct(isoWeek.Value, funds, frozenPositions, cashAvailableKr, config, macroRegime);
+    }
+
+    /// <summary>The passes, whichever entry point is asking.</summary>
+    private static TradesOutput Construct(
+        string isoWeek,
+        IReadOnlyList<FundRecord> funds,
+        IReadOnlyList<FrozenPosition> frozenPositions,
+        decimal cashAvailableKr,
+        PortfolioConstructorConfig config,
+        string? macroRegime)
+    {
         // Pass A: capital math + integrity check on held positions.
-        ValidateHeldPositions(enriched.Funds);
-        var activeValue   = enriched.Funds.Where(f => f.CurrentlyHeld).Sum(f => f.CurrentValueKr ?? 0m);
-        var frozenValue   = enriched.FrozenPositions.Sum(p => p.CurrentValueKr);
-        var cashAvailable = enriched.CashAvailableKr;
+        ValidateHeldPositions(funds);
+        var activeValue   = funds.Where(f => f.CurrentlyHeld).Sum(f => f.CurrentValueKr ?? 0m);
+        var frozenValue   = frozenPositions.Sum(p => p.CurrentValueKr);
+        var cashAvailable = cashAvailableKr;
         var portfolioVal  = activeValue + frozenValue + cashAvailable;
-        var (floorPct, regimeOverrideActive) = ResolveCashFloor(macroRegime);
+        var (floorPct, regimeOverrideActive) = ResolveCashFloor(config, macroRegime);
         var floorKr       = portfolioVal * floorPct;
         var aboveFloor    = Math.Max(0m, cashAvailable - floorKr);
 
@@ -92,9 +136,9 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         // Pass B + C + D: per-fund layer gate, conviction gate, recommendation
         // → trade conversion. Filtered Buys/Sells return null and live in
         // rejected[] only.
-        foreach (var fund in enriched.Funds)
+        foreach (var fund in funds)
         {
-            var trade = ProcessFund(fund, portfolioVal, rejected, violations);
+            var trade = ProcessFund(config, fund, portfolioVal, rejected, violations);
             if (trade is not null) trades.Add(trade);
         }
 
@@ -107,17 +151,17 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         // Pass F: size buys (default + scale + min-trade dropout, capped at
         // max_position_pct × portfolio so we don't size a fresh Buy past the
         // concentration cap and immediately Trim it back).
-        SizeBuys(trades, totalDeployable, portfolioVal, enriched.Funds, rejected, violations);
+        SizeBuys(config, trades, totalDeployable, portfolioVal, funds, rejected, violations);
 
         // Pass G: concentration cap — emit Trim or suppress for core funds.
-        EnforceConcentrationCap(trades, enriched.Funds, portfolioVal, violations);
+        EnforceConcentrationCap(config, trades, funds, portfolioVal, violations);
 
         // Pass H: sector cap — refuse new Buys that would breach, otherwise
         // Trim largest non-core member.
-        EnforceSectorCap(trades, enriched.Funds, portfolioVal, rejected, violations);
+        EnforceSectorCap(config, trades, funds, portfolioVal, rejected, violations);
 
         // Pass I: rotation pair partial (one leg dropped).
-        CheckRotationPairs(trades, enriched.Funds, rejected, violations);
+        CheckRotationPairs(trades, funds, rejected, violations);
 
         // Pass J: capital summary.
         var totalBuy      = trades.Where(t => t.TradeType is TradeType.Buy or TradeType.TopUp).Sum(t => t.AmountKr);
@@ -173,7 +217,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         return new TradesOutput
         {
             GeneratedAt             = DateTimeOffset.UtcNow.ToString("o"),
-            IsoWeek                 = enriched.IsoWeek,
+            IsoWeek                 = isoWeek,
             ConfigVersion           = PortfolioConstructorConfig.ExpectedConfigVersion,
             Trades                  = trades,
             RejectedRecommendations = rejected,
@@ -196,20 +240,22 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         }
     }
 
-    private (decimal floorPct, bool regimeOverrideActive) ResolveCashFloor(string? macroRegime)
+    private static (decimal floorPct, bool regimeOverrideActive) ResolveCashFloor(
+        PortfolioConstructorConfig config, string? macroRegime)
     {
-        if (!_config.CashPolicy.MacroOverrideEnabled || string.IsNullOrEmpty(macroRegime))
+        if (!config.CashPolicy.MacroOverrideEnabled || string.IsNullOrEmpty(macroRegime))
         {
-            return (_config.CashPolicy.FloorPct, false);
+            return (config.CashPolicy.FloorPct, false);
         }
-        if (_config.CashPolicy.MacroOverrideTable.TryGetValue(macroRegime, out var pct))
+        if (config.CashPolicy.MacroOverrideTable.TryGetValue(macroRegime, out var pct))
         {
-            return (pct, pct != _config.CashPolicy.FloorPct);
+            return (pct, pct != config.CashPolicy.FloorPct);
         }
-        return (_config.CashPolicy.FloorPct, false);
+        return (config.CashPolicy.FloorPct, false);
     }
 
-    private Trade? ProcessFund(
+    private static Trade? ProcessFund(
+        PortfolioConstructorConfig config,
         FundRecord fund,
         decimal portfolioValue,
         List<RejectedRecommendation> rejected,
@@ -247,15 +293,15 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         if (SellRecs.Contains(rec))
         {
             var thesisInvalidOverride =
-                _config.Guards.SkipSellBelowConvictionUnlessThesisInvalid &&
+                config.Guards.SkipSellBelowConvictionUnlessThesisInvalid &&
                 thesis == ThesisValidity.Invalid;
-            if (conviction < _config.Guards.SkipSellBelowConviction && !thesisInvalidOverride)
+            if (conviction < config.Guards.SkipSellBelowConviction && !thesisInvalidOverride)
             {
                 rejected.Add(new RejectedRecommendation
                 {
                     Isin                 = fund.Isin,
                     SourceRecommendation = rec,
-                    RejectedBecause      = $"conviction_below_floor (conviction {conviction.ToString("F2", CultureInfo.InvariantCulture)} < {_config.Guards.SkipSellBelowConviction.ToString("F2", CultureInfo.InvariantCulture)})",
+                    RejectedBecause      = $"conviction_below_floor (conviction {conviction.ToString("F2", CultureInfo.InvariantCulture)} < {config.Guards.SkipSellBelowConviction.ToString("F2", CultureInfo.InvariantCulture)})",
                     WouldHaveBeen        = WouldHaveBeenSell(rec, fund),
                 });
                 if (conviction >= 0.8m)
@@ -273,13 +319,13 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         }
 
         // Conviction gate: Buys.
-        if (BuyRecs.Contains(rec) && conviction < _config.Guards.SkipBuyBelowConviction)
+        if (BuyRecs.Contains(rec) && conviction < config.Guards.SkipBuyBelowConviction)
         {
             rejected.Add(new RejectedRecommendation
             {
                 Isin                 = fund.Isin,
                 SourceRecommendation = rec,
-                RejectedBecause      = $"conviction_below_floor (conviction {conviction.ToString("F2", CultureInfo.InvariantCulture)} < {_config.Guards.SkipBuyBelowConviction.ToString("F2", CultureInfo.InvariantCulture)})",
+                RejectedBecause      = $"conviction_below_floor (conviction {conviction.ToString("F2", CultureInfo.InvariantCulture)} < {config.Guards.SkipBuyBelowConviction.ToString("F2", CultureInfo.InvariantCulture)})",
                 WouldHaveBeen        = $"{rec} (size pending)",
             });
             return null;
@@ -290,14 +336,14 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         {
             Recommendation.CatalystEntry =>
                 fund.CurrentlyHeld
-                    ? (BelowTarget(fund, portfolioValue)
+                    ? (BelowTarget(config, fund, portfolioValue)
                         ? MakeTrade(fund, TradeType.TopUp, "catalyst_entry_topup", 0m, conviction)
                         : MakeTrade(fund, TradeType.Hold,  "catalyst_entry_at_target", 0m, conviction))
                     : MakeTrade(fund, TradeType.Buy, "catalyst_entry_fresh", 0m, conviction),
 
             Recommendation.MomentumEntry =>
                 fund.CurrentlyHeld
-                    ? (BelowTarget(fund, portfolioValue)
+                    ? (BelowTarget(config, fund, portfolioValue)
                         ? MakeTrade(fund, TradeType.TopUp, "momentum_entry_topup", 0m, conviction)
                         : MakeTrade(fund, TradeType.Hold,  "momentum_entry_at_target", 0m, conviction))
                     : MakeTrade(fund, TradeType.Buy, "momentum_entry_fresh", 0m, conviction),
@@ -335,11 +381,11 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         };
     }
 
-    private bool BelowTarget(FundRecord fund, decimal portfolioValue)
+    private static bool BelowTarget(PortfolioConstructorConfig config, FundRecord fund, decimal portfolioValue)
     {
         if (portfolioValue <= 0m) return true;
         var currentWeight = (fund.CurrentValueKr ?? 0m) / portfolioValue;
-        return currentWeight < _config.DefaultBuyTargetPct;
+        return currentWeight < config.DefaultBuyTargetPct;
     }
 
     private static string WouldHaveBeenSell(Recommendation rec, FundRecord fund)
@@ -397,7 +443,8 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
     // capped at max_position_pct × portfolio - current_value (concentration
     // headroom). Drop sub-min-trade buys; redistribute their freed cash among
     // survivors (still respecting headroom).
-    private void SizeBuys(
+    private static void SizeBuys(
+        PortfolioConstructorConfig config,
         List<Trade> trades,
         decimal totalDeployable,
         decimal portfolioValue,
@@ -430,7 +477,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
             return;
         }
 
-        var maxPositionValue = _config.Constraints.MaxPositionPctOfPortfolio * portfolioValue;
+        var maxPositionValue = config.Constraints.MaxPositionPctOfPortfolio * portfolioValue;
         var headroomByIsin = buys.ToDictionary(
             isin => isin,
             isin =>
@@ -440,7 +487,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
                 return Math.Max(0m, maxPositionValue - current);
             });
 
-        var perBuyPct = Math.Max(_config.DefaultBuyTargetPct, 1.0m / buys.Count);
+        var perBuyPct = Math.Max(config.DefaultBuyTargetPct, 1.0m / buys.Count);
         var requested = perBuyPct * totalDeployable;
         var totalReq  = requested * buys.Count;
         var scaling   = totalReq > totalDeployable ? totalDeployable / totalReq : 1.0m;
@@ -449,9 +496,9 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
             isin => isin,
             isin => Math.Min(requested * scaling, headroomByIsin[isin]));
 
-        if (_config.Sizing.DropBuyIfFallsBelowMinTrade)
+        if (config.Sizing.DropBuyIfFallsBelowMinTrade)
         {
-            var minTrade = _config.Constraints.MinTradeKr;
+            var minTrade = config.Constraints.MinTradeKr;
             while (true)
             {
                 var smallest = amounts
@@ -503,7 +550,8 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         }
     }
 
-    private void EnforceConcentrationCap(
+    private static void EnforceConcentrationCap(
+        PortfolioConstructorConfig config,
         List<Trade> trades,
         IReadOnlyList<FundRecord> funds,
         decimal portfolioValue,
@@ -511,7 +559,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
     {
         if (portfolioValue <= 0m) return;
 
-        var cap      = _config.Constraints.MaxPositionPctOfPortfolio;
+        var cap      = config.Constraints.MaxPositionPctOfPortfolio;
         var capValue = portfolioValue * cap;
 
         for (var i = 0; i < trades.Count; i++)
@@ -550,7 +598,8 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         }
     }
 
-    private void EnforceSectorCap(
+    private static void EnforceSectorCap(
+        PortfolioConstructorConfig config,
         List<Trade> trades,
         IReadOnlyList<FundRecord> funds,
         decimal portfolioValue,
@@ -559,7 +608,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
     {
         if (portfolioValue <= 0m) return;
 
-        var cap      = _config.Constraints.MaxSectorPctOfPortfolio;
+        var cap      = config.Constraints.MaxSectorPctOfPortfolio;
         var capValue = portfolioValue * cap;
 
         // Recompute every iteration since refused Buys change the sector totals.
@@ -670,7 +719,7 @@ public sealed class PortfolioConstructorAgent : IPortfolioConstructorAgent
         return result;
     }
 
-    private void CheckRotationPairs(
+    private static void CheckRotationPairs(
         List<Trade> trades,
         IReadOnlyList<FundRecord> funds,
         List<RejectedRecommendation> rejected,
