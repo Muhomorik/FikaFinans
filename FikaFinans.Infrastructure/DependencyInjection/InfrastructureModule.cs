@@ -465,6 +465,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep07Services(builder);
         RegisterStep08Services(builder);
         RegisterStep09Services(builder);
+        RegisterStep10Services(builder);
     }
 
     /// <summary>
@@ -751,6 +752,20 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<IStep09Barrier>(),
                 ctx.Resolve<Func<IStep09UniverseEnricher>>()))
             .As<IStep09UniverseEnricherEntry>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// The redesigned step 10. Grows one registration per row of its page's implementation
+    /// order; Run All keeps <c>PortfolioConstructorAgent</c>'s own registration above.
+    /// </summary>
+    private static void RegisterStep10Services(ContainerBuilder builder)
+    {
+        // The JSON file the tab's config editor writes locally; another source in Azure.
+        builder.Register(ctx => new JsonBackedStep10PortfolioConfigProvider(
+                LogManager.GetLogger(nameof(JsonBackedStep10PortfolioConfigProvider)),
+                ctx.Resolve<IPathsService>()))
+            .As<IStep10PortfolioConfigProvider>()
             .SingleInstance();
     }
 
