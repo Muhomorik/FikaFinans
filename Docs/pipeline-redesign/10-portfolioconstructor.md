@@ -1,13 +1,18 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design, 2026-11-10 — nothing built. Step 10 is the portfolio
-  sink: it reads every fund's step 9 record and the portfolio's own state,
-  and produces the day's trades. Decided 2026-11-10: two triggers, as step
-  9 — step 9's done-signal and a daily timer at 23:00; portfolio state read
-  by step 10 itself, through the seams step 1 already uses; the trades
-  stored, then emitted as an event the bank side consumes. The choices
-  still open are in "To settle before building"; the open questions are
-  at the end.
+  STATUS: implemented for the local (WPF) host — every row of "Proposed
+  implementation order" is done; the cloud host and the bank-side
+  consumer are not. Recorded 2026-11-15; designed 2026-11-10. Step 10 is
+  the portfolio sink: it reads every fund's step 9 record and the
+  portfolio's own state, and produces the day's trades. Decided: two
+  triggers, as step 9 — step 9's done-signal and a daily timer at 23:00;
+  portfolio state read by step 10 itself, through the seams step 1
+  already uses; the trades stored as a `Step10Json` slice per fund, then
+  a payload-free done-signal. Since built: the subscription and the timer
+  live in `LocalPipelineHost`, not `MainWindowViewModel` — see
+  event-driven-orchestration-plan.md. Still open: the macro regime, the
+  tab's Send to bank button, the cloud sources — "To settle before
+  building". The open questions are at the end.
 -->
 
 # Step 10 — PortfolioConstructor

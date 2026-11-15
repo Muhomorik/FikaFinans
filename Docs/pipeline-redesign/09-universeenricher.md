@@ -1,11 +1,16 @@
 <!--
   Authoring rules: see README.md in this folder.
-  STATUS: design, 2026-10-19 — nothing built. Step 9 is a universe-wide
-  barrier: its contract takes every fund's step 8 record, and the code
-  already runs it that way after the per-fund block. What signal-driven
-  runs add is one question — how the barrier knows it has closed. The
-  choices are in "To settle before building"; the open questions are at
-  the end.
+  STATUS: implemented for the local (WPF) host — every row of "Proposed
+  implementation order" is done except row 10, dropped by decision; the
+  cloud host is not. Recorded 2026-11-15; designed 2026-10-19. Step 9 is
+  a universe-wide barrier: its contract takes every fund's step 8
+  record. What signal-driven runs add is how the barrier knows it has
+  closed — step 8's done-signal and a daily 22:45 timer, each asking the
+  barrier. Since built: step 9 emits a done-signal after its save, which
+  step 10 runs on; the subscription and the timer live in
+  `LocalPipelineHost`, not `MainWindowViewModel` — see
+  event-driven-orchestration-plan.md. The open questions are at the
+  end.
 -->
 
 # Step 9 — UniverseEnricher

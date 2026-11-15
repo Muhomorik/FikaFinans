@@ -4,7 +4,7 @@ What every step reads and writes outside its own code — the tables the
 pipeline keeps between steps (which column, which step writes it, which
 step reads it), and the configuration each step reads but never writes.
 Written for the steps that read across the chain: step 9 reads every
-fund's step 8 record, step 10 every fund's envelope.
+fund's step 8 record, step 10 every fund's step 9 record.
 
 ## At a glance
 
@@ -17,10 +17,11 @@ flowchart LR
     s1["1 DataLoader"] --> s2["2 Metrics"] --> s3["3 MacroAnalyst"] --> s4["4 SignalScorer"]
     s4 --> s5["5 MacroAligner"] --> s6["6 CatalystTagger"] --> s7["7 ThesisValidator"] --> s8["8 Recommender<br/>chain tail"]
   end
-  s9["9 UniverseEnricher<br/>proposed — reads every row"]
+  s9["9 UniverseEnricher<br/>reads every row"]
+  s10["10 PortfolioConstructor<br/>reads every row"]
 
   nav[("NavSnapshots<br/>one row per fund per day")]
-  row[("IsinProgress<br/>one row per fund<br/>Step01Json … Step09Json")]
+  row[("IsinProgress<br/>one row per fund<br/>Step01Json … Step10Json")]
   mc[("MacroContexts<br/>one row per week")]
 
   nav --> s1
@@ -28,8 +29,10 @@ flowchart LR
   s3 <--> mc
   mc --> s5
   mc --> s6
-  row -.-> s9
-  s9 -.-> row
+  row --> s9
+  s9 --> row
+  row --> s10
+  s10 --> row
 ```
 
 Three facts carry most of the page:
@@ -38,7 +41,8 @@ Three facts carry most of the page:
   record is append-only, so `Step08Json` already holds everything steps
   1–7 added. No step reads two columns back.
 - **The columns hold the latest run only.** Step 1's start clears them
-  all.
+  all — except `Step10Json`, which holds the day's trades rather than
+  this fund's run, and survives it.
 - **Nothing per week lives on the fund's row.** The macro context has its
   own table; the row does not even say which context its run used.
 
@@ -48,14 +52,14 @@ table here becomes a partition. All three follow the Tables-shaped
 contract in [storage-schema.md](../storage-schema.md): PartitionKey and
 RowKey as the natural key, no foreign keys, last write wins.
 
-Steps 1–8 are built for the local (WPF) host; step 9 is proposed, and
-marked as such wherever it appears.
+Steps 1–10 are built for the local (WPF) host; none is built for the
+cloud host.
 
 ## The tables
 
 | Table | PartitionKey | RowKey | Written by | Read by | Lifetime |
 | --- | --- | --- | --- | --- | --- |
-| `IsinProgress` | `isin-progress` | the ISIN | steps 1–8; step 9 proposed | steps 2–8 by run id; step 9 proposed, every row | row lives forever; step columns latest-only |
+| `IsinProgress` | `isin-progress` | the ISIN | steps 1–10 | steps 2–8 by run id; steps 9 and 10, every row | row lives forever; step columns latest-only |
 | `MacroContexts` | `macro-contexts` | the weekly summary's `runId` | step 3, on a miss | steps 3, 5, 6; step 3's tab | outlives every run |
 | `NavSnapshots` | `nav/{isin}` | the trading date, round-trip ISO 8601 | step 1, as a delta | step 1 | append-only |
 
@@ -72,7 +76,7 @@ erDiagram
     datetime ProcessingStartedAt "lock time"
     string LastError
     int AttemptCount "failures in a row"
-    string Step01Json "one column per step, to Step09Json"
+    string Step01Json "one column per step, to Step10Json"
   }
   MacroContexts {
     string PartitionKey "macro-contexts"
@@ -102,7 +106,7 @@ One row per fund, doing two jobs:
 | Job | Columns |
 | --- | --- |
 | In-flight lock and dedup anchor | `State`, `RunId`, `NavDate`, `CurrentStep`, `ProcessingStartedAt`, `LatestProcessedNavDate`, `LastError`, `AttemptCount` |
-| Inline step-output store | `Step01Json` … `Step09Json` — one column per step, each one fund's output for the run in `RunId` |
+| Inline step-output store | `Step01Json` … `Step09Json` — one column per step, each one fund's output for the run in `RunId`; and `Step10Json` — the fund's slice of the day's trades, from step 10's own run |
 
 **The dedup rule.** A NAV signal is processed only when its trading date
 is strictly newer than `LatestProcessedNavDate`. The anchor moves only
@@ -149,8 +153,8 @@ flowchart TB
   c6["<b>Step06Json</b><br/>+ Catalyst"]
   c7["<b>Step07Json</b><br/>+ ThesisValidity · ThesisRationale · ThesisMethod"]
   c8["<b>Step08Json</b><br/>+ Recommendation · RecommendationReason"]
-  c9["<b>Step09Json</b> — proposed<br/>+ ConvictionScore · ConvictionBreakdown · UniverseRank · Alternatives · RotationPairId"]
-  c1 --> c2 --> c3 --> c4 --> c5 --> c6 --> c7 --> c8 -.-> c9
+  c9["<b>Step09Json</b><br/>+ ConvictionScore · ConvictionBreakdown · UniverseRank · Alternatives · RotationPairId"]
+  c1 --> c2 --> c3 --> c4 --> c5 --> c6 --> c7 --> c8 --> c9
 ```
 
 | Column | Step | Adds | Next reader | Status |
@@ -163,7 +167,11 @@ flowchart TB
 | `Step06Json` | [6 CatalystTagger](./06-catalysttagger.md) | `Catalyst` — null when none applies | step 7 | built |
 | `Step07Json` | [7 ThesisValidator](./07-thesisvalidator.md) | `ThesisValidity`, `ThesisRationale`, `ThesisMethod` | step 8 | built |
 | `Step08Json` | [8 Recommender](./08-recommender.md) | `Recommendation`, `RecommendationReason` | step 9 — every row's latest | built |
-| `Step09Json` | [9 UniverseEnricher](./09-universeenricher.md) | `ConvictionScore`, `ConvictionBreakdown`, `UniverseRank`, `Alternatives`, `RotationPairId` | step 10 | **proposed** |
+| `Step09Json` | [9 UniverseEnricher](./09-universeenricher.md) | `ConvictionScore`, `ConvictionBreakdown`, `UniverseRank`, `Alternatives`, `RotationPairId` | step 10 | built |
+
+`Step10Json` is not a `FundRecord` and not in this chain: it is the
+fund's slice of step 10's output — see "Step 10 — reads across every
+row".
 
 Field names are `FundRecord` members. What each means, and its JSON
 shape, is the step's contract in
@@ -184,7 +192,7 @@ stateDiagram-v2
 
 | Transition | What changes on the row |
 | --- | --- |
-| Step 1 start | refused if already `Processing`. Otherwise the row is **rewritten from scratch**: `State` Processing, `NavDate` the signal's, `CurrentStep` 1, `ProcessingStartedAt` now. Only `LatestProcessedNavDate` carries over — every step column, `LastError` and `AttemptCount` reset. `RunId` stays null until the fund loads |
+| Step 1 start | refused if already `Processing`. Otherwise the row is **rewritten from scratch**: `State` Processing, `NavDate` the signal's, `CurrentStep` 1, `ProcessingStartedAt` now. Only `LatestProcessedNavDate` and `Step10Json` carry over — every other step column, `LastError` and `AttemptCount` reset. `RunId` stays null until the fund loads |
 | Step N start, N > 1 | a check and a mark, never a clear: refused unless the row is in flight and names the signal's run id; `CurrentStep` moves to N |
 | Step N save | `StepNNJson` written; every other column kept |
 | Complete — the chain tail only, step 8 today | `State` Free; `LatestProcessedNavDate` takes `NavDate`; `LastError` cleared; `AttemptCount` 0; step columns kept |
@@ -304,9 +312,9 @@ See [01-dataloader.md](./01-dataloader.md).
 
 ## Step 10 — reads across every row
 
-Not built. Step 10 runs once a day on a timer, outside the per-fund
-chain, and reads `Step09Json` from **every** progress row, whatever its
-trading date.
+Built locally. Step 10 runs outside the per-fund chain — after each
+step 9 pass and on a daily timer — and reads `Step09Json` from
+**every** progress row, whatever its trading date.
 
 | Row says | Step 10 |
 | --- | --- |
@@ -316,13 +324,21 @@ trading date.
 That is the trade the run-boundary reset makes: the day's trades reflect
 each fund's last *completed* run, not necessarily its latest NAV.
 
-Where step 10 writes is open:
+**Decided: a `Step10Json` column per fund**, on
+[10-portfolioconstructor.md](./10-portfolioconstructor.md) §"Where it
+is stored". Each fund's slice holds its own trades, rejections and
+violations, plus a copy of the run's header, capital summary and
+fund-less violations, so any one slice reads back the whole portfolio
+half. The read-back takes the newest run's slices, in row order.
 
-| | One portfolio row per day | A `Step10Json` column per fund |
-| --- | --- | --- |
-| Key | PartitionKey `portfolio-trades`, RowKey the date | the progress row |
-| For | step 10's output is portfolio-wide by nature | keeps "one row tells you everything" |
-| Against | — | duplicated storage, a write per fund |
+| | `Step10Json` per fund |
+| --- | --- |
+| Key | the progress row |
+| Survives step 1's start | yes — the day's trades stay whole while a fund re-runs |
+| Cost | the portfolio half copied onto every slice; a write per fund |
+
+The other candidate — one portfolio row per day, PartitionKey
+`portfolio-trades`, RowKey the date — was not chosen.
 
 ## Step configuration
 
@@ -342,9 +358,9 @@ step that reads them.
 | 6 CatalystTagger | classification prompt — no config | a constant in `FoundryFundCatalystLlmClient` | unchanged | unchanged |
 | 7 ThesisValidator | refinement prompt — no config | a constant in `FoundryThesisRefinementLlmClient` | unchanged | unchanged |
 | 8 Recommender | no config — "None. Pure deterministic mapping." | — | — | — |
-| 9 UniverseEnricher | `IStep09ConvictionConfigProvider` *(new)* | **never read** — `config-09-conviction.json` is seeded and editable from the tab, but nothing reads it | `config-09-conviction.json` through a provider, step 4's pattern | app settings or a blob — open |
+| 9 UniverseEnricher | `IStep09ConvictionConfigProvider` | `JsonBackedStep09ConvictionConfigProvider` — `config-09-conviction.json` via `IPathsService`, read fresh on every run | unchanged | app settings or a blob — open |
 | 9 UniverseEnricher | differentiator prompt — system and retry | constants in `FoundryDifferentiatorLlmClient` | unchanged | unchanged |
-| 10 PortfolioConstructor | `config-10-portfolio.json` | in the inputs folder, read by `PortfolioConstructorAgent` | unchanged | open — step 10's page not written |
+| 10 PortfolioConstructor | `IStep10PortfolioConfigProvider` | `JsonBackedStep10PortfolioConfigProvider` — `config-10-portfolio.json` via `IPathsService`, read fresh on every run; a missing file falls back to the defaults | unchanged | another source — open |
 | 2, 4, 9, 10 | `IPathsService` — the inputs folder the config files live in | settings path, `SettingsBackedPathsService` | unchanged | **no filesystem** — every file row must find another home first |
 | 3, 5, 6, 7, 9 | Foundry project + model id | settings, `az login` | unchanged | app settings, managed identity |
 
@@ -399,7 +415,7 @@ rather than in production.
 | --- | --- | --- |
 | Theme-adjacency verdicts, per (context, category) | [05-macroaligner.md](./05-macroaligner.md) | no cache, in-process, or a store beside `MacroContexts` — none chosen |
 | Catalyst verdicts, per (context, fund) | [06-catalysttagger.md](./06-catalysttagger.md) | same three options — none chosen |
-| Step 10's portfolio trades | "Step 10 — reads across every row" above | one row per day or a column per fund — not chosen |
+| Step 10's portfolio trades as one row per day | "Step 10 — reads across every row" above | not chosen — a `Step10Json` column per fund instead |
 | A SQLite copy refreshed from Azure Tables, for local work against cloud data | [backend-nav-sync-plan.md](../backend-nav-sync-plan.md) §"Acknowledged seams" | not built — only worth it once a Tables environment exists |
 
 </details>
@@ -421,8 +437,6 @@ rather than in production.
   concurrency check to the progress row only.
 - **Stuck-row janitor placement** — inside the front-door check, or a
   timer Function of its own.
-- **Where step 10 writes** — one portfolio row per day, or a column per
-  fund.
 - **Where the step configs and step 3's prompts live in cloud** — app
   settings, a blob, or embedded defaults; and whether a missing file
   falls back to defaults or fails. Steps 2, 3, 4 and 9's pages.

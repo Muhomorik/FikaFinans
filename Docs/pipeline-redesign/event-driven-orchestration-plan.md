@@ -1,9 +1,10 @@
 <!--
-  STATUS: PARTLY IMPLEMENTED (2026-11-15). Written as a plan on
-  2026-08-25. Since then the per-step redesigns have moved every step's
-  logic into Application entry points; what is left in
-  `MainWindowViewModel` is the local trigger wiring. See "Where It Stands"
-  for what is built and what is next.
+  STATUS: LOCAL PART IMPLEMENTED (2026-11-15). Written as a plan on
+  2026-08-25. The per-step redesigns moved every step's logic into
+  Application entry points; the local trigger wiring then moved out of
+  `MainWindowViewModel` into `LocalPipelineHost`. Nothing cloud-side is
+  built. See "Where It Stands" for what is built; the sections after it
+  are the original plan, each marked where the code has overtaken it.
 
   Original scope: moving orchestration logic out of
   `MainWindowViewModel` and into the Application layer so the same logic
@@ -52,7 +53,8 @@ Most of this plan arrived sideways. Each step's redesign page, from
 [10-portfolioconstructor.md](./10-portfolioconstructor.md), pulled its
 step's logic out of the ViewModel into a host-neutral entry point. What
 the per-step work never touched is the wiring that connects those entry
-points locally — and that wiring still lives in `MainWindowViewModel`.
+points locally — that wiring lived in `MainWindowViewModel` until
+2026-11-15, and now lives in `LocalPipelineHost`.
 
 ### Done
 
@@ -67,23 +69,25 @@ points locally — and that wiring still lives in `MainWindowViewModel`.
 | Step tabs | passive — each follows `IStepEventSource` and reads its stored output |
 | "Run this step" buttons | go through the step's handler as a debug run — the plan's slice 3 |
 
-### Left — the local trigger wiring
+### Moved — the local trigger wiring (built 2026-11-15)
 
-Everything below still sits in `MainWindowViewModel`. None of it is
-policy any more; it is transport — the job Azure's trigger bindings do
-for a Functions app.
+Everything below sat in `MainWindowViewModel` and now sits in
+`LocalPipelineHost`, in Infrastructure. None of it is policy; it is
+transport — the job Azure's trigger bindings do for a Functions app.
 
 | Piece | Cloud counterpart |
 | --- | --- |
 | NAV-signal buffer and per-fund dedup, handed to the front door | queue trigger on the NAV queue |
 | Nine done-signal subscriptions, one per entry point from step 2 to step 10 | one queue trigger per step |
 | Step 9's and step 10's daily timers | timer triggers |
-| Ten near-identical fire-and-forget wrappers that catch everything | the Functions host's own invocation and error handling |
-| One cancellation token shared by all of the above and Run All | host shutdown |
+| Ten near-identical fire-and-forget wrappers that catch everything — now one dispatch helper | the Functions host's own invocation and error handling |
+| One cancellation token shared by all of the above and Run All — now the host's own, renewed after every Stop | host shutdown |
 
-It moves into one local host *(new)* that mirrors the Functions app:
-one subscription where the cloud has one Function. The window starts
-it, stops it, and renders what it reports.
+`LocalPipelineHost` mirrors the Functions app: one subscription where
+the cloud has one Function. The window starts it when it loads, cancels
+its work on Stop, and disposes it on close. The timers read the time
+through `TimeProvider`, so the host is tested without waiting for the
+wall clock.
 
 ```mermaid
 flowchart LR
@@ -91,7 +95,7 @@ flowchart LR
     main["MainWindowViewModel<br/>start · stop · dispose<br/>Run All · pickers · status"]
   end
   subgraph infra["FikaFinans.Infrastructure — local only"]
-    host["local host (new)<br/>subscriptions · timers · dispatch"]
+    host["LocalPipelineHost<br/>subscriptions · timers · dispatch"]
     bus[["LocalRxPipelineSignalBus<br/>LocalRxNavSignalBus"]]
   end
   subgraph app["FikaFinans.Application — host-neutral"]
@@ -135,19 +139,30 @@ Application layer knows which one did.
   of "never the signal stream" below, but harmlessly: it is a second
   reader on the local bus for display only, nothing depends on it, and
   the cloud has no tabs. Recorded, not fixed.
+- **Starting Run All no longer cancels signal-driven work.** It used
+  to, as a side effect of the shared token rather than a decision. Only
+  Stop cancels both now.
+- **A cancelled step leaves its row in flight.** That is the front
+  door's and the entries' existing rule, not new: cancellation is not a
+  failure, so the row is not freed. The step tab's orphaned-run recovery
+  frees it on the tab's first open in the next session.
 
 ### Proposed implementation order
 
 One commit per row, build green throughout.
 
-| # | Row | Touches |
-| --- | --- | --- |
-| 1 | This section | this page |
-| 2 | Local host *(new)* with the NAV buffer and the nine signal subscriptions, behind one dispatch helper | Infrastructure, its tests |
-| 3 | Step 9's and step 10's daily timers move into the host, reading the time through `TimeProvider` | Infrastructure, its tests |
-| 4 | `MainWindowViewModel` starts, stops and disposes the host; the moved wiring and the dead batch handler are deleted | Wpf |
-| 5 | `MainWindowViewModel` holds the week, the company and the run id as their domain types, converting to text only for display | Wpf |
-| 6 | Status pass on this page | this page |
+| # | Row | Touches | Status |
+| --- | --- | --- | --- |
+| 1 | This section | this page | done |
+| 2 | `LocalPipelineHost` with the NAV buffer and the nine signal subscriptions, behind one dispatch helper | Infrastructure, its tests | done |
+| 3 | Step 9's and step 10's daily timers move into the host, reading the time through `TimeProvider` | Infrastructure, its tests | done |
+| 4 | `MainWindowViewModel` starts, stops and disposes the host; the moved wiring and the dead batch handler are deleted | Wpf | done |
+| 5 | `MainWindowViewModel` holds the week, the company and the run id as their domain types, converting to text only for display | Wpf | done |
+| 6 | Status pass on this page | this page | done |
+
+`MainWindowViewModel` went from 843 lines to about 440. What it keeps is
+window chrome — tabs, pickers, status text — plus the Run All button and
+the host's lifetime.
 
 ## The Problem
 
@@ -754,17 +769,21 @@ not settle one on its own.
 
 ## What Moves, What Stays
 
-| Piece | Destination |
-| --- | --- |
-| Signal subscription + batching | Application — the coordinator |
-| Newest-per-ISIN coalescing | Application — the coordinator |
-| Contention decision | Application — the coordinator |
-| Run id minting | Application — behind a clock/factory seam |
-| Run cancellation lifecycle | Application — the coordinator |
-| Outcome classification | Application — emitted as a run-lifecycle event |
-| "Run this step" button | stays in WPF, but routed through the runner |
-| Status pips, progress text, tab following | stays in WPF |
-| Reading a step's persisted output for display | stays in WPF |
+The plan named one destination — a coordinator in Application. The code
+split it: the policy went behind the entry points, the transport into a
+local host.
+
+| Piece | Planned destination | Where it is (2026-11-15) |
+| --- | --- | --- |
+| Signal subscription + batching | Application — the coordinator | `LocalPipelineHost`, Infrastructure — transport, local only |
+| Newest-per-ISIN coalescing | Application — the coordinator | `LocalPipelineHost` drops a fund's repeat within one burst; the real dedup is the front door's anchor check |
+| Contention decision | Application — the coordinator | the step 1 claim, per fund — see "Contention" |
+| Run id minting | Application — behind a clock/factory seam | `IPipelineRunIdFactory`, at claim |
+| Run cancellation lifecycle | Application — the coordinator | `LocalPipelineHost`, local only; the window's Stop calls it |
+| Outcome classification | Application — emitted as a run-lifecycle event | per step and per fund — each step's `StepEvent`, failures stamped on the row. No run-level event exists |
+| "Run this step" button | stays in WPF, but routed through the runner | stays in WPF, routed through the step's handler as a debug run |
+| Status pips, progress text, tab following | stays in WPF | stays in WPF — each tab follows `IStepEventSource`; Run All's router still drives tab following |
+| Reading a step's persisted output for display | stays in WPF | stays in WPF |
 
 ### The step ViewModel's four coupling points
 
@@ -777,6 +796,13 @@ orchestrator.
 Target: **one** inbound path (a subscription the ViewModel owns) and
 **one** outbound path (a command to the runner). The parent stops
 knowing that its children exist as a collection to be driven.
+
+**Status 2026-11-15 — met for the signal-driven path, not for Run All.**
+Each tab subscribes to its own step's events and reads its stored
+output; its button runs the step's handler. The direct call into the
+agent is gone. Run context and output reload are still pushed by the
+parent, but only on the Run All path, which keeps its event router by
+decision.
 
 ## Blockers to Settle First
 
@@ -891,6 +917,11 @@ trace id joining logs across all queue hops, per
 Needs a seam (clock or factory) and a resolution decision before it
 leaves the ViewModel.
 
+**Resolved for the signal-driven path.** `IPipelineRunIdFactory` mints
+the id at claim — trading date, fund, random suffix — so it is
+collision-free and greppable across hops. Run All still mints the old
+minute stamp in the window; that path has no cloud counterpart.
+
 ## Contention — the Policy That Has No Home
 
 When signals arrive while a run is already in flight, the current
@@ -909,6 +940,15 @@ extraction is not a pure refactor. Moving the policy into the
 coordinator is mechanical; *deciding* the policy is a real design
 choice, and doing it while the logic sits in a ViewModel is how it got
 left as a one-line drop in the first place.
+
+**Status 2026-11-15 — settled locally by the claim, per fund.** The
+whole-batch drop is gone; it went with the dead batch handler. A signal
+now reaches the front door, whose claim refuses a fund already in flight
+and logs the skip. Nothing is lost: the fund's anchor has not moved, so
+the detector's next pass signals it again once the run in flight
+completes. That is "keep dropping", narrowed from a run to one fund and
+made safe by the anchor. The cloud's extend-visibility branch is still
+not built.
 
 ## Proposed Sequence
 
@@ -945,6 +985,16 @@ flowchart LR
 
 Slices 1–4 are pure local work with no cloud dependency. Slice 5 is
 what makes the cutover itself a small change rather than a rewrite.
+
+**Status 2026-11-15:**
+
+| Slice | Status |
+| --- | --- |
+| 1 · settle what starts a run | settled on the step pages — cache-first mirror, run ids at claim. Run context for Run All still comes from the pickers |
+| 2 · extract coordinator | done, split in two — policy behind the entry points, transport in `LocalPipelineHost` |
+| 3 · unify run paths | done for the signal-driven path; Run All keeps its own runner |
+| 4 · invert the wiring | done for the step tabs. The NAV Sync tab is still blind to what its signals triggered |
+| 5 · detector fission | not started |
 
 ## Open Questions
 
@@ -1043,13 +1093,15 @@ what makes the cutover itself a small change rather than a rewrite.
 - **Run context source.** Carried on the signal, read from config, or
   derived from the trading date? Changes what a run means for the
   manual path. See "Blockers".
-- **Run id shape and resolution.** Needs to be collision-free under
+- ✅ **Run id shape and resolution.** Resolved 2026-11-15 for the
+  signal-driven path — see "Run id is UI-shaped". Needs to be collision-free under
   queue-driven concurrency and usable as a cross-hop trace id. Note the
   run id type's own documentation states that it is generated at the UI
   as a minute-resolution stamp — when minting moves, that remark
   describes the old world and needs correcting with it.
-- **Local contention policy.** Hold-and-drain, merge-into-run, or keep
-  dropping? See "Contention".
+- ✅ **Local contention policy.** Resolved 2026-11-15 — per-fund skip at
+  the claim, re-signalled by the detector's next pass. See
+  "Contention". Was: hold-and-drain, merge-into-run, or keep dropping?
 - **Detector fission mechanics.** Two classes, one class with two
   seams, or the simulator half relocating into the WPF project?
 - **Run-lifecycle event shape.** The existing per-step event record
@@ -1063,7 +1115,9 @@ what makes the cutover itself a small change rather than a rewrite.
   reasonable for a desktop app with one user and one button. It is
   meaningless for a queue-driven host where runs are independent. The
   behaviour may not be portable, in which case it stays in WPF as a
-  UI-level concern.
+  UI-level concern. ✅ **Resolved 2026-11-15:** neither — the local host
+  owns it, local only. Stop cancels the work in flight and the host takes
+  a fresh token; a Functions host has no Stop, only shutdown.
 - **What the NAV Sync tab shows post-extraction.** It becomes a
   subscriber, but the useful view — per-ISIN progress for the funds it
   just signalled — needs the run-lifecycle events to carry enough
