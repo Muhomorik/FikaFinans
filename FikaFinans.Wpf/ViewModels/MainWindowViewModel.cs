@@ -6,6 +6,7 @@ using System.Windows.Input;
 using Autofac;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline;
+using FikaFinans.Domain.Funds;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Wpf.Interop;
@@ -33,9 +34,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const int NavSyncTabIndex = 11;
 
     private string _title = string.Empty;
-    private string _selectedWeek = string.Empty;
-    private string _selectedFamily = string.Empty;
-    private string _runId = "—";
+    /// <summary>
+    /// The run id the tabs are handed before any Run All — the same "no run" a tab starts with.
+    /// </summary>
+    private static readonly PipelineRunId NoRun = new(string.Empty);
+
+    private IsoWeek _selectedWeek = IsoWeek.Empty;
+    private Company? _selectedFamily;
+    private PipelineRunId? _runId;
     private string _runStatusText = "Idle";
     private string _statusBarText = "Ready";
     private bool _isRunning;
@@ -50,21 +56,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedWeek
     {
-        get => _selectedWeek;
-        set { SetProperty(ref _selectedWeek, value, nameof(SelectedWeek)); PushContextToAllSteps(); }
+        get => _selectedWeek.Value;
+        set { SetProperty(ref _selectedWeek, new IsoWeek(value ?? string.Empty), nameof(SelectedWeek)); PushContextToAllSteps(); }
     }
 
     public string SelectedFamily
     {
-        get => _selectedFamily;
-        set { SetProperty(ref _selectedFamily, value, nameof(SelectedFamily)); PushContextToAllSteps(); }
+        get => _selectedFamily?.Value ?? string.Empty;
+        set
+        {
+            var company = string.IsNullOrWhiteSpace(value) ? (Company?)null : Company.From(value);
+            SetProperty(ref _selectedFamily, company, nameof(SelectedFamily));
+            PushContextToAllSteps();
+        }
     }
 
-    public string RunId
-    {
-        get => _runId;
-        set => SetProperty(ref _runId, value, nameof(RunId));
-    }
+    /// <summary>The last Run All's id, for the run bar — "—" before the first.</summary>
+    public string RunId => _runId?.Value ?? "—";
+
+    private void SetRunId(PipelineRunId runId)
+        => SetProperty(ref _runId, runId, nameof(RunId));
 
     public string RunStatusText
     {
@@ -161,7 +172,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AvailableFamilies.Add("schroder");
         SelectedWeek = "2026-W18";
         SelectedFamily = "schroder";
-        RunId = "20260504-0000";
+        SetRunId(new PipelineRunId("20260504-0000"));
         RunStatusText = "Idle";
         StatusBarText = "Ready · DB InMemory";
     }
@@ -244,20 +255,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Step6Tab, Step7Tab, Step8Tab, Step9Tab, Step10Tab
         };
         foreach (var vm in steps.OfType<StepViewModel>())
-            vm.SetContext(SelectedFamily, SelectedWeek, new PipelineRunId(RunId));
+            vm.SetContext(SelectedFamily, SelectedWeek, _runId ?? NoRun);
     }
 
     /// <summary>
     /// Manual "Run all" — the whole universe (no NAV-change scoping).
     /// </summary>
-    private Task OnRunAllAsync() => RunPipelineAsync(navDateByIsin: null);
+    private Task OnRunAllAsync() => RunPipelineAsync();
 
     /// <summary>
-    /// Runs the streaming pipeline. When <paramref name="navDateByIsin"/> is
-    /// supplied, the run is scoped to those ISINs and stamps their NAV dates;
-    /// when null, the full universe runs.
+    /// Runs the streaming pipeline over the whole universe — the Run All path. Signal-driven
+    /// runs go through the local pipeline host instead.
     /// </summary>
-    private async Task RunPipelineAsync(IReadOnlyDictionary<string, DateTimeOffset>? navDateByIsin)
+    private async Task RunPipelineAsync()
     {
         if (_runner is null)
         {
@@ -270,12 +280,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _runCts = new CancellationTokenSource();
         var ct = _runCts.Token;
 
-        var scope = navDateByIsin is { Count: > 0 } ? $"{navDateByIsin.Count} changed ISIN(s)" : "all funds";
+        var runId = PipelineRunId.From(DateTime.Now.ToString("yyyyMMdd-HHmm"));
         IsRunning = true;
-        RunId = DateTime.Now.ToString("yyyyMMdd-HHmm");
+        SetRunId(runId);
         RunStatusText = "Running…";
-        StatusBarText = $"Run {RunId} started ({scope})";
-        _logger?.Info("Run started: {RunId} ({Scope})", RunId, scope);
+        StatusBarText = $"Run {runId} started (all funds)";
+        _logger?.Info("Run started: {RunId} (all funds)", runId.Value);
 
         var steps = new StepViewModel?[]
         {
@@ -287,7 +297,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // when LoadOutputAsync is called from the event handler.
         foreach (var vm in steps.OfType<StepViewModel>())
         {
-            vm.SetContext(SelectedFamily, SelectedWeek, new PipelineRunId(RunId));
+            vm.SetContext(SelectedFamily, SelectedWeek, runId);
             vm.Status = StepStatus.Pending;
             vm.HasError = false;
             vm.ErrorText = string.Empty;
@@ -299,7 +309,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             allOk = await _runner.RunAllStreamingAsync(
-                SelectedFamily, SelectedWeek, new PipelineRunId(RunId), navDateByIsin: navDateByIsin, ct: ct);
+                SelectedFamily, SelectedWeek, runId, ct: ct);
         }
         catch (OperationCanceledException)
         {
