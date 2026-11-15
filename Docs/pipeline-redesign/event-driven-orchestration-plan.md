@@ -1,6 +1,11 @@
 <!--
-  STATUS: PLANNING ONLY (2026-08-25). Nothing in this plan has been
-  implemented. It describes moving orchestration logic out of
+  STATUS: PARTLY IMPLEMENTED (2026-11-15). Written as a plan on
+  2026-08-25. Since then the per-step redesigns have moved every step's
+  logic into Application entry points; what is left in
+  `MainWindowViewModel` is the local trigger wiring. See "Where It Stands"
+  for what is built and what is next.
+
+  Original scope: moving orchestration logic out of
   `MainWindowViewModel` and into the Application layer so the same logic
   can be hosted by an Azure Function.
 
@@ -39,6 +44,110 @@
 >   [pipeline-step-flow-plan.md](../pipeline-step-flow-plan.md).
 > - The per-ISIN row that holds run state and step outputs is planned in
 >   [storage-migration-plan.md](../storage-migration-plan.md).
+
+## Where It Stands (2026-11-15)
+
+Most of this plan arrived sideways. Each step's redesign page, from
+[01-dataloader.md](./01-dataloader.md) to
+[10-portfolioconstructor.md](./10-portfolioconstructor.md), pulled its
+step's logic out of the ViewModel into a host-neutral entry point. What
+the per-step work never touched is the wiring that connects those entry
+points locally — and that wiring still lives in `MainWindowViewModel`.
+
+### Done
+
+| Piece | Where it lives now |
+| --- | --- |
+| Front door — NAV-signal dedup, claim, step 1 | `IPipelineFrontDoor`, Application |
+| Steps 2–8, one per-fund hop each | `IStep02MetricsCalculatorEntry` … `IStep08RecommenderEntry`, Application |
+| Steps 9 and 10 — barrier, pass, triggers | `IStep09UniverseEnricherEntry`, `IStep10PortfolioConstructorEntry`, Application |
+| Run identity | `IPipelineRunIdFactory`, Application — minted at claim, not from the window's clock |
+| Step-to-step hops | done-signals on `IPipelineSignalStreams`; locally `LocalRxPipelineSignalBus` |
+| Progress, travelling up | `StepEvent` on `IStepEventSource`; locally `LocalRxStepEventBus` |
+| Step tabs | passive — each follows `IStepEventSource` and reads its stored output |
+| "Run this step" buttons | go through the step's handler as a debug run — the plan's slice 3 |
+
+### Left — the local trigger wiring
+
+Everything below still sits in `MainWindowViewModel`. None of it is
+policy any more; it is transport — the job Azure's trigger bindings do
+for a Functions app.
+
+| Piece | Cloud counterpart |
+| --- | --- |
+| NAV-signal buffer and per-fund dedup, handed to the front door | queue trigger on the NAV queue |
+| Nine done-signal subscriptions, one per entry point from step 2 to step 10 | one queue trigger per step |
+| Step 9's and step 10's daily timers | timer triggers |
+| Ten near-identical fire-and-forget wrappers that catch everything | the Functions host's own invocation and error handling |
+| One cancellation token shared by all of the above and Run All | host shutdown |
+
+It moves into one local host *(new)* that mirrors the Functions app:
+one subscription where the cloud has one Function. The window starts
+it, stops it, and renders what it reports.
+
+```mermaid
+flowchart LR
+  subgraph wpf["FikaFinans.Wpf"]
+    main["MainWindowViewModel<br/>start · stop · dispose<br/>Run All · pickers · status"]
+  end
+  subgraph infra["FikaFinans.Infrastructure — local only"]
+    host["local host (new)<br/>subscriptions · timers · dispatch"]
+    bus[["LocalRxPipelineSignalBus<br/>LocalRxNavSignalBus"]]
+  end
+  subgraph app["FikaFinans.Application — host-neutral"]
+    entries["front door<br/>step 2…10 entry points"]
+  end
+  subgraph cloud["Azure — not built"]
+    fn["Functions app<br/>queue and timer triggers"]
+  end
+  main -->|"start / stop"| host
+  bus -->|signals| host
+  host -->|invokes| entries
+  fn -.->|invokes| entries
+  entries -->|emit| bus
+```
+
+The arrows into the entry points are the whole contract: the local host
+and a Functions app call the same entry points, and nothing in the
+Application layer knows which one did.
+
+### Decided 2026-11-15
+
+- **The host lives in Infrastructure**, beside the local Rx buses. It
+  is local-only transport; a Functions host never resolves it. The
+  dependency runs one way — the host depends on the entry points,
+  nothing depends on the host — so the cloud's graph is unaffected.
+- **The host takes no WPF type.** In particular not the dispatcher
+  scheduler the desktop app registers: signal handling must not run on
+  the UI thread.
+- **`MainWindowViewModel` owns the host's lifetime** — started when the
+  window loads, disposed when it closes. The window is the app.
+- **Stop cancels both** Run All and the signal-driven work in flight, as
+  it does today. The host takes a fresh token afterwards, so later
+  signals still run.
+- **Run All stays** as it is: the desktop button that runs the whole
+  universe through `PipelineRunner`, with its own event router, run
+  context push and run-id bar. It has no cloud counterpart and is not
+  part of this move.
+- **Tabs 2–8 read done-signals — accepted as desktop-only.** Each of
+  those tabs subscribes to its step's done-signal to learn which run to
+  reload, because `StepEvent` carries no run id. That breaks the letter
+  of "never the signal stream" below, but harmlessly: it is a second
+  reader on the local bus for display only, nothing depends on it, and
+  the cloud has no tabs. Recorded, not fixed.
+
+### Proposed implementation order
+
+One commit per row, build green throughout.
+
+| # | Row | Touches |
+| --- | --- | --- |
+| 1 | This section | this page |
+| 2 | Local host *(new)* with the NAV buffer and the nine signal subscriptions, behind one dispatch helper | Infrastructure, its tests |
+| 3 | Step 9's and step 10's daily timers move into the host, reading the time through `TimeProvider` | Infrastructure, its tests |
+| 4 | `MainWindowViewModel` starts, stops and disposes the host; the moved wiring and the dead batch handler are deleted | Wpf |
+| 5 | `MainWindowViewModel` holds the week, the company and the run id as their domain types, converting to text only for display | Wpf |
+| 6 | Status pass on this page | this page |
 
 ## The Problem
 
@@ -629,6 +738,15 @@ processing is done, and output plus what triggers the next step.
 | Step | Page |
 | --- | --- |
 | 1 — DataLoader | [01-dataloader.md](./01-dataloader.md) |
+| 2 — MetricsCalculator | [02-metricscalculator.md](./02-metricscalculator.md) |
+| 3 — MacroAnalyst | [03-macroanalyst.md](./03-macroanalyst.md) |
+| 4 — SignalScorer | [04-signalscorer.md](./04-signalscorer.md) |
+| 5 — MacroAligner | [05-macroaligner.md](./05-macroaligner.md) |
+| 6 — CatalystTagger | [06-catalysttagger.md](./06-catalysttagger.md) |
+| 7 — ThesisValidator | [07-thesisvalidator.md](./07-thesisvalidator.md) |
+| 8 — Recommender | [08-recommender.md](./08-recommender.md) |
+| 9 — UniverseEnricher | [09-universeenricher.md](./09-universeenricher.md) |
+| 10 — PortfolioConstructor | [10-portfolioconstructor.md](./10-portfolioconstructor.md) |
 
 Open questions raised by a step page stay **here**, in this document. A
 step page may restate a constraint this plan has already settled; it may
