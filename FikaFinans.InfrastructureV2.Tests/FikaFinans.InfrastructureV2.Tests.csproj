@@ -24,6 +24,7 @@
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="NLog" Version="6.0.7" />
     <PackageReference Include="System.Reactive" Version="6.1.0" />
+    <PackageReference Include="Microsoft.Reactive.Testing" Version="6.1.0" />
 
 
     <PackageReference Include="AutoFixture" Version="4.18.1" />

@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using Autofac;
 using Azure.AI.Projects;
 using Azure.Identity;
@@ -466,6 +467,7 @@ public sealed class InfrastructureModule : Autofac.Module
         RegisterStep08Services(builder);
         RegisterStep09Services(builder);
         RegisterStep10Services(builder);
+        RegisterLocalPipelineHost(builder);
     }
 
     /// <summary>
@@ -893,6 +895,34 @@ public sealed class InfrastructureModule : Autofac.Module
                 ctx.Resolve<Func<IStep01DataLoader>>(),
                 LogManager.GetLogger(nameof(PipelineFrontDoor))))
             .As<IPipelineFrontDoor>()
+            .SingleInstance();
+    }
+
+    /// <summary>
+    /// Local host only — the stand-in for the Functions app's trigger bindings. A Functions
+    /// host never resolves it; nothing else depends on it.
+    /// </summary>
+    private static void RegisterLocalPipelineHost(ContainerBuilder builder)
+    {
+        // The scheduler is passed explicitly, never resolved: the desktop app registers
+        // IScheduler as its dispatcher scheduler, and signal handling must not run on the UI
+        // thread.
+        builder.Register(ctx => new LocalPipelineHost(
+                LogManager.GetLogger(nameof(LocalPipelineHost)),
+                DefaultScheduler.Instance,
+                ctx.Resolve<INavSignalSource>(),
+                ctx.Resolve<IPipelineSignalStreams>(),
+                ctx.Resolve<IPipelineFrontDoor>(),
+                ctx.Resolve<IStep02MetricsCalculatorEntry>(),
+                ctx.Resolve<IStep03MacroAnalystEntry>(),
+                ctx.Resolve<IStep04SignalScorerEntry>(),
+                ctx.Resolve<IStep05MacroAlignerEntry>(),
+                ctx.Resolve<IStep06CatalystTaggerEntry>(),
+                ctx.Resolve<IStep07ThesisValidatorEntry>(),
+                ctx.Resolve<IStep08RecommenderEntry>(),
+                ctx.Resolve<IStep09UniverseEnricherEntry>(),
+                ctx.Resolve<IStep10PortfolioConstructorEntry>()))
+            .AsSelf()
             .SingleInstance();
     }
 
