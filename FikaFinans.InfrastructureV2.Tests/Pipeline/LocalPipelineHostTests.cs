@@ -8,6 +8,7 @@ using FikaFinans.Application.Pipeline.Signals;
 using FikaFinans.Domain.Identifiers;
 using FikaFinans.Domain.Pipeline;
 using FikaFinans.Infrastructure.Pipeline;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Reactive.Testing;
 using Moq;
 
@@ -27,6 +28,7 @@ public sealed class LocalPipelineHostTests
 
     private IFixture _fixture = null!;
     private TestScheduler _scheduler = null!;
+    private FakeTimeProvider _clock = null!;
     private Subject<NavChangeSignal> _navSignals = null!;
     private Subject<IPipelineSignal> _pipelineSignals = null!;
 
@@ -37,6 +39,11 @@ public sealed class LocalPipelineHostTests
 
         _scheduler = new TestScheduler();
         _fixture.Inject<IScheduler>(_scheduler);
+
+        // Noon UTC, in a UTC zone — so the timers' local times are plain offsets from here.
+        _clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
+        _clock.SetLocalTimeZone(TimeZoneInfo.Utc);
+        _fixture.Inject<TimeProvider>(_clock);
 
         _navSignals = new Subject<NavChangeSignal>();
         _fixture.Freeze<Mock<INavSignalSource>>()
@@ -60,6 +67,18 @@ public sealed class LocalPipelineHostTests
         sut.Start();
         return sut;
     }
+
+    /// <summary>
+    /// Moves both clocks together: the host reads the time from one and waits on the other.
+    /// </summary>
+    private void Advance(TimeSpan by)
+    {
+        _clock.Advance(by);
+        _scheduler.AdvanceBy(by.Ticks);
+    }
+
+    /// <summary>How far the noon start is from a timer's time of day.</summary>
+    private static TimeSpan UntilToday(TimeOnly at) => at.ToTimeSpan() - TimeSpan.FromHours(12);
 
     private static TaskCompletionSource<T> NewCapture<T>()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -356,6 +375,71 @@ public sealed class LocalPipelineHostTests
         // Assert
         var handed = await token.Task.WaitAsync(Timeout);
         Assert.That(handed.IsCancellationRequested, Is.False);
+    }
+
+    // ── Daily timers ────────────────────────────────────────────────────
+
+    [Test]
+    public async Task Start_ClockReachesStep09Time_RunsStep09WithTimerTrigger()
+    {
+        // Arrange
+        var got = NewCapture<Step09Trigger>();
+        _fixture.Freeze<Mock<IStep09UniverseEnricherEntry>>()
+            .Setup(e => e.HandleAsync(It.IsAny<Step09Trigger>(), It.IsAny<CancellationToken>()))
+            .Callback<Step09Trigger, CancellationToken>((t, _) => got.TrySetResult(t))
+            .ReturnsAsync(true);
+        using var sut = CreateStarted();
+
+        // Act
+        Advance(UntilToday(LocalPipelineHost.Step09TimerAt));
+
+        // Assert
+        Assert.That(await got.Task.WaitAsync(Timeout), Is.EqualTo(Step09Trigger.Timer));
+    }
+
+    [Test]
+    public async Task Start_ClockReachesStep10Time_RunsStep10WithTimerTrigger()
+    {
+        // Arrange
+        var got = NewCapture<Step10Trigger>();
+        _fixture.Freeze<Mock<IStep10PortfolioConstructorEntry>>()
+            .Setup(e => e.HandleAsync(It.IsAny<Step10Trigger>(), It.IsAny<CancellationToken>()))
+            .Callback<Step10Trigger, CancellationToken>((t, _) => got.TrySetResult(t))
+            .ReturnsAsync(true);
+        using var sut = CreateStarted();
+
+        // Act
+        Advance(UntilToday(LocalPipelineHost.Step10TimerAt));
+
+        // Assert
+        Assert.That(await got.Task.WaitAsync(Timeout), Is.EqualTo(Step10Trigger.Timer));
+    }
+
+    [Test]
+    public async Task Start_TimerFired_RearmsForSameTimeTomorrow()
+    {
+        // Arrange
+        using var runs = new SemaphoreSlim(0);
+        _fixture.Freeze<Mock<IStep10PortfolioConstructorEntry>>()
+            .Setup(e => e.HandleAsync(Step10Trigger.Timer, It.IsAny<CancellationToken>()))
+            .Callback(() => runs.Release())
+            .ReturnsAsync(true);
+        using var sut = CreateStarted();
+        Advance(UntilToday(LocalPipelineHost.Step10TimerAt));
+        Assert.That(await runs.WaitAsync(Timeout), Is.True, "first day's run");
+
+        // Act — a minute short of tomorrow's time, then the last minute.
+        Advance(TimeSpan.FromDays(1) - TimeSpan.FromMinutes(1));
+        var early = await runs.WaitAsync(TimeSpan.FromMilliseconds(100));
+        Advance(TimeSpan.FromMinutes(1));
+        var onTime = await runs.WaitAsync(Timeout);
+
+        // Assert
+        Assert.Multiple(() =>
+        {
+            Assert.That(early, Is.False, "fired before tomorrow's time");
+            Assert.That(onTime, Is.True, "did not fire at tomorrow's time");
+        });
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────

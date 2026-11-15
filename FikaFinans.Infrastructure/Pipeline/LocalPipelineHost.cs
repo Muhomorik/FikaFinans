@@ -4,6 +4,7 @@ using System.Reactive.Linq;
 
 using FikaFinans.Application.Pipeline;
 using FikaFinans.Application.Pipeline.Signals;
+using FikaFinans.Application.Schedules;
 
 using NLog;
 
@@ -33,8 +34,22 @@ public sealed class LocalPipelineHost : IDisposable
     /// </summary>
     private static readonly TimeSpan NavBufferWindow = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>
+    /// When step 9's daily timer fires, local time — the safety net for a barrier that closed
+    /// without a step 8 completion, because the last fund failed earlier in its chain.
+    /// </summary>
+    public static readonly TimeOnly Step09TimerAt = new(22, 45);
+
+    /// <summary>
+    /// When step 10's daily timer fires, local time — the cloud timer's 23:00, decided on step
+    /// 10's page. Fifteen minutes after step 9's, which a pass's LLM calls normally fit in; a
+    /// pass still running is no harm, as its done-signal runs step 10 again once it lands.
+    /// </summary>
+    public static readonly TimeOnly Step10TimerAt = new(23, 0);
+
     private readonly ILogger _logger;
     private readonly IScheduler _scheduler;
+    private readonly TimeProvider _clock;
     private readonly INavSignalSource _navSignals;
     private readonly IPipelineSignalStreams _pipelineSignals;
     private readonly IPipelineFrontDoor _frontDoor;
@@ -55,6 +70,7 @@ public sealed class LocalPipelineHost : IDisposable
     public LocalPipelineHost(
         ILogger logger,
         IScheduler scheduler,
+        TimeProvider clock,
         INavSignalSource navSignals,
         IPipelineSignalStreams pipelineSignals,
         IPipelineFrontDoor frontDoor,
@@ -70,6 +86,7 @@ public sealed class LocalPipelineHost : IDisposable
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _navSignals = navSignals ?? throw new ArgumentNullException(nameof(navSignals));
         _pipelineSignals = pipelineSignals ?? throw new ArgumentNullException(nameof(pipelineSignals));
         _frontDoor = frontDoor ?? throw new ArgumentNullException(nameof(frontDoor));
@@ -125,6 +142,15 @@ public sealed class LocalPipelineHost : IDisposable
             .Subscribe(done => Dispatch(10, $"after step 9 pass {done.RunId.Value}",
                 ct => _step10.HandleAsync(Step10Trigger.Step09Done, ct))));
 
+        // Step 9's and step 10's timer triggers. Only fire while the app is open; a day it is
+        // closed at that time gets no timer run.
+        _subscriptions.Add(Daily(9, Step09TimerAt)
+            .Subscribe(_ => Dispatch(9, "from the daily timer",
+                ct => _step09.HandleAsync(Step09Trigger.Timer, ct))));
+        _subscriptions.Add(Daily(10, Step10TimerAt)
+            .Subscribe(_ => Dispatch(10, "from the daily timer",
+                ct => _step10.HandleAsync(Step10Trigger.Timer, ct))));
+
         _logger.Info("Local pipeline host started");
     }
 
@@ -146,6 +172,25 @@ public sealed class LocalPipelineHost : IDisposable
         _inFlight.Cancel();
         _inFlight.Dispose();
     }
+
+    /// <summary>
+    /// Ticks once a day at <paramref name="at"/>, local time. Re-armed after every firing, so
+    /// each day's time is worked out fresh — a daylight-saving change keeps the wall-clock
+    /// time.
+    /// </summary>
+    /// <remarks>
+    /// The clock says what time it is; the scheduler does the waiting, as a relative delay.
+    /// </remarks>
+    private IObservable<long> Daily(int step, TimeOnly at)
+        => Observable
+            .Defer(() =>
+            {
+                var now = _clock.GetUtcNow();
+                var next = DailyTime.NextAfter(now, at, _clock.LocalTimeZone);
+                _logger.Info("Step {Step} timer armed — next run at {Next:yyyy-MM-dd HH:mm zzz}", step, next);
+                return Observable.Timer(next - now, _scheduler);
+            })
+            .Repeat();
 
     /// <summary>A per-fund hop: the step's done-signal names the fund it ran.</summary>
     private void On<TSignal>(int step, Func<TSignal, string> isin, Func<TSignal, CancellationToken, Task> handle)

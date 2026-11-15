@@ -910,6 +910,7 @@ public sealed class InfrastructureModule : Autofac.Module
         builder.Register(ctx => new LocalPipelineHost(
                 LogManager.GetLogger(nameof(LocalPipelineHost)),
                 DefaultScheduler.Instance,
+                ctx.Resolve<TimeProvider>(),
                 ctx.Resolve<INavSignalSource>(),
                 ctx.Resolve<IPipelineSignalStreams>(),
                 ctx.Resolve<IPipelineFrontDoor>(),
