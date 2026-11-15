@@ -15,8 +15,8 @@ namespace FikaFinans.Wpf.ViewModels;
 /// </summary>
 /// <remarks>
 /// The <see cref="CheckAndRunCommand"/> only <em>publishes</em> signals through
-/// the detector; <c>MainWindowViewModel</c>'s Rx subscription is what actually
-/// triggers the scoped pipeline run — exactly how the Azure queue trigger will
+/// the detector; the local pipeline host's Rx subscription is what actually
+/// hands each fund to the front door — exactly how the Azure queue trigger will
 /// fire the Function. Grid loads on first tab open (driven by the parent) and
 /// thereafter only via <see cref="RefreshCommand"/>.
 /// </remarks>

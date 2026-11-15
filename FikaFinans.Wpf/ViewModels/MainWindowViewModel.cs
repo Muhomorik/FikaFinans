@@ -6,9 +6,8 @@ using System.Windows.Input;
 using Autofac;
 using DevExpress.Mvvm;
 using FikaFinans.Application.Pipeline;
-using FikaFinans.Application.Pipeline.Signals;
-using FikaFinans.Application.Schedules;
 using FikaFinans.Domain.Pipeline;
+using FikaFinans.Infrastructure.Pipeline;
 using FikaFinans.Wpf.Interop;
 using FikaFinans.Wpf.ViewModels.Steps;
 using FikaFinans.Wpf.Views;
@@ -23,6 +22,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ILifetimeScope? _scope;
     private readonly CompositeDisposable _disposables = new();
     private IPipelineRunner? _runner;
+    private LocalPipelineHost? _host;
     private IReadOnlyDictionary<int, StepViewModel>? _stepsByNumber;
 
     /// <summary>
@@ -31,19 +31,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// 1:1. Bank=0, Steps 1–10 = 1–10, NAV Sync = 11.
     /// </summary>
     private const int NavSyncTabIndex = 11;
-
-    /// <summary>
-    /// When step 9's daily timer fires, local time — shortly before step 10's, so a pass the
-    /// timer runs lands before the day's trades are made.
-    /// </summary>
-    private static readonly TimeOnly Step09TimerAt = new(22, 45);
-
-    /// <summary>
-    /// When step 10's daily timer fires, local time — the cloud timer's 23:00, decided on step
-    /// 10's page. Fifteen minutes after step 9's, which a pass's LLM calls normally fit in; a
-    /// pass still running is no harm, as its done-signal runs step 10 again once it lands.
-    /// </summary>
-    private static readonly TimeOnly Step10TimerAt = new(23, 0);
 
     private string _title = string.Empty;
     private string _selectedWeek = string.Empty;
@@ -243,383 +230,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var sub = _runner.Events.ObserveOn(_uiScheduler!).Subscribe(OnStepEvent);
         _disposables.Add(sub);
 
-        // NAV-change signals: the local stand-in for the Azure queue trigger. Coalescing
-        // lives here rather than below the call — buffer to drop duplicate funds, then
-        // flatten back to one signal per invocation, because the front door takes one fund.
-        var navSource = _scope.Resolve<INavSignalSource>();
-        var frontDoor = _scope.Resolve<IPipelineFrontDoor>();
-        var navSub = navSource.Signals
-            .Buffer(TimeSpan.FromMilliseconds(250))
-            .SelectMany(batch => batch.DistinctBy(s => s.Isin))
-            .Subscribe(signal => RunFrontDoorAsync(frontDoor, signal));
-        _disposables.Add(navSub);
-
-        // Step 1's done-signal: the local stand-in for step 2's queue trigger. No coalescing
-        // buffer, unlike the NAV stream — step 1 emits once per run per fund.
-        var pipelineSignals = _scope.Resolve<IPipelineSignalStreams>();
-        var step02Entry = _scope.Resolve<IStep02MetricsCalculatorEntry>();
-        var step02Sub = pipelineSignals.Signals
-            .OfType<Step01DoneSignal>()
-            .Subscribe(done => RunStep02Async(step02Entry, done));
-        _disposables.Add(step02Sub);
-
-        // Step 2's done-signal: the local stand-in for step 3's queue trigger. Same stream,
-        // filtered to the next signal down the chain.
-        var step03Entry = _scope.Resolve<IStep03MacroAnalystEntry>();
-        var step03Sub = pipelineSignals.Signals
-            .OfType<Step02DoneSignal>()
-            .Subscribe(done => RunStep03Async(step03Entry, done));
-        _disposables.Add(step03Sub);
-
-        // Step 3's done-signal: the local stand-in for step 4's queue trigger.
-        var step04Entry = _scope.Resolve<IStep04SignalScorerEntry>();
-        var step04Sub = pipelineSignals.Signals
-            .OfType<Step03DoneSignal>()
-            .Subscribe(done => RunStep04Async(step04Entry, done));
-        _disposables.Add(step04Sub);
-
-        // Step 4's done-signal: the local stand-in for step 5's queue trigger.
-        var step05Entry = _scope.Resolve<IStep05MacroAlignerEntry>();
-        var step05Sub = pipelineSignals.Signals
-            .OfType<Step04DoneSignal>()
-            .Subscribe(done => RunStep05Async(step05Entry, done));
-        _disposables.Add(step05Sub);
-
-        // Step 5's done-signal: the local stand-in for step 6's queue trigger. Calls the LLM
-        // per fund.
-        var step06Entry = _scope.Resolve<IStep06CatalystTaggerEntry>();
-        var step06Sub = pipelineSignals.Signals
-            .OfType<Step05DoneSignal>()
-            .Subscribe(done => RunStep06Async(step06Entry, done));
-        _disposables.Add(step06Sub);
-
-        // Step 6's done-signal: the local stand-in for step 7's queue trigger. Calls the LLM
-        // only on the decision matrix's conflicting rows.
-        var step07Entry = _scope.Resolve<IStep07ThesisValidatorEntry>();
-        var step07Sub = pipelineSignals.Signals
-            .OfType<Step06DoneSignal>()
-            .Subscribe(done => RunStep07Async(step07Entry, done));
-        _disposables.Add(step07Sub);
-
-        // Step 7's done-signal: the local stand-in for step 8's queue trigger. Step 8 is the
-        // chain tail, so it is the one that frees the fund's row. Code only — no LLM.
-        var step08Entry = _scope.Resolve<IStep08RecommenderEntry>();
-        var step08Sub = pipelineSignals.Signals
-            .OfType<Step07DoneSignal>()
-            .Subscribe(done => RunStep08Async(step08Entry, done));
-        _disposables.Add(step08Sub);
-
-        // Step 8's done-signal: one of step 9's two triggers, the other its daily timer. Every
-        // completion asks the barrier; only the one that finds every fund finished runs the
-        // pass. Step 8 completes before it emits, so the last fund already reads finished.
-        var step09Entry = _scope.Resolve<IStep09UniverseEnricherEntry>();
-        var step09Sub = pipelineSignals.Signals
-            .OfType<Step08DoneSignal>()
-            .Subscribe(done => RunStep09Async(
-                step09Entry, Step09Trigger.Step08Done, $"after {done.Isin.Value} completed step 8"));
-        _disposables.Add(step09Sub);
-
-        // Step 9's daily timer: the safety net for a barrier that closed without a step 8
-        // completion — the last fund failed earlier in its chain. Re-armed after every firing,
-        // so each day's time is worked out fresh in local time. Only fires while the app is
-        // open; a day it is closed at that time gets no timer pass.
-        var step09Timer = Observable
-            .Defer(() =>
-            {
-                var next = DailyTime.NextAfter(DateTimeOffset.Now, Step09TimerAt, TimeZoneInfo.Local);
-                _logger?.Info("Step 9 timer armed — next barrier check at {Next:yyyy-MM-dd HH:mm zzz}", next);
-                return Observable.Timer(next);
-            })
-            .Repeat()
-            .Subscribe(_ => RunStep09Async(step09Entry, Step09Trigger.Timer, "from the daily timer"));
-        _disposables.Add(step09Timer);
-
-        // Step 9's done-signal: one of step 10's two triggers, the other its daily timer. One
-        // signal per stored pass, so the trades follow new conviction as soon as it lands.
-        var step10Entry = _scope.Resolve<IStep10PortfolioConstructorEntry>();
-        var step10Sub = pipelineSignals.Signals
-            .OfType<Step09DoneSignal>()
-            .Subscribe(done => RunStep10Async(
-                step10Entry, Step10Trigger.Step09Done, $"after step 9 pass {done.RunId.Value}"));
-        _disposables.Add(step10Sub);
-
-        // Step 10's daily timer: the safety net for a day with no step 9 pass — the trades are
-        // made on the records stored. Re-armed after every firing, as step 9's, and likewise
-        // fires only while the app is open.
-        var step10Timer = Observable
-            .Defer(() =>
-            {
-                var next = DailyTime.NextAfter(DateTimeOffset.Now, Step10TimerAt, TimeZoneInfo.Local);
-                _logger?.Info("Step 10 timer armed — next run at {Next:yyyy-MM-dd HH:mm zzz}", next);
-                return Observable.Timer(next);
-            })
-            .Repeat()
-            .Subscribe(_ => RunStep10Async(step10Entry, Step10Trigger.Timer, "from the daily timer"));
-        _disposables.Add(step10Timer);
+        // The signal-driven pipeline: the local stand-in for the Functions app's triggers. The
+        // window owns only its lifetime — what triggers which step lives in the host.
+        _host = _scope.Resolve<LocalPipelineHost>();
+        _host.Start();
     }
-
-    /// <summary>
-    /// Hands one signal to the front door, off the Rx callback. Step 1 only — steps 2 to 10
-    /// follow through <see cref="RunStep02Async"/> to <see cref="RunStep10Async"/>; the Run
-    /// All button still runs steps 9 and 10 through <see cref="IPipelineRunner"/>.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape: the front door rethrows so a queue trigger can retry,
-    /// but an exception reaching <c>Subscribe</c> ends the subscription for the session and
-    /// every later signal would be silently dropped.
-    /// </remarks>
-    private void RunFrontDoorAsync(IPipelineFrontDoor frontDoor, NavChangeSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await frontDoor.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 1 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 1 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-1 done-signal to step 2's entry point, off the Rx callback — the bus
-    /// publishes inside step 1's emit, so running step 2 inline would hold step 1 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep02Async(IStep02MetricsCalculatorEntry step02Entry, Step01DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step02Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 2 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 2 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-2 done-signal to step 3's entry point, off the Rx callback — the bus
-    /// publishes inside step 2's emit, so running step 3 inline would hold step 2 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep03Async(IStep03MacroAnalystEntry step03Entry, Step02DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step03Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 3 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 3 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-3 done-signal to step 4's entry point, off the Rx callback — the bus
-    /// publishes inside step 3's emit, so running step 4 inline would hold step 3 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep04Async(IStep04SignalScorerEntry step04Entry, Step03DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step04Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 4 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 4 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-4 done-signal to step 5's entry point, off the Rx callback — the bus
-    /// publishes inside step 4's emit, so running step 5 inline would hold step 4 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep05Async(IStep05MacroAlignerEntry step05Entry, Step04DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step05Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 5 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 5 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-5 done-signal to step 6's entry point, off the Rx callback — the bus
-    /// publishes inside step 5's emit, so running step 6 inline would hold step 5 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep06Async(IStep06CatalystTaggerEntry step06Entry, Step05DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step06Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 6 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 6 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-6 done-signal to step 7's entry point, off the Rx callback — the bus
-    /// publishes inside step 6's emit, so running step 7 inline would hold step 6 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep07Async(IStep07ThesisValidatorEntry step07Entry, Step06DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step07Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 7 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 7 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one step-7 done-signal to step 8's entry point, off the Rx callback — the bus
-    /// publishes inside step 7's emit, so running step 8 inline would hold step 7 up.
-    /// </summary>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>:
-    /// an exception reaching <c>Subscribe</c> ends the subscription for the session.
-    /// </remarks>
-    private void RunStep08Async(IStep08RecommenderEntry step08Entry, Step07DoneSignal signal)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step08Entry.HandleAsync(signal, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 8 cancelled for {Isin}", signal.Isin.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 8 failed for {Isin}", signal.Isin.Value);
-            }
-        });
-
-    /// <summary>
-    /// Hands one trigger to step 9's entry point, off the Rx callback — the bus publishes
-    /// inside step 8's emit, the timer fires on a pool thread, and a pass makes LLM calls.
-    /// </summary>
-    /// <param name="step09Entry">Step 9's entry point.</param>
-    /// <param name="trigger">Which trigger fired; the entry logs it.</param>
-    /// <param name="cause">
-    /// What set it off, for this method's own log lines — the fund whose step 8 completion
-    /// it was, or the timer. Not passed on: the pass is over every fund, whichever was last.
-    /// </param>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
-    /// </remarks>
-    private void RunStep09Async(IStep09UniverseEnricherEntry step09Entry, Step09Trigger trigger, string cause)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step09Entry.HandleAsync(trigger, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 9 cancelled, {Cause}", cause);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 9 failed, {Cause}", cause);
-            }
-        });
-
-    /// <summary>
-    /// Hands one trigger to step 10's entry point, off the Rx callback — the done-signal
-    /// arrives inside step 9's emit, on whichever thread ran the pass.
-    /// </summary>
-    /// <param name="step10Entry">Step 10's entry point.</param>
-    /// <param name="trigger">Which trigger fired; the entry logs it.</param>
-    /// <param name="cause">
-    /// What set it off, for this method's own log lines — the step 9 pass, or the timer.
-    /// </param>
-    /// <remarks>
-    /// Nothing is allowed to escape, for the same reason as <see cref="RunFrontDoorAsync"/>.
-    /// Two triggers close together run twice; the later run's slices win, as decided on
-    /// step 10's page.
-    /// </remarks>
-    private void RunStep10Async(IStep10PortfolioConstructorEntry step10Entry, Step10Trigger trigger, string cause)
-        => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await step10Entry.HandleAsync(trigger, _runCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger?.Debug("Step 10 cancelled, {Cause}", cause);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Error(ex, "Step 10 failed, {Cause}", cause);
-            }
-        });
 
     private void PushContextToAllSteps()
     {
@@ -636,30 +251,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// Manual "Run all" — the whole universe (no NAV-change scoping).
     /// </summary>
     private Task OnRunAllAsync() => RunPipelineAsync(navDateByIsin: null);
-
-    /// <summary>
-    /// Collects a batch of NAV-change signals (raised by the NAV Sync tab) and
-    /// kicks off a pipeline run scoped to just those ISINs — the local stand-in
-    /// for the Azure queue trigger. Ignored if a run is already in flight.
-    /// Runs on the UI scheduler (see the <c>ObserveOn</c> in <see cref="OnLoaded"/>).
-    /// </summary>
-    private void OnNavSignalsBatch(IList<NavChangeSignal> batch)
-    {
-        if (_runner is null) return;
-        if (IsRunning)
-        {
-            _logger?.Warn("NAV signals arrived while a run is in progress — ignoring {Count} signal(s)", batch.Count);
-            return;
-        }
-
-        // One date per ISIN (newest wins if the batch carried duplicates).
-        var navDateByIsin = batch
-            .GroupBy(s => s.Isin.Value, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Max(s => s.NavDate), StringComparer.Ordinal);
-
-        _logger?.Info("NAV signals → scoped run for {Count} ISIN(s)", navDateByIsin.Count);
-        _ = RunPipelineAsync(navDateByIsin);
-    }
 
     /// <summary>
     /// Runs the streaming pipeline. When <paramref name="navDateByIsin"/> is
@@ -802,6 +393,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void OnStop()
     {
         _runCts.Cancel();
+        _host?.CancelInFlight();
         IsRunning = false;
         RunStatusText = "Stopped";
         StatusBarText = $"Run {RunId} stopped by user";
@@ -826,6 +418,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         _disposables.Dispose();
+        _host?.Dispose();
 
         // Dispose tab VMs that are IDisposable
         BankTab?.Dispose();

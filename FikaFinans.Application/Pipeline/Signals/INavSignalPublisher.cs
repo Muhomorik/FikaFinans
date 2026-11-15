@@ -2,8 +2,8 @@ namespace FikaFinans.Application.Pipeline.Signals;
 
 /// <summary>
 /// Sink seam for raised <see cref="NavChangeSignal"/>s. The local implementation
-/// pushes onto an Rx stream the WPF app subscribes to (see the local signal
-/// bus); the Azure implementation will enqueue to Queue Storage.
+/// pushes onto an Rx stream the local pipeline host subscribes to (see the
+/// local signal bus); the Azure implementation will enqueue to Queue Storage.
 /// <see cref="NavChangeDetector"/> publishes detected signals through this seam,
 /// keeping the detection logic identical across environments.
 /// </summary>
